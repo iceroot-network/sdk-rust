@@ -6,7 +6,7 @@ Vote selection for IceRoot wallets. A vote names at least 20 validators with at 
 |---|---|---|
 | Diversity (recommended) | Not resigned, no jailing or equivocation in the last 30 days, at least 95 % of assigned slots forged when there is a production record | Equal, then before each draw divided by one plus the earlier picks in the same rank band, and raised for each declared operator, hosting provider and region that fewer earlier picks share than the common one, to at most twice the weight of a validator whose declarations are all common (see below) |
 | Reliability | At least 7 days seated in the 30-day window, at least 95 % of assigned slots forged, no jailing or equivocation in the window | `1,000,000 × assigned / (assigned + 100 × missed)`: missing 1 % of the slots halves it |
-| Maximum Rewards | Seated, payouts measured by the indexer (never declared rates), no jailing or equivocation in the window; at most two picks per declared operator | The square of the payout per unit of vote weight as a share of the best payer's, in parts per million, so that one very large payer does not flatten everyone else's weight |
+| Maximum Rewards | Seated, payouts measured by the indexer (never declared rates), no jailing or equivocation in the window; at most two picks per declared operator | The square of the payout per unit of vote weight as a share of the best payer's, counted in 10^15 parts, so that one very large payer does not flatten everyone else's weight: behind a payer a billion times above them, the others still have a million parts or more. The review screen shows the share in parts per million |
 | Support Newcomers | Ranked within the last 10 seats or below the cutoff, registered for at least 7 days, complete declarations, no penalty ever, at least 95 % of assigned slots forged when there is an earlier record | `100,000 / (10 + distance from the cutoff)` |
 | Manual | No selection: the holder names the validators and `validate_vote` checks the vote | |
 
@@ -75,7 +75,7 @@ for finding in check(&selection, &newer_snapshot)? {
 - a property test: 10,000 random snapshots and vote rules, each with a selection attempted in all four modes; every selection is a valid vote under its rules, the longest start of its draw that fits them, reproducible, drawn from the right pools, within the Diversity weight bound at every pick, and meets its criteria under `check`;
 - reproducibility vectors (`tests/data/select-v1.jsonl`): fixture, account, mode, count, draw and vote rules to the exact selection, some with a tighter size limit;
 - each mode's criteria and weights on a synthetic snapshot of 80 validators (`tests/data/synthetic-80.json`), against pools, weights and rank bands computed independently from the rules above (`synthetic-80.expected.json`);
-- attempts to game the draw, each with bounds on pick frequencies over 2,000 selections: validators that invent unique declarations, a crowd that declares nothing, a small last rank band, and one very large payer;
+- attempts to game the draw, each with bounds on pick frequencies over 2,000 selections: validators that invent unique declarations, a crowd that declares nothing, a small last rank band, and one very large payer (up to a billion times the next best);
 - the size limits of both stages, with long names;
 - a devnet-shaped snapshot from relay data (`tests/data/devnet-relay.json`), including a fresh chain where Reliability tops up;
 - top-up and `check` cases.

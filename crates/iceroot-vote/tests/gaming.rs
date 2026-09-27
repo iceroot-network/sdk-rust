@@ -235,51 +235,66 @@ fn a_small_last_rank_band_is_not_favoured() {
 
 #[test]
 fn one_huge_payer_does_not_flatten_the_others() {
-    // One validator pays 20,000 times the next best; 20 pay 1,000 and 39 pay 500, all seated.
-    // As a share of the best payer's in basis points, the others all rounded to 0 and weighed
-    // the same.
-    let records: Vec<ValidatorRecord> = (0..60)
-        .map(|i| {
-            let mut record = validator(i, u32::try_from(i + 1).unwrap());
-            record.seated = true;
-            record.status = ValidatorStatus::Active;
-            record.declarations = declared(&format!("Op {i}"), "Hostco", "DE");
-            let paid = match i {
-                0 => 20_000_000,
-                1..=20 => 1_000,
-                _ => 500,
-            };
-            record.payouts = Some(Payouts {
-                per_unit_weight: paid,
-                intervals: 30,
-            });
-            record
-        })
-        .collect();
-    let s = VoteSnapshot {
-        seats: 60,
-        ..snapshot(records)
-    };
-    let weights: Vec<u128> = evaluate(&s, Mode::MaximumRewards)
-        .unwrap()
-        .into_iter()
-        .map(|c| c.weight)
-        .collect();
-    // Candidates come in name order, which is index order here: 50 and 25 parts per million.
-    assert_eq!(weights[0], 1_000_000 * 1_000_000);
-    assert!(weights[1..=20].iter().all(|&w| w == 50 * 50));
-    assert!(weights[21..].iter().all(|&w| w == 25 * 25));
-    let rates = pick_rates(&s, Mode::MaximumRewards);
-    let better = mean(rates[1..=20].iter().copied());
-    let lesser = mean(rates[21..].iter().copied());
-    println!(
-        "huge payer {:.3}, pays 1,000 {better:.3}, pays 500 {lesser:.3}",
-        rates[0]
-    );
-    assert!(rates[0] > 0.99);
-    // 19 picks among 59 others: at four times the weight, the better payers take most of them.
-    // Flattened, both would be picked by about 32 % of holders.
-    assert!(better > 2.0 * lesser, "{better:.3} against {lesser:.3}");
-    assert!(better > 0.5, "{better:.3}");
-    assert!(lesser < 0.25, "{lesser:.3}");
+    // One validator pays 20,000 times the next best, then two million and a billion times (for
+    // example a validator with almost no vote weight that pays its own voter); 20 pay 1,000 and
+    // 39 pay 500, all seated. As a share of the best payer's in basis points, the others all
+    // rounded to 0 at 20,000 times and weighed the same; in parts per million they did at two
+    // million times, and both groups were picked by 32 % of holders.
+    for times in [20_000u128, 2_000_000, 1_000_000_000] {
+        let records: Vec<ValidatorRecord> = (0..60)
+            .map(|i| {
+                let mut record = validator(i, u32::try_from(i + 1).unwrap());
+                record.seated = true;
+                record.status = ValidatorStatus::Active;
+                record.declarations = declared(&format!("Op {i}"), "Hostco", "DE");
+                let paid = match i {
+                    0 => 1_000 * times,
+                    1..=20 => 1_000,
+                    _ => 500,
+                };
+                record.payouts = Some(Payouts {
+                    per_unit_weight: paid,
+                    intervals: 30,
+                });
+                record
+            })
+            .collect();
+        let s = VoteSnapshot {
+            seats: 60,
+            ..snapshot(records)
+        };
+        let weights: Vec<u128> = evaluate(&s, Mode::MaximumRewards)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.weight)
+            .collect();
+        // Candidates come in name order, which is index order here. Shares are in 10^15 parts
+        // of the best payer's: the 1,000-payers keep exactly four times the 500-payers' weight.
+        let share = 10u128.pow(15) / times;
+        assert_eq!(weights[0], 10u128.pow(30));
+        assert!(
+            weights[1..=20].iter().all(|&w| w == share * share),
+            "{times}"
+        );
+        assert!(
+            weights[21..].iter().all(|&w| w == share * share / 4),
+            "{times}"
+        );
+        let rates = pick_rates(&s, Mode::MaximumRewards);
+        let better = mean(rates[1..=20].iter().copied());
+        let lesser = mean(rates[21..].iter().copied());
+        println!(
+            "{times} times: huge payer {:.3}, pays 1,000 {better:.3}, pays 500 {lesser:.3}",
+            rates[0]
+        );
+        assert!(rates[0] > 0.99);
+        // 19 picks among 59 others: at four times the weight, the better payers take most of
+        // them. Flattened, both would be picked by about 32 % of holders.
+        assert!(
+            better > 2.0 * lesser,
+            "{times}: {better:.3} against {lesser:.3}"
+        );
+        assert!(better > 0.5, "{times}: {better:.3}");
+        assert!(lesser < 0.25, "{times}: {lesser:.3}");
+    }
 }

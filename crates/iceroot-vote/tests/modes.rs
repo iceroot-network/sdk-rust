@@ -385,9 +385,9 @@ fn maximum_rewards_criteria_weights_and_cap() {
         .map(|c| c.validator.as_str())
         .collect();
     assert_eq!(unmeasured.len(), 5, "{unmeasured:?}");
-    // The best payer weighs a million squared (parts per million); 60 % of the best payout,
-    // 36 % of that.
-    assert_eq!(judged["chestnut"].weight, 1_000_000_000_000);
+    // The best payer weighs 10^15 squared (its share in 10^15 parts); 60 % of the best payout,
+    // 36 % of that. The review screen shows the share in parts per million.
+    assert_eq!(judged["chestnut"].weight, 10u128.pow(30));
     let best_reason = judged["chestnut"]
         .reasons
         .iter()
@@ -397,7 +397,7 @@ fn maximum_rewards_criteria_weights_and_cap() {
         })
         .unwrap();
     assert_eq!(best_reason, 1_000_000);
-    assert_eq!(judged["dogwood"].weight, 600_000 * 600_000);
+    assert_eq!(judged["dogwood"].weight, 6 * 6 * 10u128.pow(28));
     // At most two picks per declared operator, in every selection; the undeclared group too.
     let selections = many(&s, m, 20, 600);
     for selection in &selections {

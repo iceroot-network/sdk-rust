@@ -26,8 +26,13 @@ pub const MAX_PICKS_PER_OPERATOR: u32 = 2;
 
 /// Every Diversity candidate's weight before the spread: 2^64.
 pub(crate) const DIVERSITY_WEIGHT: u128 = 1 << 64;
-/// Maximum Rewards compares payouts in parts per million of the best payer's.
-const PAYOUT_SCALE: u64 = 1_000_000;
+/// Maximum Rewards compares payouts as a share of the best payer's in 10^15 parts, so that a
+/// payer even a billion times above the rest leaves the others' weights distinct. The weight is
+/// the share squared, at most 10^30, so the total weight of any realistic pool fits in 128 bits.
+const PAYOUT_SCALE: u64 = 1_000_000_000_000_000;
+/// How many of those parts make one part per million, the unit of the share the review screen
+/// shows.
+const PAYOUT_PARTS_PER_PPM: u128 = 1_000_000_000;
 /// A Reliability weight with no slot missed.
 const RELIABILITY_SCALE: u128 = 1_000_000;
 /// The Support Newcomers weight at the cutoff.
@@ -68,10 +73,11 @@ pub struct Candidate {
 ///   `1,000,000 × assigned / (assigned + 100 × missed)`: missing 1 % of the slots halves it.
 /// - **Maximum Rewards:** seated, measured payouts (at least one interval and a positive value)
 ///   and no jailing or equivocation in the window. Weight: the square of the payout as a share of
-///   the best payer's in parts per million, rounded down, at least 1, so that one very large
-///   payer does not flatten the weights of the others. At most two picks per declared operator;
-///   validators that declare no operator form one group. Picks that top the selection up from
-///   Diversity never give a declared operator a third pick either.
+///   the best payer's in 10^15 parts, rounded down, at least 1, so that one very large payer
+///   does not flatten the weights of the others: behind a payer a billion times above them,
+///   they still have shares of a million parts or more. At most two picks per declared
+///   operator; validators that declare no operator form one group. Picks that top the selection
+///   up from Diversity never give a declared operator a third pick either.
 /// - **Support Newcomers:** ranked within the last 10 seats or below the cutoff, registered for
 ///   at least 7 days, complete declarations, no penalty ever, and at least 95 % of assigned slots
 ///   forged when there is a production record from earlier seated time. Weight
@@ -169,13 +175,14 @@ pub(crate) fn assess(
             let weight = match record.payouts {
                 Some(payouts) if own.is_empty() => {
                     // The best payout is the largest among eligible validators, so the share is
-                    // at most one million.
+                    // at most 10^15, and its square at most 10^30.
                     let of_best = mul_div(payouts.per_unit_weight, PAYOUT_SCALE, best_payout)
                         .min(u128::from(PAYOUT_SCALE));
                     reasons.push(Reason::MeasuredPayouts {
                         per_unit_weight: payouts.per_unit_weight,
                         intervals: payouts.intervals,
-                        of_best_ppm: u32::try_from(of_best).unwrap_or(u32::MAX),
+                        of_best_ppm: u32::try_from(of_best / PAYOUT_PARTS_PER_PPM)
+                            .unwrap_or(u32::MAX),
                     });
                     (of_best * of_best).max(1)
                 }

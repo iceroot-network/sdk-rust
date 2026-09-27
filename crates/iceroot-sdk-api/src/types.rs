@@ -4,7 +4,8 @@
 //! terms, whatever backend served them: a validator is never a "delegate", a validator's name is
 //! never a "username", shares are whole basis points and amounts are integers in base units. The
 //! module depends on nothing but the standard library, so the SDK's core crate can re-export it
-//! unchanged.
+//! unchanged. With the feature `serde`, every type serializes to the JSON form that all the SDK's
+//! bindings share (see the crate documentation).
 //!
 //! Addresses and public keys are carried as the text the node reported. They are checked against a
 //! network profile by the SDK's core, not here, because this crate knows no address format.
@@ -39,6 +40,28 @@ impl AssetId {
     pub fn is_root(self) -> bool {
         self == AssetId::ROOT
     }
+
+    /// The asset id written as `text`: `ROOT`, or 64 hex digits in either case, as
+    /// [`Display`](fmt::Display) writes it. `None` for anything else.
+    pub fn parse(text: &str) -> Option<AssetId> {
+        if text == "ROOT" {
+            return Some(AssetId::ROOT);
+        }
+        if text.len() != 64 {
+            return None;
+        }
+        let digit = |c: u8| {
+            char::from(c)
+                .to_digit(16)
+                .and_then(|d| u8::try_from(d).ok())
+        };
+        let mut bytes = [0u8; 32];
+        let (pairs, _) = text.as_bytes().as_chunks::<2>();
+        for (byte, [high, low]) in bytes.iter_mut().zip(pairs) {
+            *byte = (digit(*high)? << 4) | digit(*low)?;
+        }
+        Some(AssetId(bytes))
+    }
 }
 
 impl fmt::Display for AssetId {
@@ -54,24 +77,42 @@ impl fmt::Display for AssetId {
 }
 
 /// A balance of one asset.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Balance {
     /// The asset.
     pub asset: AssetId,
     /// The amount in base units.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub amount: BaseUnits,
 }
 
 /// A point in chain time.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Timestamp {
     /// Seconds since the chain's epoch, as recorded in the block header.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub chain: u64,
     /// Seconds since the Unix epoch.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub unix: i64,
 }
 
 /// One page of a listing.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Page<T> {
     /// The items of this page, in the node's order.
@@ -81,6 +122,7 @@ pub struct Page<T> {
     /// The number of pages the listing had when this page was served.
     pub page_count: u32,
     /// The number of items in the whole listing.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub total: u64,
     /// Whether `total` is an estimate (the node may count large listings approximately).
     pub total_is_estimate: bool,
@@ -103,20 +145,33 @@ impl<T> Page<T> {
 }
 
 /// The node's view of its own progress.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NodeStatus {
     /// Height of the node's last block.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub height: u64,
     /// Whether the node considers itself in sync with its peers.
     pub synced: bool,
     /// How many blocks the node's peers are ahead of it (0 when synced or unknown).
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub blocks_behind: u64,
     /// The node's current chain time: seconds since the chain's epoch by the node's clock.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub chain_time: i64,
 }
 
 /// The chain identity a node reports. A network profile pins it, so a node on another chain is
 /// refused.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkIdentity {
     /// The network hash (hex), which is the genesis payload hash on today's devnet.
@@ -130,6 +185,11 @@ pub struct NetworkIdentity {
 }
 
 /// The labels a node shows for the native token. Display only: the asset is [`AssetId::ROOT`].
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TokenLabels {
     /// The token's name as configured (for example `dROOT` on devnets).
@@ -139,6 +199,11 @@ pub struct TokenLabels {
 }
 
 /// The transaction pool's limits, which bound what one submission may carry.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PoolLimits {
     /// Transactions the pool holds at most.
@@ -155,20 +220,33 @@ pub struct PoolLimits {
 
 /// The pool's dynamic fee settings. The exact fee floor is computed by the SDK's core from the
 /// milestone in force; these figures let it apply the node's own minimum on top.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PoolFees {
     /// Whether dynamic fees are enabled.
     pub dynamic: bool,
     /// Fee per byte-unit the pool requires to admit a transaction (0 when dynamic fees are off).
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub min_fee_pool: u64,
     /// Fee per byte-unit the node requires to broadcast a transaction (0 when dynamic fees are off).
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub min_fee_broadcast: u64,
     /// Extra byte-units per transaction kind, in wire type order. Kinds the client does not know
     /// are left out.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::addon_bytes"))]
     pub addon_bytes: Vec<(TxKind, u64)>,
 }
 
 /// A node's configuration: chain identity, token labels, the milestone in force and pool limits.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeConfiguration {
     /// Version of the node software.
@@ -178,6 +256,10 @@ pub struct NodeConfiguration {
     /// The native token's labels.
     pub token: TokenLabels,
     /// The explorer URL the network declares, if any.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub explorer: Option<String>,
     /// Validator seats per round in the milestone at the node's tip.
     pub seats: u32,
@@ -195,6 +277,11 @@ pub struct NodeConfiguration {
 /// The chain definition a node serves: network, milestones, genesis block and exceptions, each as
 /// JSON text (the node's JSON written compactly, with its keys in the node's order), ready for the
 /// SDK core's configuration loaders.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CryptoConfiguration {
     /// The network hash, read from the network definition.
@@ -208,60 +295,104 @@ pub struct CryptoConfiguration {
     /// The genesis block.
     pub genesis_block_json: String,
     /// The exceptions, when the node sends them.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub exceptions_json: Option<String>,
 }
 
 /// Burned amounts since genesis.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Burned {
     /// Burned by the fee burn share.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub fees: BaseUnits,
     /// Burned by burn transactions.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub transactions: BaseUnits,
     /// The sum of both.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub total: BaseUnits,
 }
 
 /// The native token's supply at a block.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Supply {
     /// Height of the block the figures belong to.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub height: u64,
     /// Id of that block.
     pub block_id: String,
     /// The circulating supply in base units.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub supply: BaseUnits,
     /// What has been burned.
     pub burned: Burned,
 }
 
 /// Fee figures of one transaction kind over the requested window.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeeStatistic {
     /// The transaction kind.
+    #[cfg_attr(feature = "serde", serde(flatten))]
     pub kind: TxKind,
     /// Average fee, rounded by the node.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub avg: BaseUnits,
     /// Smallest fee.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub min: BaseUnits,
     /// Largest fee.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub max: BaseUnits,
     /// Sum of fees.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub sum: BaseUnits,
     /// Sum of burned fee shares.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub burned: BaseUnits,
 }
 
 /// The node's fee statistics.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeeStatistics {
     /// The window in days, when one was requested.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub days: Option<u32>,
     /// One entry per transaction kind the node reports, in the node's order.
     pub entries: Vec<FeeStatistic>,
 }
 
 /// One entry of a vote: a validator, named, and its share.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VoteEntry {
     /// The validator's name, which is what a vote carries on the wire.
@@ -271,21 +402,39 @@ pub struct VoteEntry {
 }
 
 /// An account as the node sees it.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountInfo {
     /// The account's address.
     pub address: String,
     /// The account's public key, once the account has sent a transaction (or is in the genesis).
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub public_key: Option<String>,
     /// The nonce of the account's last transaction (0 for a fresh account).
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub nonce: u64,
     /// Balances per asset. On today's devnet there is exactly one entry, ROOT.
     pub balances: Vec<Balance>,
     /// The account's current vote, empty when it does not vote.
     pub vote: Vec<VoteEntry>,
     /// The registered second public key, if any.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub second_public_key: Option<String>,
     /// The account's validator name, when the account is a registered validator.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub validator_name: Option<String>,
 }
 
@@ -338,6 +487,21 @@ impl TxKind {
             TxKind::Other { .. } => "other",
         }
     }
+
+    /// The kind named `name` by [`as_str`](TxKind::as_str), for the six kinds the SDK builds;
+    /// `None` for `other` (whose wire type the name does not carry) and for unknown names.
+    pub fn from_name(name: &str) -> Option<TxKind> {
+        [
+            TxKind::Transfer,
+            TxKind::Vote,
+            TxKind::Burn,
+            TxKind::RegisterSecondKey,
+            TxKind::RegisterValidator,
+            TxKind::ResignValidator,
+        ]
+        .into_iter()
+        .find(|kind| kind.as_str() == name)
+    }
 }
 
 impl fmt::Display for TxKind {
@@ -353,15 +517,26 @@ impl fmt::Display for TxKind {
 }
 
 /// One recipient of a transfer.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Payment {
     /// The recipient's address.
     pub address: String,
     /// The amount in base units.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub amount: BaseUnits,
 }
 
 /// What a validator resignation does.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "kebab-case")
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Resignation {
     /// Leaves the ranking until revoked.
@@ -384,6 +559,15 @@ impl Resignation {
 }
 
 /// The kind-specific content of a transaction.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(
+        tag = "kind",
+        rename_all = "kebab-case",
+        rename_all_fields = "camelCase"
+    )
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TxDetails {
@@ -400,6 +584,7 @@ pub enum TxDetails {
     /// A burn of ROOT.
     Burn {
         /// The burned amount.
+        #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
         amount: BaseUnits,
     },
     /// Registration of a second public key.
@@ -424,6 +609,10 @@ pub enum TxDetails {
         /// Wire type within the group.
         type_id: u16,
         /// The transaction's `asset` object as JSON text, when present.
+        #[cfg_attr(
+            feature = "serde",
+            serde(default, skip_serializing_if = "Option::is_none")
+        )]
         asset_json: Option<String>,
     },
 }
@@ -451,6 +640,11 @@ impl TxDetails {
 }
 
 /// Where a transaction stands.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "kebab-case")
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum TxStatus {
@@ -461,6 +655,11 @@ pub enum TxStatus {
 }
 
 /// A transaction's direction relative to one account.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "kebab-case")
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TxDirection {
     /// The account sent it and is not among its recipients.
@@ -474,19 +673,35 @@ pub enum TxDirection {
 }
 
 /// The block that holds a confirmed transaction.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TxBlock {
     /// Block id.
     pub id: String,
     /// Block height.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub height: u64,
     /// Confirmations when the node answered (1 in the node's last block).
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub confirmations: u64,
     /// The block's time, when the node reported it.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub time: Option<Timestamp>,
 }
 
 /// A transaction as the SDK reports it in histories, lookups and listings.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TxRecord {
     /// Transaction id (hex).
@@ -494,20 +709,42 @@ pub struct TxRecord {
     /// Pending or confirmed.
     pub status: TxStatus,
     /// The block, when confirmed.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub block: Option<TxBlock>,
     /// Direction relative to the account a history was requested for; `None` elsewhere.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub direction: Option<TxDirection>,
     /// The sender's address.
     pub sender: String,
     /// The sender's public key.
     pub sender_public_key: String,
     /// The sender's nonce for this transaction.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub nonce: u64,
     /// The fee in base units.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub fee: BaseUnits,
     /// The burned share of the fee, when the node reported it.
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            default,
+            with = "crate::serde_repr::decimal_option",
+            skip_serializing_if = "Option::is_none"
+        )
+    )]
     pub burned_fee: Option<BaseUnits>,
     /// The memo, if any.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub memo: Option<String>,
     /// Whether the transaction carries a second signature.
     pub second_signed: bool,
@@ -563,6 +800,11 @@ impl TxRecord {
 }
 
 /// Which way to list an account's history.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "kebab-case")
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum HistoryDirection {
     /// Everything the account sent or received.
@@ -575,6 +817,11 @@ pub enum HistoryDirection {
 }
 
 /// A validator's name resolved to its account. Always carries the address, never a bare name.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedName {
     /// The name.
@@ -586,6 +833,11 @@ pub struct ResolvedName {
 }
 
 /// A validator's standing.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "kebab-case")
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ValidatorStatus {
     /// Holds a seat: ranked within the seat count.
@@ -611,45 +863,92 @@ impl ValidatorStatus {
 }
 
 /// The last block a validator produced.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LastBlock {
     /// Block id.
     pub id: String,
     /// Block height, when the node reported it.
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            default,
+            with = "crate::serde_repr::decimal_option",
+            skip_serializing_if = "Option::is_none"
+        )
+    )]
     pub height: Option<u64>,
     /// Block time, when the node reported it.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub time: Option<Timestamp>,
 }
 
 /// A validator's lifetime production counters.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Production {
     /// Blocks produced.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub produced: u64,
     /// Slots missed (0 when the node reports none).
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub missed: u64,
     /// Produced against assigned slots in basis points, when the node reports it.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub productivity_basis_points: Option<u16>,
     /// The last block produced, if any.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub last_block: Option<LastBlock>,
 }
 
 /// What a validator has earned since registration.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Earnings {
     /// Block rewards.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub rewards: BaseUnits,
     /// Fees collected.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub fees: BaseUnits,
     /// The burned share of those fees.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub burned_fees: BaseUnits,
     /// Donations paid out of rewards.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub donations: BaseUnits,
     /// Net: rewards plus fees, minus burned fees and donations.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub total: BaseUnits,
 }
 
 /// A registered validator.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatorInfo {
     /// The validator's name.
@@ -659,58 +958,93 @@ pub struct ValidatorInfo {
     /// The validator's account public key.
     pub public_key: String,
     /// Rank by vote weight (1 is first); `None` when not ranked (for example after resigning).
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub rank: Option<u32>,
     /// Active, standby or resigned.
     pub status: ValidatorStatus,
     /// Total vote weight in base units.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub vote_weight: BaseUnits,
     /// Vote weight as a share of the supply, in basis points, rounded by the node.
     pub vote_share_basis_points: u32,
     /// Number of voting accounts.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub voters: u64,
     /// Production counters.
     pub production: Production,
     /// Earnings since registration.
     pub earnings: Earnings,
     /// The node software version the validator last announced, if any.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub version: Option<String>,
 }
 
 /// One donation paid out of a block reward.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Donation {
     /// The receiving address.
     pub address: String,
     /// The amount in base units.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub amount: BaseUnits,
 }
 
 /// A block.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockInfo {
     /// Block id (hex).
     pub id: String,
     /// Height.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub height: u64,
     /// Block format version.
     pub version: u32,
     /// Id of the previous block (`None` for the genesis block).
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub previous: Option<String>,
     /// The producing validator's name, when it has one.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub producer_name: Option<String>,
     /// The producer's public key.
     pub producer_public_key: String,
     /// Block reward.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub reward: BaseUnits,
     /// Donations paid out of the reward, sorted by address.
     pub donations: Vec<Donation>,
     /// Sum of fees.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub total_fee: BaseUnits,
     /// Burned share of the fees.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub burned_fee: BaseUnits,
     /// Sum of amounts moved by the block's transactions.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub total_amount: BaseUnits,
     /// What the producer keeps: reward minus donations, plus fees minus the burned share.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub producer_earned: BaseUnits,
     /// Number of transactions.
     pub transaction_count: u32,
@@ -721,24 +1055,36 @@ pub struct BlockInfo {
     /// The block signature (hex).
     pub signature: String,
     /// Blocks on top of this one when the node answered.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub confirmations: u64,
     /// The block's time.
     pub time: Timestamp,
 }
 
 /// Where to find a block.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BlockRef {
     /// By height.
-    Height(u64),
+    Height(#[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))] u64),
     /// By id (hex).
     Id(String),
 }
 
 /// A slot a validator missed.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MissedSlot {
     /// The height the block would have had.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub height: u64,
     /// The slot's time.
     pub time: Timestamp,
@@ -747,15 +1093,26 @@ pub struct MissedSlot {
 }
 
 /// One seat of a round's validator set.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoundValidator {
     /// The validator's public key.
     pub public_key: String,
     /// Its vote weight when the round was built.
+    #[cfg_attr(feature = "serde", serde(with = "crate::serde_repr::decimal"))]
     pub vote_weight: BaseUnits,
 }
 
 /// Why the node, or the client on its behalf, refused a submitted transaction.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "kebab-case")
+)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum RejectReason {
@@ -804,6 +1161,15 @@ impl fmt::Display for RejectReason {
 }
 
 /// The result of submitting one transaction.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(
+        tag = "status",
+        rename_all = "kebab-case",
+        rename_all_fields = "camelCase"
+    )
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubmitStatus {
     /// The pool accepted the transaction.
@@ -823,11 +1189,17 @@ pub enum SubmitStatus {
 }
 
 /// One transaction's outcome within a submission.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubmitOutcome {
     /// The transaction id the outcome belongs to.
     pub id: String,
     /// Accepted or rejected.
+    #[cfg_attr(feature = "serde", serde(flatten))]
     pub status: SubmitStatus,
 }
 
@@ -839,6 +1211,11 @@ impl SubmitOutcome {
 }
 
 /// The outcomes of a submission, one per transaction, in submission order.
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SubmitReport {
     /// The outcomes.
@@ -911,6 +1288,26 @@ mod tests {
     fn names() {
         assert_eq!(AssetId::ROOT.to_string(), "ROOT");
         assert_eq!(AssetId::from_bytes([1; 32]).to_string(), "01".repeat(32));
+        assert_eq!(AssetId::parse("ROOT"), Some(AssetId::ROOT));
+        assert_eq!(
+            AssetId::parse(&"0A".repeat(32)),
+            Some(AssetId::from_bytes([10; 32]))
+        );
+        for bad in [
+            "root",
+            "",
+            "0a",
+            "+a".repeat(32).as_str(),
+            "gg".repeat(32).as_str(),
+        ] {
+            assert_eq!(AssetId::parse(bad), None, "{bad}");
+        }
+        assert_eq!(
+            TxKind::from_name("register-second-key"),
+            Some(TxKind::RegisterSecondKey)
+        );
+        assert_eq!(TxKind::from_name("other"), None);
+        assert_eq!(TxKind::from_name("delegate"), None);
         assert_eq!(
             TxKind::Other {
                 type_group: 1,

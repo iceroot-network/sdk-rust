@@ -10,6 +10,11 @@ use crate::error::ApiError;
 
 /// HTTP method of a request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "UPPERCASE")
+)]
 pub enum Method {
     /// `GET`, for every read.
     Get,
@@ -109,12 +114,59 @@ impl fmt::Display for Relay {
 }
 
 /// One HTTP request, relative to a [`Relay`].
+///
+/// With the feature `serde` it is `{ method, path, query: [[name, value]], body? }`, the query
+/// not yet encoded.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(try_from = "RequestFields")
+)]
 pub struct Request {
     method: Method,
     path: String,
     query: Vec<(String, String)>,
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     body: Option<String>,
+}
+
+/// The fields of a [`Request`] before they are checked.
+#[cfg(feature = "serde")]
+#[derive(serde::Deserialize)]
+struct RequestFields {
+    method: Method,
+    path: String,
+    #[serde(default)]
+    query: Vec<(String, String)>,
+    #[serde(default)]
+    body: Option<String>,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<RequestFields> for Request {
+    type Error = ApiError;
+
+    /// A request whose path starts with `/` and carries no query string, fragment, white space
+    /// or control character.
+    fn try_from(fields: RequestFields) -> Result<Request, ApiError> {
+        let path_ok = fields.path.starts_with('/')
+            && !fields
+                .path
+                .chars()
+                .any(|c| c == '?' || c == '#' || c.is_whitespace() || c.is_control());
+        if !path_ok {
+            return Err(ApiError::InvalidRequest {
+                reason: format!("{:?} is not a route path", fields.path),
+            });
+        }
+        Ok(Request {
+            method: fields.method,
+            path: fields.path,
+            query: fields.query,
+            body: fields.body,
+        })
+    }
 }
 
 impl Request {
@@ -218,6 +270,11 @@ impl Response {
         self.status
     }
 
+    /// The headers, in the order they were added.
+    pub fn headers(&self) -> &[(String, String)] {
+        &self.headers
+    }
+
     /// The body bytes.
     pub fn body(&self) -> &[u8] {
         &self.body
@@ -309,6 +366,27 @@ mod tests {
         );
         assert!(segment("..").is_err());
         assert!(segment("").is_err());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn requests_as_json() {
+        let request = Request::get("/wallets/dA".into()).with_query("page", 2);
+        let value = serde_json::to_value(&request).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({ "method": "GET", "path": "/wallets/dA", "query": [["page", "2"]] })
+        );
+        assert_eq!(serde_json::from_value::<Request>(value).unwrap(), request);
+        let post = Request::post_json("/transactions".into(), "{}".into());
+        let value = serde_json::to_value(&post).unwrap();
+        assert_eq!(value["method"], "POST");
+        assert_eq!(value["body"], "{}");
+        assert_eq!(serde_json::from_value::<Request>(value).unwrap(), post);
+        for path in ["wallets", "/a?b=1", "/a b", "/a#b"] {
+            let value = serde_json::json!({ "method": "GET", "path": path });
+            assert!(serde_json::from_value::<Request>(value).is_err(), "{path}");
+        }
     }
 
     #[test]

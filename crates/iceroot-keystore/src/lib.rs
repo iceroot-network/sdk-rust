@@ -4,8 +4,8 @@
 //! Argon2id, and the seed is sealed with XChaCha20-Poly1305. Its header (the format version, the
 //! key derivation function and its parameters, the salt, the nonce and the payload's kind and
 //! length) is readable without the password and authenticated with the seed, so changing any
-//! byte of it makes decryption fail. The layout is in [`format`] and in `docs/keystore-format.md`
-//! of the repository.
+//! byte of it makes decryption fail. The layout is in [`format`](mod@format) and in
+//! `docs/keystore-format.md` of the repository.
 //!
 //! The crate stores nothing. An app keeps the keystore's bytes (or their text form, [`armor`])
 //! where its platform keeps secrets best, and never stores the password.

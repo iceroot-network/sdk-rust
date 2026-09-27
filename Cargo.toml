@@ -28,6 +28,7 @@ indexing_slicing = "deny"
 [workspace.dependencies]
 iceroot-sdk-core = { path = "crates/iceroot-sdk-core" }
 iceroot-sdk-api = { path = "crates/iceroot-sdk-api" }
+iceroot-vote = { path = "crates/iceroot-vote" }
 
 # Heartwood Core's byte-exact layer: keys, addresses, signatures, the transaction codec, the
 # milestone rules, the fee floor and the message signing domain, at its tagged release. No feature
@@ -64,6 +65,21 @@ tokio = { version = "1", default-features = false, features = ["time"] }
 
 # Tests only.
 hex = "0.4"
+proptest = "1.11"
 
 [profile.release]
 overflow-checks = true
+
+# The vote library's property test draws about 40,000 selections: light optimization keeps
+# debug runs short. Overflow checks and debug assertions stay on.
+[profile.dev.package.iceroot-vote]
+opt-level = 1
+
+[profile.dev.package.proptest]
+opt-level = 2
+
+[profile.dev.package.regex-syntax]
+opt-level = 2
+
+[profile.dev.package.sha2]
+opt-level = 2

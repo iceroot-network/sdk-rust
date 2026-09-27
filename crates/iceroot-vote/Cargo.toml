@@ -1,0 +1,20 @@
+[package]
+name = "iceroot-vote"
+description = "Vote selection for IceRoot wallets: the four vote modes, vote rules and checks, as pure functions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+sha2.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true

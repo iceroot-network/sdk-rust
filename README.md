@@ -68,7 +68,7 @@ CC_wasm32_unknown_unknown=clang AR_wasm32_unknown_unknown=llvm-ar \
 
 ### Vectors
 
-- `vectors/heartwood/`: copies of Heartwood Core's golden vectors of `heartwood-crypto` at the pinned revision, generated from the reference implementation, with `MANIFEST.sha256`. `crates/iceroot-sdk-core/tests/heartwood_vectors.rs` runs every record through the SDK's public API; records the SDK has no operation for (blocks, peer status) are skipped by an explicit rule, and each class asserts how many records matched, differed as documented, or were skipped. Updating the pinned revision updates these files in the same change.
+- `vectors/heartwood/`: copies of Heartwood Core's golden vectors of `heartwood-crypto` at the pinned tag, generated from the reference implementation, with `MANIFEST.sha256`. `crates/iceroot-sdk-core/tests/heartwood_vectors.rs` runs every record through the SDK's public API, except the reference's raw signatures of chosen 32-byte inputs, which go through the test seam of the feature `fixed-aux` because no public function signs a chosen digest; records the SDK has no operation for (blocks, peer status) are skipped by an explicit rule, and each class asserts how many records matched, differed as documented, or were skipped. Updating the pinned tag updates these files in the same change.
 - `vectors/sdk/`: the SDK's own vectors, in the same `heartwood-vectors/1` format: BIP39 phrases and seeds (the published vectors, non-ASCII passphrases, validation, and the genesis passphrases of Heartwood Core's devnet), hardened derivation (the BIP32 test vectors and wallet paths), message signatures, and sign-in messages. `tools/oracle/gen-sdk-vectors.js` generates them with the reference implementation's own libraries as the oracle:
 
   ```sh

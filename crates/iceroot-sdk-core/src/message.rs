@@ -1,10 +1,14 @@
 //! Message signing: off-chain messages signed by an account, and their verification.
 //!
 //! In today's format a message signature is the reference implementation's: BIP340 Schnorr over
-//! the SHA-256 of the message's exact UTF-8 bytes, algorithm `secp256k1-bip340-sha256`. The SDK
-//! always hashes first and signs the 32-byte digest. (`heartwood-crypto` signs a 32-byte input as
-//! it is and hashes every other length, so passing the message itself would silently differ from
-//! the reference for any message of exactly 32 bytes.)
+//! the SHA-256 of the message's exact UTF-8 bytes, algorithm `secp256k1-bip340-sha256`, signed in
+//! `heartwood-crypto`'s off-chain message domain. The SDK always hashes first and signs the 32-byte
+//! digest. (`heartwood-crypto` signs a 32-byte input as it is and hashes every other length, so
+//! passing the message itself would silently differ from the reference for any message of exactly
+//! 32 bytes.)
+//!
+//! Only messages are signed here: no public function signs a digest the caller chooses, which
+//! could be the signing digest of a transaction.
 
 use heartwood_crypto::crypto::hash::sha256;
 use heartwood_crypto::crypto::sig::{self, SchemeId, Signature, SigningDomain};
@@ -19,10 +23,10 @@ use crate::profile::{Capability, Profile};
 /// The algorithm name of message signatures in today's format.
 pub const ALGORITHM: &str = "secp256k1-bip340-sha256";
 
-/// The signing domain of off-chain messages. In today's format the domain changes no bytes;
-/// `heartwood-crypto` at the pinned revision names no message domain yet, so the transaction
-/// domain stands in for it here, and only here.
-const MESSAGE_DOMAIN: SigningDomain = SigningDomain::Transaction;
+/// The signing domain of off-chain messages. In today's format the domain changes no bytes; from
+/// the post-quantum formats on it carries the off-chain message tag, so that a message signature
+/// can never pass as a transaction's.
+const MESSAGE_DOMAIN: SigningDomain = SigningDomain::Message;
 
 /// A signed message's signature, in the form wallets and websites exchange.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -91,8 +95,17 @@ pub fn sign_bytes_with(
     })
 }
 
-/// The BIP340 signature of the 32-byte `digest` by `account`, signed as it is.
-pub fn sign_digest(account: &Account, digest: &[u8; 32], aux: Aux) -> Result<Signature, Error> {
+/// The BIP340 signature of the 32-byte `digest` by `account`, signed as it is, in the message
+/// domain.
+///
+/// Crate-private: a digest the caller chooses could be a transaction's signing digest, so the
+/// public functions sign only the SHA-256 of a message. The test builds reach it through
+/// `test_seam::sign_digest`.
+pub(crate) fn sign_digest(
+    account: &Account,
+    digest: &[u8; 32],
+    aux: Aux,
+) -> Result<Signature, Error> {
     sig::sign(
         SchemeId::Secp256k1Bip340,
         MESSAGE_DOMAIN,
@@ -106,6 +119,23 @@ pub fn sign_digest(account: &Account, digest: &[u8; 32], aux: Aux) -> Result<Sig
             reason: other.to_string(),
         },
     })
+}
+
+/// Test seam of the feature `fixed-aux`, which only test builds enable: signing a chosen digest,
+/// for the vector runners that compare the reference's raw BIP340 signatures.
+#[cfg(feature = "fixed-aux")]
+#[doc(hidden)]
+pub mod test_seam {
+    use heartwood_crypto::Aux;
+    use heartwood_crypto::crypto::sig::Signature;
+
+    use crate::error::Error;
+    use crate::keys::Account;
+
+    /// The BIP340 signature of the 32-byte `digest` by `account`, signed as it is.
+    pub fn sign_digest(account: &Account, digest: &[u8; 32], aux: Aux) -> Result<Signature, Error> {
+        super::sign_digest(account, digest, aux)
+    }
 }
 
 /// Whether `signature` signs `message`: the algorithm is [`ALGORITHM`], and the signature

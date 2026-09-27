@@ -612,7 +612,9 @@ fn bip340_sign(record: &Record, passphrases: &HashMap<String, String>) -> Outcom
     let account = account(passphrase);
     let message = hex::decode(text(&input["message"])).expect("hex");
     let aux = Aux::fixed(hex::decode_array(text(&input["aux"])).expect("32 bytes of aux"));
-    match message::sign_digest(&account, &signed_digest(&message), aux) {
+    // The reference signs the raw 32 bytes, which no public SDK function does (message signing
+    // always hashes first), so the digest goes through the test seam.
+    match message::test_seam::sign_digest(&account, &signed_digest(&message), aux) {
         Ok(signature) => compare(
             record.expected.as_ref().expect("an output"),
             &json!({ "signature": signature.to_hex() }),

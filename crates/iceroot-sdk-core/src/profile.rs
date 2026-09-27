@@ -148,7 +148,8 @@ pub enum Capability {
     Finality,
     /// History search.
     HistorySearch,
-    /// Live updates.
+    /// Live updates that the network pushes (server-sent events from an indexer). Without it, an
+    /// application refreshes by polling the node.
     LiveEvents,
     /// A transaction id known before signing.
     TransactionIdBeforeSigning,
@@ -366,7 +367,6 @@ impl Profile {
                 Capability::SecondKey,
                 Capability::ValidatorNames,
                 Capability::HistorySearch,
-                Capability::LiveEvents,
                 Capability::MessageSigning,
             ]),
         }
@@ -559,6 +559,7 @@ mod tests {
             Capability::KeyRotation,
             Capability::Multisig,
             Capability::Swaps,
+            Capability::LiveEvents,
             Capability::TransactionIdBeforeSigning,
         ] {
             assert!(!caps.has(capability), "{capability}");

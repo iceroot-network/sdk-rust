@@ -11,9 +11,13 @@
 //
 // The release workflow (.github/workflows/release.yml) runs this for every pushed v* tag, after
 // the checks and tests. It needs the GitHub CLI with a token that may write releases (GH_TOKEN).
+//
+// The notes say how to depend on the release, what it contains, the notes written for the version
+// in release-notes/<tag>.md (what an application must know: changed or removed interfaces), and
+// the commits since the previous tag.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -85,6 +89,7 @@ function releaseNotes(tag, version, head) {
   const changes = git("log", "--no-merges", "--format=- %s", previous ? `${previous}..${head}` : head)
     .split("\n")
     .filter(Boolean);
+  const written = versionNotes(tag);
 
   return `Use this release as a git dependency:
 
@@ -100,11 +105,17 @@ Building it needs read access to heartwood-core over SSH until that repository i
 - Crates: ${crates}
 - heartwood-crypto: ${heartwoodSource(lock)}
 - Rust ${rustVersion()} or later
-
+${written ? `\n## Notes\n\n${written}\n` : ""}
 ## Changes${previous ? ` since ${previous}` : ""}
 
 ${changes.join("\n") || "- No changes."}
 `;
+}
+
+// The notes written for this version, if any.
+function versionNotes(tag) {
+  const file = join(root, "release-notes", `${tag}.md`);
+  return existsSync(file) ? readFileSync(file, "utf8").trim() : null;
 }
 
 // Where heartwood-crypto comes from, as Cargo.lock records it.

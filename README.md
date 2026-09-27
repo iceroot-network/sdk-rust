@@ -75,6 +75,17 @@ CC_wasm32_unknown_unknown=clang AR_wasm32_unknown_unknown=llvm-ar \
   node tools/oracle/gen-sdk-vectors.js <built reference checkout> <browser wallet checkout>
   ```
 
+### Devnet end-to-end test
+
+`crates/iceroot-sdk/tests/e2e.rs`, behind the `e2e` feature, runs against a local devnet: it connects and pins the chain, imports a genesis wallet with the legacy passphrase import, creates an account from a new recovery phrase, funds it, sends a transfer with a memo and a vote, waits until each is forged and reads it back through the node API client, and checks that a fee one base unit below the floor is refused with the node's own code. `tools/e2e/devnet.sh` starts a fresh one-node devnet of the reference implementation through its devnet tooling (`ICEROOT_DEVNET_TOOLS`), runs the test, and stops and removes the devnet; the chain never runs more than five rounds:
+
+```sh
+ICEROOT_DEVNET_TOOLS=<devnet tooling> tools/e2e/devnet.sh run -- \
+  cargo test -p iceroot-sdk --features e2e --test e2e -- --ignored
+```
+
+The TypeScript SDK's `npm run test:e2e` runs the same harness for its Node and Chromium tests and then this test, which also verifies the messages they signed.
+
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE).

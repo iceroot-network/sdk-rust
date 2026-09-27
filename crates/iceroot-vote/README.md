@@ -16,7 +16,7 @@ Validators that declare no operator (or hosting provider, or country) form one g
 
 - **Seeded per account.** `seed = SHA-256("iceroot/vote-select/v1" ‖ u32 length ‖ account address ‖ u32 length ‖ mode id ‖ u64 snapshot height ‖ u32 draw)`, integers big-endian. Block `i` of the stream is `SHA-256(seed ‖ u64 i)`, read as two 128-bit numbers.
 - **Weighted, without replacement.** Candidates are in name order. Each draw takes a number below the total weight from the stream (by rejection, so it is uniform) and picks the candidate whose running sum first exceeds it.
-- **Top-up.** When a mode runs out of eligible validators, the rest is drawn from Diversity's pool, and each such pick and the selection say so.
+- **Top-up.** When a mode runs out of eligible validators, the rest is drawn from Diversity's pool, and each such pick and the selection say so. A Maximum Rewards top-up still gives no declared operator more than two picks in all.
 - **Shares.** 10,000 basis points split evenly in whole basis points, one extra to each of the first picks drawn while the remainder lasts; entries in the protocol's canonical order (larger share first, then name). 20 picks get 500 each; 53 get 189 or 188.
 - **Reproducible.** The same snapshot, account, mode, number of picks, draw number and library version (`iceroot-vote/1`) give the same selection. "Draw again" increments the draw number.
 - **Explained.** Every pick carries its reasons (criteria met, values, groups, and its chance at the step it was drawn), each with a plain English sentence for the review screen.

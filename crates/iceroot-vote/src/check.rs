@@ -41,8 +41,10 @@ impl Finding {
 ///
 /// A pick drawn from the mode's pool is judged by the selection's mode, a top-up pick by
 /// Diversity, and a pick the holder chose only by whether the validator is still registered and
-/// has not resigned. For Maximum Rewards, picks beyond two per declared operator (by current
-/// declarations, in draw order) no longer meet the cap.
+/// has not resigned. For Maximum Rewards, picks beyond two per operator (by current
+/// declarations, in draw order) no longer meet the cap: among the mode's picks, validators that
+/// declare no operator count as one operator; top-up picks count only towards a declared
+/// operator's two.
 pub fn check(
     selection: &Selection,
     snapshot: &VoteSnapshot,
@@ -109,13 +111,15 @@ pub fn check(
     Ok(findings)
 }
 
-/// Mark Maximum Rewards picks beyond the cap of their declared operator, in draw order.
+/// Mark Maximum Rewards picks beyond the cap of their operator, in draw order, as `select`
+/// applies it: mode picks count towards their operator group, the group of validators that
+/// declare no operator included; top-up picks count only towards a declared operator.
 fn apply_operator_cap(selection: &Selection, snapshot: &VoteSnapshot, findings: &mut [Finding]) {
     let mut drawn: Vec<(&Pick, &mut Finding)> = selection
         .entries
         .iter()
         .zip(findings.iter_mut())
-        .filter(|(pick, _)| pick.source == PickSource::Mode)
+        .filter(|(pick, _)| pick.source != PickSource::Holder)
         .collect();
     drawn.sort_by_key(|(pick, _)| pick.step);
     let mut counts: Vec<(Option<String>, u32)> = Vec::new();
@@ -128,6 +132,9 @@ fn apply_operator_cap(selection: &Selection, snapshot: &VoteSnapshot, findings: 
             .as_ref()
             .and_then(|d| d.operator.as_ref());
         let (key, label) = declared_key(declared);
+        if pick.source == PickSource::TopUp && key.is_none() {
+            continue;
+        }
         let count = match counts.iter_mut().find(|(k, _)| *k == key) {
             Some((_, n)) => {
                 *n += 1;

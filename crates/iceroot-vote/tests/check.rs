@@ -178,6 +178,59 @@ fn rewards_picks_that_stop_paying_or_exceed_the_operator_cap() {
 }
 
 #[test]
+fn rewards_top_ups_count_towards_a_declared_operator() {
+    // 42 Maximum Rewards picks and 11 top-ups. A top-up whose validator now declares the same
+    // operator as two earlier picks exceeds the cap; one that declares no operator never does.
+    let mut snapshot = synthetic();
+    let mut request = SelectRequest::new(Mode::MaximumRewards, "addr-holder-check");
+    request.count = 53;
+    let chosen = select(&snapshot, &request).unwrap();
+    let mut by_step: Vec<_> = chosen.entries.iter().collect();
+    by_step.sort_by_key(|p| p.step);
+    let top_up = by_step
+        .iter()
+        .find(|p| p.source == PickSource::TopUp)
+        .unwrap()
+        .validator
+        .clone();
+    let earlier: Vec<String> = by_step
+        .iter()
+        .filter(|p| p.source == PickSource::Mode)
+        .take(2)
+        .map(|p| p.validator.clone())
+        .collect();
+    for name in earlier.iter().chain([&top_up]) {
+        let record = record_mut(&mut snapshot, name);
+        let declarations = record
+            .declarations
+            .get_or_insert_with(Declarations::default);
+        declarations.operator = Some("Merged Operator".to_owned());
+    }
+    let findings = check(&chosen, &snapshot).unwrap();
+    assert_eq!(
+        failing(&findings),
+        vec![(
+            top_up.as_str(),
+            &[Shortfall::OperatorCap {
+                operator: Some("Merged Operator".to_owned()),
+                maximum: 2
+            }][..]
+        )]
+    );
+    // The same top-up declaring no operator is fine.
+    let record = record_mut(&mut snapshot, &top_up);
+    if let Some(declarations) = record.declarations.as_mut() {
+        declarations.operator = None;
+    }
+    assert!(
+        check(&chosen, &snapshot)
+            .unwrap()
+            .iter()
+            .all(|f| f.still_meets)
+    );
+}
+
+#[test]
 fn top_up_picks_are_judged_by_diversity() {
     // On the devnet, Support Newcomers has no pool: every pick is a Diversity top-up, which
     // still meets Diversity's criteria though no validator meets the Newcomers criteria.

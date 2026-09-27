@@ -64,7 +64,8 @@ pub struct Candidate {
 /// - **Maximum Rewards:** seated, measured payouts (at least one interval and a positive value)
 ///   and no jailing or equivocation in the window. Weight: the square of the payout as a share of
 ///   the best payer's in basis points, at least 1. At most two picks per declared operator;
-///   validators that declare no operator form one group.
+///   validators that declare no operator form one group. Picks that top the selection up from
+///   Diversity never give a declared operator a third pick either.
 /// - **Support Newcomers:** ranked within the last 10 seats or below the cutoff, registered for
 ///   at least 7 days, complete declarations, no penalty ever, and at least 95 % of assigned slots
 ///   forged when there is a production record from earlier seated time. Weight
@@ -321,6 +322,12 @@ impl Groups {
     pub(crate) fn operator_label(&self) -> Option<String> {
         let [operator, ..] = &self.labels;
         operator.clone()
+    }
+
+    /// Whether the validator declares an operator.
+    pub(crate) fn operator_declared(&self) -> bool {
+        let [operator, ..] = &self.labels;
+        operator.is_some()
     }
 }
 

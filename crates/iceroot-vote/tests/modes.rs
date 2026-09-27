@@ -601,6 +601,43 @@ fn small_pools_top_up_from_diversity_and_say_so() {
 }
 
 #[test]
+fn maximum_rewards_top_ups_keep_the_operator_cap() {
+    // With 53 picks, 11 come from Diversity. Frostline and Polar Systems each run several
+    // validators that Diversity would also pick; the top-up must not give either a third pick.
+    let s = synthetic();
+    let operator = |name: &str| {
+        s.record(name)
+            .unwrap()
+            .declarations
+            .as_ref()
+            .and_then(|d| d.operator.clone())
+            .map(|o| o.trim().to_ascii_lowercase())
+            .filter(|o| !o.is_empty())
+    };
+    let mut declared_top_ups = 0;
+    for selection in many(&s, Mode::MaximumRewards, 53, 400) {
+        assert_eq!(selection.topped_up, 11);
+        let mut per_operator: BTreeMap<String, usize> = BTreeMap::new();
+        for pick in &selection.entries {
+            if let Some(operator) = operator(&pick.validator) {
+                *per_operator.entry(operator).or_insert(0) += 1;
+                if pick.source == PickSource::TopUp {
+                    declared_top_ups += 1;
+                    assert!(
+                        pick.reasons
+                            .iter()
+                            .any(|r| matches!(r, Reason::OperatorPicks { maximum: 2, .. }))
+                    );
+                }
+            }
+        }
+        assert!(per_operator.values().all(|&n| n <= 2), "{per_operator:?}");
+    }
+    // Top-ups do come from declared operators with room left.
+    assert!(declared_top_ups > 0);
+}
+
+#[test]
 fn refusals() {
     let s = synthetic();
     for count in [0u8, 19, 54, 255] {

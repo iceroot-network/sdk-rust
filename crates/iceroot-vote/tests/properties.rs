@@ -286,6 +286,17 @@ fn assert_valid(snapshot: &VoteSnapshot, request: &SelectRequest<'_>, selection:
                     assert!(picked || full, "{name}");
                 }
             }
+            // Top-up picks never take a declared operator past the cap either.
+            let mut per_declared: BTreeMap<String, u32> = BTreeMap::new();
+            for pick in from_mode.iter().chain(&top_ups) {
+                if let Some(operator) = operator_key(snapshot, &pick.validator) {
+                    *per_declared.entry(operator).or_insert(0) += 1;
+                }
+            }
+            assert!(
+                per_declared.values().all(|&n| n <= MAX_PICKS_PER_OPERATOR),
+                "{per_declared:?}"
+            );
         }
         _ => {
             if !top_ups.is_empty() {
@@ -332,11 +343,14 @@ proptest! {
                 Err(SelectError::NotEnoughValidators { requested, available }) => {
                     prop_assert_eq!(requested, count);
                     prop_assert!(available < u32::from(count));
-                    if mode != Mode::MaximumRewards {
-                        let union: BTreeSet<String> = eligible(&snapshot, mode)
-                            .union(&eligible(&snapshot, Mode::Diversity))
-                            .cloned()
-                            .collect();
+                    let union: BTreeSet<String> = eligible(&snapshot, mode)
+                        .union(&eligible(&snapshot, Mode::Diversity))
+                        .cloned()
+                        .collect();
+                    if mode == Mode::MaximumRewards {
+                        // The operator cap can hold some back.
+                        prop_assert!(available <= u32::try_from(union.len()).unwrap());
+                    } else {
                         prop_assert_eq!(available, u32::try_from(union.len()).unwrap());
                     }
                 }

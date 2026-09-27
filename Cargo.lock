@@ -594,6 +594,7 @@ dependencies = [
  "getrandom 0.4.3",
  "hex",
  "iceroot-keystore",
+ "icu_normalizer",
  "js-sys",
  "poly1305",
  "serde_json",

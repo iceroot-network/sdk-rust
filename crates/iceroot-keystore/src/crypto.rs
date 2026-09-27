@@ -4,7 +4,7 @@
 use argon2::{Algorithm, Argon2, Block, Version};
 use chacha20poly1305::aead::AeadInOut;
 use chacha20poly1305::{KeyInit, Tag, XChaCha20Poly1305, XNonce};
-use unicode_normalization::char::{canonical_combining_class, decompose_compatible};
+use icu_normalizer::DecomposingNormalizerBorrowed;
 use zeroize::{Zeroize, Zeroizing};
 
 // The state that holds secrets inside the primitives is wiped when dropped only with the `zeroize`
@@ -31,9 +31,12 @@ pub const MAX_PASSWORD_BYTES: usize = 1024;
 /// text typed on different systems gives the same key. Empty and over-long passwords are refused
 /// before any work is done.
 ///
-/// The normalization is done here, over buffers of exact size that are wiped, rather than with
-/// `unicode-normalization`'s iterator, whose buffer moves to the heap for a character with a long
-/// decomposition or a run of combining marks, and is then freed without being wiped.
+/// The normalizer is ICU4X's, which the SDK's core already uses for recovery phrases, so that a
+/// module with both carries one copy of the Unicode data. It is driven here over buffers of exact
+/// size that are wiped, one character at a time: the normalizer's own buffer then holds at most one
+/// character's decomposition, which always fits in the buffer's inline part, so none of the
+/// password is ever moved to heap memory that is freed without being wiped (as the normalizer's
+/// buffer would be for a long run of combining marks).
 pub(crate) fn password_bytes(password: &str) -> Result<Zeroizing<Vec<u8>>, Error> {
     if password.is_empty() {
         return Err(Error::InvalidPassword {
@@ -48,16 +51,20 @@ pub(crate) fn password_bytes(password: &str) -> Result<Zeroizing<Vec<u8>>, Error
             },
         });
     }
+    let nfkd = DecomposingNormalizerBorrowed::new_nfkd();
+    let mut scratch = Scratch::new();
     // Each buffer is sized exactly first, so that it never reallocates and leaves a copy behind.
     let mut count = 0usize;
     for c in password.chars() {
-        decompose_compatible(c, |_| count += 1);
+        count += scratch.decompose(&nfkd, c).chars().count();
     }
     let mut chars: Zeroizing<Vec<char>> = Zeroizing::new(Vec::with_capacity(count));
     for c in password.chars() {
-        decompose_compatible(c, |d| chars.push(d));
+        for d in scratch.decompose(&nfkd, c).chars() {
+            chars.push(d);
+        }
     }
-    canonical_order(&mut chars);
+    canonical_order(&nfkd, &mut scratch, &mut chars);
     let length: usize = chars.iter().map(|c| c.len_utf8()).sum();
     let mut bytes = Zeroizing::new(Vec::with_capacity(length));
     let mut buffer = Zeroizing::new([0u8; 4]);
@@ -67,22 +74,67 @@ pub(crate) fn password_bytes(password: &str) -> Result<Zeroizing<Vec<u8>>, Error
     Ok(bytes)
 }
 
+/// The most UTF-8 bytes of one character's NFKD: 18 characters (for U+FDFA) of at most 4 bytes.
+const MAX_DECOMPOSITION_BYTES: usize = 18 * 4;
+
+/// Scratch space for normalizing one character, or a pair of decomposed characters: the input's
+/// UTF-8 and the normalizer's output. Both are wiped when dropped, and the output is never
+/// reallocated, since no input here normalizes to more than [`MAX_DECOMPOSITION_BYTES`].
+struct Scratch {
+    input: Zeroizing<[u8; 8]>,
+    output: Zeroizing<String>,
+}
+
+impl Scratch {
+    fn new() -> Scratch {
+        Scratch {
+            input: Zeroizing::new([0u8; 8]),
+            output: Zeroizing::new(String::with_capacity(MAX_DECOMPOSITION_BYTES)),
+        }
+    }
+
+    /// The full compatibility decomposition of `c`, in canonical order.
+    fn decompose(&mut self, nfkd: &DecomposingNormalizerBorrowed<'_>, c: char) -> &str {
+        self.output.clear();
+        // Writing to a String never fails.
+        let _ = nfkd.normalize_to(c.encode_utf8(self.input.as_mut_slice()), &mut *self.output);
+        &self.output
+    }
+
+    /// Whether two fully decomposed characters are out of canonical order: `b` has a non-zero
+    /// canonical combining class lower than that of `a`. The NFKD of such a pair swaps it, and
+    /// leaves every other pair of decomposed characters as it is.
+    fn out_of_order(&mut self, nfkd: &DecomposingNormalizerBorrowed<'_>, a: char, b: char) -> bool {
+        let (first, rest) = self.input.split_at_mut(a.len_utf8());
+        a.encode_utf8(first);
+        let length = a.len_utf8() + b.encode_utf8(rest).len();
+        self.output.clear();
+        // Two characters encoded one after the other are UTF-8.
+        let Some(Ok(pair)) = self.input.get(..length).map(core::str::from_utf8) else {
+            return false;
+        };
+        let _ = nfkd.normalize_to(pair, &mut *self.output);
+        self.output.as_str() != pair
+    }
+}
+
 /// The canonical ordering of the Unicode Standard (section 3.11), the last step of NFKD: each run
 /// of characters with a non-zero canonical combining class is sorted by class, keeping the order
 /// of equal classes. An insertion sort in place, so no scratch copy is made; a starter (class 0)
-/// is never passed.
-fn canonical_order(chars: &mut [char]) {
+/// never moves, since no pair puts it out of order. Each comparison asks the normalizer about the
+/// pair, so no table of combining classes is needed besides its own data.
+fn canonical_order(
+    nfkd: &DecomposingNormalizerBorrowed<'_>,
+    scratch: &mut Scratch,
+    chars: &mut [char],
+) {
     for i in 1..chars.len() {
-        let class = chars.get(i).map_or(0, |&c| canonical_combining_class(c));
-        if class == 0 {
-            continue;
-        }
         let mut j = i;
         while j > 0 {
-            let before = chars
-                .get(j - 1)
-                .map_or(0, |&c| canonical_combining_class(c));
-            if before <= class {
+            let (Some(&before), Some(&current)) = (chars.get(j - 1), chars.get(j)) else {
+                break;
+            };
+            if !scratch.out_of_order(nfkd, before, current) {
                 break;
             }
             chars.swap(j - 1, j);
@@ -177,7 +229,8 @@ mod tests {
         assert_eq!(composed.as_slice(), "cafe\u{301} fi".as_bytes());
     }
 
-    /// The library's NFKD, which the normalization here must equal.
+    /// NFKD by `unicode-normalization`, an independent implementation, which the normalization
+    /// here must equal.
     fn library_nfkd(text: &str) -> Vec<u8> {
         use unicode_normalization::UnicodeNormalization;
         text.nfkd().collect::<String>().into_bytes()

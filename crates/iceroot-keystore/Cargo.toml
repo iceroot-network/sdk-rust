@@ -27,7 +27,8 @@ chacha20poly1305.workspace = true
 getrandom.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-unicode-normalization.workspace = true
+# Password normalisation (NFKD): the normaliser the core uses for recovery phrases.
+icu_normalizer.workspace = true
 zeroize.workspace = true
 # Not called: dependencies only to turn on their `zeroize` features (see the workspace manifest).
 # src/crypto.rs does not build without those of blake2 and cipher.
@@ -44,6 +45,8 @@ iceroot-keystore = { path = ".", features = ["testing"] }
 hex.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+# A second NFKD implementation, which the password normalisation is compared with.
+unicode-normalization.workspace = true
 
 # The tests in WebAssembly, under Node (wasm-bindgen-test-runner), and their clock.
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]

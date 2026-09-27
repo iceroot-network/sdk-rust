@@ -45,14 +45,14 @@ secp256k1 = { version = "=0.33.1", default-features = false, features = ["std"] 
 # Recovery phrases and wallet derivation: SHA-256 and SHA-512 (digest 0.11, as heartwood-crypto),
 # HMAC-SHA512, PBKDF2 and the NFKD normalisation BIP39 requires. The normaliser is ICU4X's, with its
 # data compiled in: the same crate the `http` feature already brings in through URL parsing, and
-# about half the size of the alternatives in the WebAssembly module.
+# about half the size of the alternatives in the WebAssembly module. The keystore normalises
+# passwords with it too, so a module with both carries one copy of the Unicode data.
 sha2 = "0.11"
 hmac = "0.13"
 pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
 icu_normalizer = { version = "2.3", default-features = false, features = ["compiled_data"] }
-# The keystore's password normalisation, an NFKD over this crate's character tables that wipes
-# every buffer it uses (iceroot-keystore); in the core's tests, a second NFKD implementation that
-# the ICU4X normaliser is compared with, code point by code point.
+# Tests only: a second NFKD implementation that the ICU4X normaliser is compared with, code point
+# by code point, in the core's tests and the keystore's.
 unicode-normalization = "0.1.25"
 
 zeroize = "1.9"

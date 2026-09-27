@@ -1,0 +1,34 @@
+[package]
+name = "iceroot-sdk-core"
+description = "The core of the IceRoot SDK: network profiles, recovery phrases and keys, addresses, amounts, transaction drafts and signing, message signing and sign-in"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+getrandom.workspace = true
+heartwood-crypto.workspace = true
+hmac.workspace = true
+pbkdf2.workspace = true
+secp256k1.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+unicode-normalization.workspace = true
+zeroize.workspace = true
+
+# In a browser, a worker or Node, randomness comes from crypto.getRandomValues.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+
+[dev-dependencies]
+# The vector tests sign with a fixed aux, exactly as Heartwood's own tests do. A dev-dependency
+# feature never reaches a normal build (tools/check-deps.sh checks it).
+heartwood-crypto = { workspace = true, features = ["fixed-aux"] }
+hex.workspace = true

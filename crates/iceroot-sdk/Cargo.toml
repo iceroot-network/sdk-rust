@@ -1,0 +1,15 @@
+[package]
+name = "iceroot-sdk"
+description = "The IceRoot SDK for Rust: the one crate applications depend on"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+iceroot-sdk-core.workspace = true

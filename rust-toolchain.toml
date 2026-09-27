@@ -1,0 +1,6 @@
+# The toolchain Heartwood Core is built and checked with.
+[toolchain]
+channel = "1.98.0"
+components = ["clippy", "rustfmt"]
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"

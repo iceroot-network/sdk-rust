@@ -77,12 +77,23 @@ https://github.com/iceroot-network/heartwood-core at 10d0619b3f97639c205353b4412
     THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDERS AND CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS OFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ====================================================================================================
-Third-party Rust code (169)
+Third-party Rust code (181)
 ====================================================================================================
 
 Each crate is listed with its version, its licence as its authors state it and, where they offer
 a choice, the licence it is used under here, its source, and the copyright lines of its
 licence files (or, where they have none, its authors). The licence texts are at the end.
+
+aead 0.6.1
+  Licence: MIT OR Apache-2.0 (used under Apache-2.0)
+  Source: https://crates.io/crates/aead/0.6.1, https://github.com/RustCrypto/traits
+  Copyright (c) 2019-2026 The RustCrypto Project Developers
+  Copyright (c) 2019 MobileCoin, LLC
+
+argon2 0.6.0
+  Licence: MIT OR Apache-2.0 (used under Apache-2.0)
+  Source: https://crates.io/crates/argon2/0.6.0, https://github.com/RustCrypto/password-hashes
+  Copyright (c) 2021-2026 The RustCrypto Project Developers
 
 atomic-waker 1.1.2
   Licence: Apache-2.0 OR MIT (used under Apache-2.0)
@@ -115,10 +126,23 @@ base64 0.23.1
   Source: https://crates.io/crates/base64/0.23.1, https://github.com/marshallpierce/rust-base64
   Copyright (c) 2025 Alice Maz, Marshall Pierce
 
+base64ct 1.8.3
+  Licence: Apache-2.0 OR MIT (used under Apache-2.0)
+  Source: https://crates.io/crates/base64ct/1.8.3, https://github.com/RustCrypto/formats
+  Copyright (c) 2014 Steve "Sc00bz" Thomas (steve at tobtu dot com)
+  Copyright (c) 2021-2025 The RustCrypto Project Developers
+
 bitflags 2.13.2
   Licence: MIT OR Apache-2.0 (used under Apache-2.0)
   Source: https://crates.io/crates/bitflags/2.13.2, https://github.com/bitflags/bitflags
   Copyright (c) 2014 The Rust Project Developers
+
+blake2 0.11.0
+  Licence: MIT OR Apache-2.0 (used under Apache-2.0)
+  Source: https://crates.io/crates/blake2/0.11.0, https://github.com/RustCrypto/hashes
+  Copyright (c) 2017-2026 The RustCrypto Project Developers
+  Copyright (c) 2017 Artyom Pavlov
+  Copyright (c) 2015-2016 The blake2-rfc Developers, Cesar Barros
 
 block-buffer 0.12.1
   Licence: MIT OR Apache-2.0 (used under Apache-2.0)
@@ -149,6 +173,16 @@ chacha20 0.10.2
   Licence: MIT OR Apache-2.0 (used under Apache-2.0)
   Source: https://crates.io/crates/chacha20/0.10.2, https://github.com/RustCrypto/stream-ciphers
   Copyright (c) 2019-2026 The RustCrypto Project Developers
+
+chacha20poly1305 0.11.0
+  Licence: Apache-2.0 OR MIT (used under Apache-2.0)
+  Source: https://crates.io/crates/chacha20poly1305/0.11.0, https://github.com/RustCrypto/AEADs
+  Copyright (c) 2019-2026 The RustCrypto Project Developers
+
+cipher 0.5.2
+  Licence: MIT OR Apache-2.0 (used under Apache-2.0)
+  Source: https://crates.io/crates/cipher/0.5.2, https://github.com/RustCrypto/traits
+  Copyright (c) 2016-2025 RustCrypto Developers
 
 cmov 0.5.4
   Licence: Apache-2.0 OR MIT (used under Apache-2.0)
@@ -362,6 +396,12 @@ indexmap 2.14.2
   Copyright (c) 2016--2017
   Authors: the indexmap developers (no copyright line in the package)
 
+inout 0.2.2
+  Licence: MIT OR Apache-2.0 (used under Apache-2.0)
+  Source: https://crates.io/crates/inout/0.2.2, https://github.com/RustCrypto/utils
+  Copyright (c) 2022-2025 The RustCrypto Project Developers
+  Copyright (c) 2022 Artyom Pavlov
+
 ipnet 2.12.2
   Licence: MIT OR Apache-2.0 (used under Apache-2.0)
   Source: https://crates.io/crates/ipnet/2.12.2, https://github.com/krisprice/ipnet
@@ -438,6 +478,11 @@ openssl-probe 0.2.1
   Source: https://crates.io/crates/openssl-probe/0.2.1, https://github.com/rustls/openssl-probe
   Copyright (c) 2014 Alex Crichton
 
+password-hash 0.6.1
+  Licence: MIT OR Apache-2.0 (used under Apache-2.0)
+  Source: https://crates.io/crates/password-hash/0.6.1, https://github.com/RustCrypto/traits
+  Copyright (c) 2020-2026 RustCrypto Developers
+
 pbkdf2 0.13.0
   Licence: MIT OR Apache-2.0 (used under Apache-2.0)
   Source: https://crates.io/crates/pbkdf2/0.13.0, https://github.com/RustCrypto/password-hashes
@@ -449,10 +494,20 @@ percent-encoding 2.3.2
   Source: https://crates.io/crates/percent-encoding/2.3.2, https://github.com/servo/rust-url/
   Copyright (c) 2013-2025 The rust-url developers
 
+phc 0.6.1
+  Licence: Apache-2.0 OR MIT (used under Apache-2.0)
+  Source: https://crates.io/crates/phc/0.6.1, https://github.com/RustCrypto/formats
+  Copyright (c) 2021-2026 The RustCrypto Project Developers
+
 pin-project-lite 0.2.17
   Licence: Apache-2.0 OR MIT (used under Apache-2.0)
   Source: https://crates.io/crates/pin-project-lite/0.2.17, https://github.com/taiki-e/pin-project-lite
   Authors: the pin-project-lite developers (no copyright line in the package)
+
+poly1305 0.9.1
+  Licence: Apache-2.0 OR MIT (used under Apache-2.0)
+  Source: https://crates.io/crates/poly1305/0.9.1, https://github.com/RustCrypto/universal-hashes
+  Copyright (c) 2015-2026 The RustCrypto Project Developers
 
 potential_utf 0.1.6
   Licence: Unicode-3.0
@@ -781,6 +836,16 @@ unicode-ident 1.0.26
   Licence: (MIT OR Apache-2.0) AND Unicode-3.0 (used under Apache-2.0 AND Unicode-3.0)
   Source: https://crates.io/crates/unicode-ident/1.0.26, https://github.com/dtolnay/unicode-ident
   Copyright © 1991-2023 Unicode, Inc.
+
+unicode-normalization 0.1.25
+  Licence: MIT OR Apache-2.0 (used under Apache-2.0)
+  Source: https://crates.io/crates/unicode-normalization/0.1.25, https://github.com/unicode-rs/unicode-normalization
+  Copyright (c) 2015 The Rust Project Developers
+
+universal-hash 0.6.1
+  Licence: MIT OR Apache-2.0 (used under Apache-2.0)
+  Source: https://crates.io/crates/universal-hash/0.6.1, https://github.com/RustCrypto/traits
+  Copyright (c) 2019-2025 RustCrypto Developers
 
 untrusted 0.9.0
   Licence: ISC

@@ -483,6 +483,7 @@ dependencies = [
  "hex",
  "hmac",
  "iceroot-sdk-api",
+ "icu_normalizer",
  "pbkdf2",
  "secp256k1",
  "serde_json",

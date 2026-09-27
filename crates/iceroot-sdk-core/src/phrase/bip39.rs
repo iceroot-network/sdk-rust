@@ -9,8 +9,8 @@
 //! from the canonical phrase, the list's own words joined by single spaces.
 
 use hmac::Hmac;
+use icu_normalizer::DecomposingNormalizerBorrowed;
 use sha2::{Digest, Sha256, Sha512};
-use unicode_normalization::UnicodeNormalization;
 use zeroize::Zeroizing;
 
 use crate::error::{Error, PhraseProblem};
@@ -254,7 +254,7 @@ pub fn mnemonic_to_seed(text: &str, passphrase: &str) -> Result<Seed, Error> {
 pub(crate) fn seed(canonical: &str, passphrase: &str) -> Result<Seed, Error> {
     let mut salt = Zeroizing::new(String::with_capacity(8 + passphrase.len() * 2));
     salt.push_str("mnemonic");
-    salt.extend(passphrase.nfkd());
+    push_nfkd(&mut salt, passphrase);
     let mut out = Zeroizing::new([0u8; 64]);
     // HMAC accepts keys of every length, so PBKDF2 does not fail; the error is still passed on.
     pbkdf2::pbkdf2::<Hmac<Sha512>>(
@@ -272,8 +272,14 @@ pub(crate) fn seed(canonical: &str, passphrase: &str) -> Result<Seed, Error> {
 /// The NFKD form of `text`, wiped when dropped.
 fn nfkd(text: &str) -> Zeroizing<String> {
     let mut out = Zeroizing::new(String::with_capacity(text.len() * 2));
-    out.extend(text.nfkd());
+    push_nfkd(&mut out, text);
     out
+}
+
+/// Append the NFKD form of `text` to `out`.
+fn push_nfkd(out: &mut String, text: &str) {
+    // Writing to a String never fails, so the result carries nothing.
+    let _ = DecomposingNormalizerBorrowed::new_nfkd().normalize_to(text, out);
 }
 
 #[cfg(test)]
@@ -329,6 +335,26 @@ mod tests {
             hex::encode(a.as_bytes()),
             "2e8905819b8723fe2c1d161860e5ee1830318dbf49a83bd451cfb8440c28bd6fa457fe1296106559a3c80937a1c1069be3a3a5bd381ee6260e8d9739fce1f607"
         );
+    }
+
+    /// The normaliser against a second implementation: every code point alone, each after a
+    /// starter and before a combining mark (so that canonical reordering runs), and runs of
+    /// combining marks out of order.
+    #[test]
+    fn nfkd_equals_a_second_implementation() {
+        use unicode_normalization::UnicodeNormalization;
+
+        let check = |text: &str| {
+            let expected: String = text.nfkd().collect();
+            assert_eq!(nfkd(text).as_str(), expected, "NFKD of {text:?}");
+        };
+        for scalar in (0..=0x10ffff_u32).filter_map(char::from_u32) {
+            check(&scalar.to_string());
+            check(&format!("a{scalar}\u{301}\u{316}"));
+        }
+        check("e\u{301}\u{316}\u{327}\u{300}\u{31b}x");
+        check("\u{1100}\u{1161}\u{11a8}\u{ac00}\u{d7a3}");
+        check("\u{fb01}\u{2126}\u{212b}\u{3000}\u{ff21}\u{2460}\u{1d400}");
     }
 
     #[test]

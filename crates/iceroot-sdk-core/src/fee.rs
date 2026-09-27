@@ -11,7 +11,10 @@
 //! - [`FeeChoice::Multiplier`]: the minimum scaled up, in basis points (15,000 is 1.5 times).
 //!
 //! The floor comes from `heartwood-crypto`, the function the node checks every fee with; the SDK
-//! keeps no copy of the formula. Where a network's formats have no floor function, the minimum
+//! keeps no copy of the formula. A node's pool admits a transaction by the same rule whenever the
+//! milestone enables dynamic fees. Where the milestone has none, the floor is zero while a node's
+//! pool applies its own settings (the node configuration's pool fees) or a fixed fee, so such a
+//! network needs an exact fee. Where a network's formats have no floor function, the minimum
 //! falls back to the node's fee statistics for the operation (the largest fee paid recently), and
 //! without statistics the choice fails with [`Error::FeeUnavailable`]; an exact fee still works.
 

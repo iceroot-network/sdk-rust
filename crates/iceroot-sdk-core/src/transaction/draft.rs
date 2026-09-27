@@ -321,6 +321,12 @@ impl Draft {
     /// [`FeeSource::Floor`] only when the form says so and the fee equals the floor computed
     /// here, and [`FeeSource::Explicit`] otherwise, since where any other fee came from cannot be
     /// checked.
+    ///
+    /// The floor, the rules and the token's labels come from the network configuration the
+    /// serialized form carries, which the draft was built under. The pinned network hash identifies
+    /// the chain but does not cover the milestones or the labels of that configuration, so a
+    /// signer that does not trust the context that built the draft judges the fee by its amount,
+    /// not by its source.
     pub fn deserialize(bytes: &[u8], profile: &Profile) -> Result<Draft, Error> {
         let (chain, envelope) = envelope::decode(bytes, profile, EnvelopeKind::Draft)?;
         let data = deserialiser::deserialise(&envelope.transaction).map_err(|error| {

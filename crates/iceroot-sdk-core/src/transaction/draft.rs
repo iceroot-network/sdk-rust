@@ -322,6 +322,7 @@ impl Draft {
                 problem: super::signed::decode_problem(&error),
             }
         })?;
+        envelope::check_network(data.network, &chain)?;
         // The fee is the transaction's own; only its source is taken from the serialized form.
         // The floor is computed again, as everything else the summary shows.
         let source = envelope

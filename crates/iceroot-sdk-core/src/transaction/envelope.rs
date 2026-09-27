@@ -73,6 +73,23 @@ pub(crate) fn invalid(reason: &str) -> Error {
     }
 }
 
+/// `Ok` when a serialized transaction's own network byte, `network`, is the network byte of
+/// `chain`; else [`Error::NetworkMismatch`], as for any other part of the serialized form that
+/// names another network.
+pub(crate) fn check_network(network: u8, chain: &Chain) -> Result<(), Error> {
+    let expected = chain.network_byte();
+    if network == expected {
+        Ok(())
+    } else {
+        Err(Error::NetworkMismatch {
+            problem: MismatchProblem::NetworkByte {
+                expected,
+                actual: network,
+            },
+        })
+    }
+}
+
 impl Envelope {
     /// The serialized form, for `chain`.
     pub(crate) fn encode(&self, chain: &Chain) -> Vec<u8> {

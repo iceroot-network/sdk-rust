@@ -539,6 +539,33 @@ fn serialized_drafts() {
             problem: MismatchProblem::Profile { .. }
         })
     ));
+    // A transaction whose own header names another network, inside a form for this one.
+    let form = String::from_utf8(bytes.clone()).unwrap();
+    let unsigned = iceroot_hex(draft.unsigned_bytes());
+    assert!(unsigned.starts_with("ff035a"), "{unsigned}");
+    let elsewhere = form.replace(&unsigned, &unsigned.replacen("ff035a", "ff031e", 1));
+    assert_eq!(
+        Draft::deserialize(elsewhere.as_bytes(), profile).unwrap_err(),
+        Error::NetworkMismatch {
+            problem: MismatchProblem::NetworkByte {
+                expected: 90,
+                actual: 30
+            }
+        }
+    );
+    let signed_form = String::from_utf8(signed.serialize()).unwrap();
+    let signed_bytes = iceroot_hex(signed.bytes());
+    let signed_elsewhere =
+        signed_form.replace(&signed_bytes, &signed_bytes.replacen("ff035a", "ff031e", 1));
+    assert_eq!(
+        SignedTransaction::deserialize(signed_elsewhere.as_bytes(), profile).unwrap_err(),
+        Error::NetworkMismatch {
+            problem: MismatchProblem::NetworkByte {
+                expected: 90,
+                actual: 30
+            }
+        }
+    );
 
     // The summary is computed from the transaction's own fields.
     let text = String::from_utf8(bytes.clone()).unwrap();

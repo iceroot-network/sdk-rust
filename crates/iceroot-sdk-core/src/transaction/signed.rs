@@ -3,6 +3,7 @@
 use heartwood_crypto::Transaction;
 use heartwood_crypto::errors::{BuildError, DecodeError, EncodeError, MemoError};
 use heartwood_crypto::identities::PublicKey;
+use heartwood_crypto::transactions::deserialiser;
 use heartwood_crypto::transactions::types::Memo;
 use serde_json::Value;
 
@@ -147,9 +148,16 @@ impl SignedTransaction {
     }
 
     /// The signed transaction in `bytes`, for `profile`, whose network hash must be pinned. It
-    /// must verify.
+    /// must verify. Data made for another profile or network is refused with
+    /// [`Error::NetworkMismatch`].
     pub fn deserialize(bytes: &[u8], profile: &Profile) -> Result<SignedTransaction, Error> {
         let (chain, envelope) = envelope::decode(bytes, profile, EnvelopeKind::Signed)?;
+        let data = deserialiser::deserialise(&envelope.transaction).map_err(|error| {
+            Error::InvalidTransaction {
+                problem: decode_problem(&error),
+            }
+        })?;
+        envelope::check_network(data.network, &chain)?;
         let signed = SignedTransaction::decode(&chain, &envelope.transaction, envelope.height)?;
         if !signed.is_verified() {
             return Err(Error::InvalidTransaction {

@@ -52,6 +52,8 @@ pub enum ErrorCode {
     InvalidSignIn,
     /// A request to a node could not be built from its arguments.
     InvalidRequest,
+    /// A network profile is incomplete or malformed.
+    InvalidProfile,
     /// No node could be reached.
     NodeUnavailable,
     /// The node refused the request for its rate limit.
@@ -105,6 +107,7 @@ impl ErrorCode {
             ErrorCode::InvalidTransaction => "InvalidTransaction",
             ErrorCode::InvalidSignIn => "InvalidSignIn",
             ErrorCode::InvalidRequest => "InvalidRequest",
+            ErrorCode::InvalidProfile => "InvalidProfile",
             ErrorCode::NodeUnavailable => "NodeUnavailable",
             ErrorCode::RateLimited => "RateLimited",
             ErrorCode::Timeout => "Timeout",
@@ -141,7 +144,8 @@ impl ErrorCode {
             | ErrorCode::InvalidDraft
             | ErrorCode::InvalidTransaction
             | ErrorCode::InvalidSignIn
-            | ErrorCode::InvalidRequest => ErrorGroup::Input,
+            | ErrorCode::InvalidRequest
+            | ErrorCode::InvalidProfile => ErrorGroup::Input,
             ErrorCode::NodeUnavailable
             | ErrorCode::RateLimited
             | ErrorCode::Timeout
@@ -265,8 +269,9 @@ pub enum Error {
         /// The rule it breaks.
         reason: &'static str,
     },
-    /// No fee can be resolved: the exact fee floor is not available and the node reported no fee
-    /// statistics for the operation. An explicit fee still works.
+    /// No fee can be resolved for the operation: its exact fee floor is above the largest fee a
+    /// transaction can carry, or the network's formats have no floor function and the node
+    /// reported no fee statistics for it. An explicit fee still works.
     #[error("no fee can be resolved for {operation}; pass an explicit fee")]
     FeeUnavailable {
         /// The operation.
@@ -296,6 +301,13 @@ pub enum Error {
     InvalidRequest {
         /// What is wrong.
         reason: String,
+    },
+    /// A network profile is incomplete or malformed, such as a network hash to pin that is not 64
+    /// hex digits.
+    #[error("invalid profile: {reason}")]
+    InvalidProfile {
+        /// What is wrong.
+        reason: &'static str,
     },
     /// No node could be reached.
     #[error("no node is available: {reason}")]
@@ -408,6 +420,7 @@ impl Error {
             Error::InvalidTransaction { .. } => ErrorCode::InvalidTransaction,
             Error::InvalidSignIn { .. } => ErrorCode::InvalidSignIn,
             Error::InvalidRequest { .. } => ErrorCode::InvalidRequest,
+            Error::InvalidProfile { .. } => ErrorCode::InvalidProfile,
             Error::NodeUnavailable { .. } => ErrorCode::NodeUnavailable,
             Error::RateLimited { .. } => ErrorCode::RateLimited,
             Error::Timeout => ErrorCode::Timeout,
@@ -449,7 +462,9 @@ impl Error {
             }
             Error::InvalidVote { problem } => problem.details(),
             Error::InvalidName { name, reason } => json!({ "name": name, "reason": reason }),
-            Error::InvalidFee { reason } => json!({ "reason": reason }),
+            Error::InvalidFee { reason } | Error::InvalidProfile { reason } => {
+                json!({ "reason": reason })
+            }
             Error::FeeUnavailable { operation } => json!({ "operation": operation.as_str() }),
             Error::InvalidDraft { reason }
             | Error::InvalidRequest { reason }

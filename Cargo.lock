@@ -319,7 +319,7 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 [[package]]
 name = "heartwood-crypto"
 version = "0.1.0"
-source = "git+ssh://git@github-iceroot/iceroot-network/heartwood-core.git?rev=c01da1e#c01da1e7676328499de2a04ffc795244f5a4d54b"
+source = "git+ssh://git@github-iceroot/iceroot-network/heartwood-core.git?tag=crypto-v0.1.0#10d0619b3f97639c205353b4412f7bd7f77b4547"
 dependencies = [
  "bs58",
  "getrandom 0.4.3",
@@ -483,6 +483,7 @@ dependencies = [
  "hex",
  "hmac",
  "iceroot-sdk-api",
+ "iceroot-sdk-core",
  "pbkdf2",
  "secp256k1",
  "serde_json",

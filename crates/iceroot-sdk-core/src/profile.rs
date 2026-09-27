@@ -426,11 +426,12 @@ impl Profile {
         self
     }
 
-    /// The same profile with the network hash `nethash` pinned (64 hex digits).
+    /// The same profile with the network hash `nethash` pinned (64 hex digits, in either case).
+    /// Anything else is refused with [`Error::InvalidProfile`].
     pub fn with_nethash(mut self, nethash: &str) -> Result<Profile, Error> {
         if nethash.len() != 64 || !nethash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return Err(Error::BadResponse {
-                reason: "a network hash is 64 hex digits".to_owned(),
+            return Err(Error::InvalidProfile {
+                reason: "a network hash is 64 hex digits",
             });
         }
         self.chain.nethash = Some(nethash.to_ascii_lowercase());
@@ -610,10 +611,17 @@ mod tests {
         assert_eq!(profile.chain().nethash.as_deref(), Some(hash.as_str()));
         assert!(profile.accepts_nethash(&hash));
         assert!(!profile.accepts_nethash(&"cd".repeat(32)));
-        assert!(
-            Profile::devnet(DevnetOptions::default())
-                .with_nethash("12")
-                .is_err()
-        );
+        for bad in ["12", &"zz".repeat(32), &"ab".repeat(33)] {
+            let error = Profile::devnet(DevnetOptions::default())
+                .with_nethash(bad)
+                .unwrap_err();
+            assert_eq!(
+                error,
+                Error::InvalidProfile {
+                    reason: "a network hash is 64 hex digits"
+                }
+            );
+            assert_eq!(error.code().group(), crate::error::ErrorGroup::Input);
+        }
     }
 }

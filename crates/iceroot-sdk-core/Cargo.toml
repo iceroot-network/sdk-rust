@@ -14,9 +14,10 @@ workspace = true
 [features]
 default = []
 # Test seam: `Aux::fixed`, so that bindings (WebAssembly, later Go) can sign with chosen auxiliary
-# bytes and compare their signatures with native Rust byte for byte. Only the test builds of the
-# bindings enable it; no published build does, and tools/check-deps.sh refuses it in the default
-# build.
+# bytes and compare their signatures with native Rust byte for byte, and
+# `message::test_seam::sign_digest`, so that the vector runners can compare the reference's raw
+# BIP340 signatures. Only test builds enable it; no published build does, and tools/check-deps.sh
+# refuses it in the default build.
 fixed-aux = ["heartwood-crypto/fixed-aux"]
 
 [dependencies]
@@ -39,7 +40,9 @@ zeroize.workspace = true
 getrandom = { workspace = true, features = ["wasm_js"] }
 
 [dev-dependencies]
-# The vector tests sign with a fixed aux, exactly as Heartwood's own tests do. A dev-dependency
-# feature never reaches a normal build (tools/check-deps.sh checks it).
+# The vector tests sign with a fixed aux, exactly as Heartwood's own tests do, through this
+# crate's own test seam. A dev-dependency feature never reaches a normal build
+# (tools/check-deps.sh checks it).
 heartwood-crypto = { workspace = true, features = ["fixed-aux"] }
+iceroot-sdk-core = { path = ".", features = ["fixed-aux"] }
 hex.workspace = true

@@ -21,7 +21,7 @@ use crate::address::Address;
 use crate::amount::Amount;
 use crate::chain::Chain;
 use crate::error::{AddressProblem, AmountProblem, Error, TransactionProblem, VoteProblem};
-use crate::fee::{self, FeeStatistics, ResolvedFee};
+use crate::fee::{self, FeeSource, FeeStatistics, ResolvedFee};
 use crate::keys::Account;
 use crate::profile::Profile;
 use crate::rules::Rules;
@@ -315,6 +315,12 @@ impl Draft {
     /// The draft in `bytes`, for `profile`, whose network hash must be pinned. Data made for
     /// another profile or network is refused with [`Error::NetworkMismatch`], and the summary is
     /// computed again from the transaction's own fields.
+    ///
+    /// The fee is the transaction's own, and its floor is computed again at the draft's height.
+    /// The fee's source is not taken on trust from the serialized form: it reads
+    /// [`FeeSource::Floor`] only when the form says so and the fee equals the floor computed
+    /// here, and [`FeeSource::Explicit`] otherwise, since where any other fee came from cannot be
+    /// checked.
     pub fn deserialize(bytes: &[u8], profile: &Profile) -> Result<Draft, Error> {
         let (chain, envelope) = envelope::decode(bytes, profile, EnvelopeKind::Draft)?;
         let data = deserialiser::deserialise(&envelope.transaction).map_err(|error| {
@@ -323,26 +329,40 @@ impl Draft {
             }
         })?;
         envelope::check_network(data.network, &chain)?;
-        // The fee is the transaction's own; only its source is taken from the serialized form.
-        // The floor is computed again, as everything else the summary shows.
-        let source = envelope
+        let claimed = envelope
             .fee
             .ok_or_else(|| envelope::invalid("no fee"))?
             .source;
-        let fee = ResolvedFee {
-            amount: Amount::from(data.fee),
-            source,
+        let amount = Amount::from(data.fee);
+        let placeholder = ResolvedFee {
+            amount,
+            source: FeeSource::Explicit,
             floor: None,
         };
-        let mut draft = Draft::from_data(chain, envelope.height, data, fee, envelope.second_key)?;
+        let mut draft = Draft::from_data(
+            chain,
+            envelope.height,
+            data,
+            placeholder,
+            envelope.second_key,
+        )?;
         if draft.unsigned != envelope.transaction {
             return Err(Error::InvalidTransaction {
                 problem: TransactionProblem::NotCanonical,
             });
         }
-        draft.fee.floor = draft
+        let floor = draft
             .chain
             .fee_floor(draft.kind(), draft.size(), draft.height);
+        let source = match claimed {
+            FeeSource::Floor if floor == Some(amount) => FeeSource::Floor,
+            _ => FeeSource::Explicit,
+        };
+        draft.fee = ResolvedFee {
+            amount,
+            source,
+            floor,
+        };
         Ok(draft)
     }
 }

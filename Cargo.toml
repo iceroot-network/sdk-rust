@@ -41,10 +41,15 @@ heartwood-crypto = { git = "ssh://git@github-iceroot/iceroot-network/heartwood-c
 secp256k1 = { version = "=0.33.1", default-features = false, features = ["std"] }
 
 # Recovery phrases and wallet derivation: SHA-256 and SHA-512 (digest 0.11, as heartwood-crypto),
-# HMAC-SHA512, PBKDF2 and the NFKD normalisation BIP39 requires.
+# HMAC-SHA512, PBKDF2 and the NFKD normalisation BIP39 requires. The normaliser is ICU4X's, with its
+# data compiled in: the same crate the `http` feature already brings in through URL parsing, and
+# about half the size of the alternatives in the WebAssembly module.
 sha2 = "0.11"
 hmac = "0.13"
 pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
+icu_normalizer = { version = "2.3", default-features = false, features = ["compiled_data"] }
+# Tests only: a second NFKD implementation that the normaliser is compared with, code point by code
+# point.
 unicode-normalization = "0.1.25"
 
 zeroize = "1.9"

@@ -1,0 +1,123 @@
+name: SDK checks
+
+on:
+  pull_request:
+    branches: [dev, prod]
+  push:
+    branches: [prod]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: sdk-rust-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # libsecp256k1 is C: the wasm32 build compiles it with clang.
+  CC_wasm32_unknown_unknown: clang-18
+  AR_wasm32_unknown_unknown: llvm-ar-18
+
+jobs:
+  production-merge:
+    if: github.event_name == 'push' && github.event.created == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Require the merged dev to prod pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            count=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls?per_page=100" --jq '[.[] | select(.merged_at != null and .merge_commit_sha == env.GITHUB_SHA and .base.ref == "prod" and .head.ref == "dev" and .base.repo.full_name == env.GITHUB_REPOSITORY and .head.repo.full_name == env.GITHUB_REPOSITORY)] | length')
+            if [ "$count" -gt 0 ]; then exit 0; fi
+            sleep 2
+          done
+          echo "::error::Production CI requires this exact commit to be a merged dev to prod PR in this repository."
+          exit 1
+
+  checks:
+    needs: production-merge
+    # Pull requests run without the production gate; pushes to prod only after it.
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || needs.production-merge.result == 'success') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: '1.98.0'
+          components: rustfmt,clippy
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.21.1'
+      - name: Install clang and llvm-ar for the wasm32 build
+        run: |
+          command -v clang-18 >/dev/null && command -v llvm-ar-18 >/dev/null ||
+            (sudo apt-get update && sudo apt-get install -y --no-install-recommends clang-18 llvm-18)
+      - name: Read access to heartwood-core
+        env:
+          HEARTWOOD_DEPLOY_KEY: ${{ secrets.HEARTWOOD_DEPLOY_KEY }}
+        run: tools/ci/heartwood-access.sh
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Formatting
+        run: cargo fmt --all -- --check
+      - name: Lints, native, with every feature
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: Lints, wasm32
+        run: cargo clippy --locked --workspace --lib --target wasm32-unknown-unknown -- -D warnings
+      - name: Tests, with Heartwood Core's vectors and the SDK's vectors
+        run: cargo test --locked --workspace --all-features
+      - name: Documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --workspace --all-features --no-deps
+      - name: Build for wasm32
+        run: cargo build --locked --workspace --lib --target wasm32-unknown-unknown --release
+      - name: Dependency guard
+        run: tools/check-deps.sh
+      - name: NOTICE matches the dependency tree
+        run: node tools/notice.mjs --check
+
+  # Heartwood Core's dev branch, where the next heartwood-crypto tag is prepared. A failure here
+  # warns before the next tag; it does not block a merge.
+  heartwood-canary:
+    needs: production-merge
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || needs.production-merge.result == 'success') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: sdk-rust
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: iceroot-network/heartwood-core
+          ref: dev
+          path: heartwood-core
+          ssh-key: ${{ secrets.HEARTWOOD_DEPLOY_KEY }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: '1.98.0'
+      - name: Read access to heartwood-core
+        env:
+          HEARTWOOD_DEPLOY_KEY: ${{ secrets.HEARTWOOD_DEPLOY_KEY }}
+        run: sdk-rust/tools/ci/heartwood-access.sh
+      - name: Tests against heartwood-core dev
+        working-directory: sdk-rust
+        run: |
+          set -euo pipefail
+          url=$(sed -n 's/^heartwood-crypto = { git = "\([^"]*\)".*/\1/p' Cargo.toml)
+          test -n "$url"
+          cargo test --workspace --all-features \
+            --config "patch.'$url'.heartwood-crypto.path='$GITHUB_WORKSPACE/heartwood-core/packages/crypto'"

@@ -27,12 +27,12 @@ heartwood-crypto.workspace = true
 # (src/node.rs). No I/O and no HTTP: the client's `http` feature stays off here.
 iceroot-sdk-api.workspace = true
 hmac.workspace = true
+icu_normalizer.workspace = true
 pbkdf2.workspace = true
 secp256k1.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
-unicode-normalization.workspace = true
 zeroize.workspace = true
 
 # In a browser, a worker or Node, randomness comes from crypto.getRandomValues.
@@ -46,3 +46,4 @@ getrandom = { workspace = true, features = ["wasm_js"] }
 heartwood-crypto = { workspace = true, features = ["fixed-aux"] }
 iceroot-sdk-core = { path = ".", features = ["fixed-aux"] }
 hex.workspace = true
+unicode-normalization.workspace = true

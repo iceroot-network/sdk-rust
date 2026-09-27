@@ -9,8 +9,8 @@
 //! from the canonical phrase, the list's own words joined by single spaces.
 
 use hmac::Hmac;
+use icu_normalizer::DecomposingNormalizerBorrowed;
 use sha2::{Digest, Sha256, Sha512};
-use unicode_normalization::UnicodeNormalization;
 use zeroize::Zeroizing;
 
 use crate::error::{Error, PhraseProblem};
@@ -24,40 +24,64 @@ const WORD_COUNT: usize = 2048;
 /// The PBKDF2 rounds of the seed.
 const SEED_ROUNDS: u32 = 2048;
 
-/// The words of [`WORDLIST`], split at compile time. A list without exactly 2,048 non-empty lines
-/// fails the build.
-static WORDS: [&str; WORD_COUNT] = split_lines(WORDLIST);
+/// Where each word of [`WORDLIST`] starts, and after the last entry the length of the list plus
+/// one: word `i` is `WORDLIST[OFFSETS[i]..OFFSETS[i + 1] - 1]`, without its line break. Computed at
+/// compile time; a list without exactly 2,048 non-empty lines fails the build. Two bytes per word
+/// instead of a string slice each keeps the WebAssembly module small.
+static OFFSETS: [u16; WORD_COUNT + 1] = line_offsets(WORDLIST);
 
 #[allow(
     clippy::indexing_slicing,
     reason = "evaluated at compile time, where an index out of range is a build error"
 )]
-const fn split_lines(text: &'static str) -> [&'static str; WORD_COUNT] {
-    let mut words = [""; WORD_COUNT];
-    let mut rest = text;
+const fn line_offsets(text: &str) -> [u16; WORD_COUNT + 1] {
+    let bytes = text.as_bytes();
+    assert!(
+        bytes.len() < u16::MAX as usize,
+        "the word list is too long for 16-bit offsets"
+    );
+    let mut offsets = [0u16; WORD_COUNT + 1];
     let mut count = 0;
-    while count < WORD_COUNT {
-        let bytes = rest.as_bytes();
-        let mut len = 0;
-        while len < bytes.len() && bytes[len] != b'\n' {
-            len += 1;
+    let mut start = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] == b'\n' {
+            assert!(at > start, "the word list has an empty line");
+            assert!(
+                count < WORD_COUNT,
+                "the word list has more than 2,048 lines"
+            );
+            count += 1;
+            offsets[count] = (at + 1) as u16;
+            start = at + 1;
         }
-        let (word, tail) = rest.split_at(len);
-        assert!(!word.is_empty(), "the word list has an empty line");
-        words[count] = word;
-        rest = tail.split_at(if tail.is_empty() { 0 } else { 1 }).1;
-        count += 1;
+        at += 1;
     }
-    assert!(rest.is_empty(), "the word list has more than 2,048 lines");
-    words
+    // A last line without a line break ends at the end of the text.
+    if start < bytes.len() {
+        assert!(
+            count < WORD_COUNT,
+            "the word list has more than 2,048 lines"
+        );
+        count += 1;
+        offsets[count] = (bytes.len() + 1) as u16;
+    }
+    assert!(
+        count == WORD_COUNT,
+        "the word list has fewer than 2,048 lines"
+    );
+    offsets
 }
 
 /// The word with the 11-bit index `index`.
 pub fn word(index: u16) -> &'static str {
-    WORDS
-        .get(usize::from(index) & (WORD_COUNT - 1))
-        .copied()
-        .unwrap_or_default()
+    let index = usize::from(index) & (WORD_COUNT - 1);
+    match (OFFSETS.get(index), OFFSETS.get(index + 1)) {
+        (Some(&start), Some(&end)) => WORDLIST
+            .get(usize::from(start)..usize::from(end).saturating_sub(1))
+            .unwrap_or_default(),
+        _ => "",
+    }
 }
 
 /// The index of `word` in the list, comparing ASCII letters without regard to case.
@@ -65,14 +89,20 @@ pub fn index_of(word: &str) -> Option<u16> {
     if !word.is_ascii() {
         return None;
     }
-    WORDS
-        .binary_search_by(|candidate| {
-            candidate
-                .bytes()
-                .cmp(word.bytes().map(|byte| byte.to_ascii_lowercase()))
-        })
-        .ok()
-        .and_then(|index| u16::try_from(index).ok())
+    // The list is sorted: a binary search over the indexes.
+    let (mut low, mut high) = (0u16, WORD_COUNT as u16);
+    while low < high {
+        let middle = low + (high - low) / 2;
+        match self::word(middle)
+            .bytes()
+            .cmp(word.bytes().map(|byte| byte.to_ascii_lowercase()))
+        {
+            std::cmp::Ordering::Less => low = middle + 1,
+            std::cmp::Ordering::Greater => high = middle,
+            std::cmp::Ordering::Equal => return Some(middle),
+        }
+    }
+    None
 }
 
 /// The words of the English mnemonic of `entropy`, which must be 16, 20, 24, 28 or 32 bytes long
@@ -224,7 +254,7 @@ pub fn mnemonic_to_seed(text: &str, passphrase: &str) -> Result<Seed, Error> {
 pub(crate) fn seed(canonical: &str, passphrase: &str) -> Result<Seed, Error> {
     let mut salt = Zeroizing::new(String::with_capacity(8 + passphrase.len() * 2));
     salt.push_str("mnemonic");
-    salt.extend(passphrase.nfkd());
+    push_nfkd(&mut salt, passphrase);
     let mut out = Zeroizing::new([0u8; 64]);
     // HMAC accepts keys of every length, so PBKDF2 does not fail; the error is still passed on.
     pbkdf2::pbkdf2::<Hmac<Sha512>>(
@@ -242,8 +272,14 @@ pub(crate) fn seed(canonical: &str, passphrase: &str) -> Result<Seed, Error> {
 /// The NFKD form of `text`, wiped when dropped.
 fn nfkd(text: &str) -> Zeroizing<String> {
     let mut out = Zeroizing::new(String::with_capacity(text.len() * 2));
-    out.extend(text.nfkd());
+    push_nfkd(&mut out, text);
     out
+}
+
+/// Append the NFKD form of `text` to `out`.
+fn push_nfkd(out: &mut String, text: &str) {
+    // Writing to a String never fails, so the result carries nothing.
+    let _ = DecomposingNormalizerBorrowed::new_nfkd().normalize_to(text, out);
 }
 
 #[cfg(test)]
@@ -258,13 +294,16 @@ mod tests {
             hex::encode(&<[u8; 32]>::from(Sha256::digest(WORDLIST.as_bytes()))),
             "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda"
         );
-        assert_eq!(WORDS.first(), Some(&"abandon"));
-        assert_eq!(WORDS.last(), Some(&"zoo"));
-        assert!(WORDS.windows(2).all(|pair| pair[0] < pair[1]), "sorted");
-        for (index, word) in WORDS.iter().enumerate() {
+        let words: Vec<&str> = (0..WORD_COUNT as u16).map(word).collect();
+        assert_eq!(words, WORDLIST.lines().collect::<Vec<_>>());
+        assert_eq!(words.first(), Some(&"abandon"));
+        assert_eq!(words.last(), Some(&"zoo"));
+        assert!(words.windows(2).all(|pair| pair[0] < pair[1]), "sorted");
+        for (index, word) in words.iter().enumerate() {
             assert_eq!(index_of(word), Some(index as u16));
             assert_eq!(index_of(&word.to_uppercase()), Some(index as u16));
         }
+        assert_eq!(word(2048), "abandon", "an index wraps to 11 bits");
         assert_eq!(index_of("abandonx"), None);
         assert_eq!(index_of("ábandon"), None);
         assert_eq!(index_of(""), None);
@@ -296,6 +335,26 @@ mod tests {
             hex::encode(a.as_bytes()),
             "2e8905819b8723fe2c1d161860e5ee1830318dbf49a83bd451cfb8440c28bd6fa457fe1296106559a3c80937a1c1069be3a3a5bd381ee6260e8d9739fce1f607"
         );
+    }
+
+    /// The normaliser against a second implementation: every code point alone, each after a
+    /// starter and before a combining mark (so that canonical reordering runs), and runs of
+    /// combining marks out of order.
+    #[test]
+    fn nfkd_equals_a_second_implementation() {
+        use unicode_normalization::UnicodeNormalization;
+
+        let check = |text: &str| {
+            let expected: String = text.nfkd().collect();
+            assert_eq!(nfkd(text).as_str(), expected, "NFKD of {text:?}");
+        };
+        for scalar in (0..=0x10ffff_u32).filter_map(char::from_u32) {
+            check(&scalar.to_string());
+            check(&format!("a{scalar}\u{301}\u{316}"));
+        }
+        check("e\u{301}\u{316}\u{327}\u{300}\u{31b}x");
+        check("\u{1100}\u{1161}\u{11a8}\u{ac00}\u{d7a3}");
+        check("\u{fb01}\u{2126}\u{212b}\u{3000}\u{ff21}\u{2460}\u{1d400}");
     }
 
     #[test]

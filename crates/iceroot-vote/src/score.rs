@@ -359,20 +359,48 @@ pub(crate) fn declared_key(value: Option<&String>) -> (Option<String>, Option<St
     }
 }
 
-/// [`RANK_BAND_SIZE`] as a length.
-const BAND_SIZE: usize = RANK_BAND_SIZE as usize;
-
 /// Diversity's rank bands over one snapshot. The validators that meet Diversity's criteria, in
 /// rank order (validators without a rank last, then by name), are split into
 /// `⌈n / RANK_BAND_SIZE⌉` bands: the validator at position `i`, from 0, is in band
 /// `⌊i × bands / n⌋`, so band sizes differ by at most one. A validator outside the pool is in the
 /// band of the position it would take.
+///
+/// The band arithmetic is done in 64-bit integers, never in `usize`, so that 32-bit targets such
+/// as WebAssembly and 64-bit native builds compute the same bands for any pool: the products stay
+/// below 2^64 for every pool of fewer than 2^32 validators.
 #[derive(Debug)]
 pub(crate) struct Bands {
     /// The pool's ranks and names, in rank order.
     order: Vec<(Option<u32>, String)>,
     /// Each band's label.
     labels: Vec<Option<String>>,
+}
+
+/// A length or position as a 64-bit integer.
+fn to_u64(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
+}
+
+/// A 64-bit position or band as an index.
+fn to_usize(value: u64) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
+}
+
+/// The number of rank bands of a pool of `n` validators: `⌈n / RANK_BAND_SIZE⌉`.
+fn band_count(n: u64) -> u64 {
+    n.div_ceil(u64::from(RANK_BAND_SIZE))
+}
+
+/// The position of the first validator of `band`, from 0, among `n` validators in `count` bands:
+/// `⌈band × n / count⌉`. `band_start(count, ..)` is `n`.
+fn band_start(band: u64, n: u64, count: u64) -> u64 {
+    band.saturating_mul(n).div_ceil(count.max(1))
+}
+
+/// The band of the validator at `position`, from 0, among `n` validators in `count` bands:
+/// `⌊position × count / n⌋`.
+fn band_of(position: u64, n: u64, count: u64) -> u64 {
+    position.saturating_mul(count) / n.max(1)
 }
 
 /// The rank order of the bands: rank ascending, validators without a rank last, then names in
@@ -399,12 +427,12 @@ impl Bands {
             .map(|record| (record.rank, record.name.clone()))
             .collect();
         order.sort_by(|a, b| rank_key(a.0, &a.1).cmp(&rank_key(b.0, &b.1)));
-        let n = order.len();
-        let count = n.div_ceil(BAND_SIZE);
+        let n = to_u64(order.len());
+        let count = band_count(n);
         let labels = (0..count)
             .map(|band| {
-                let start = (band * n).div_ceil(count);
-                let end = ((band + 1) * n).div_ceil(count);
+                let start = to_usize(band_start(band, n, count));
+                let end = to_usize(band_start(band + 1, n, count));
                 order.get(start..end).and_then(band_label)
             })
             .collect();
@@ -413,16 +441,17 @@ impl Bands {
 
     /// The band of a validator.
     pub(crate) fn band(&self, record: &ValidatorRecord) -> usize {
-        let n = self.order.len();
+        let n = to_u64(self.order.len());
         if n == 0 {
             return 0;
         }
         let key = rank_key(record.rank, &record.name);
-        let position = self
-            .order
-            .partition_point(|(rank, name)| rank_key(*rank, name) < key)
-            .min(n - 1);
-        position * self.labels.len() / n
+        let position = to_u64(
+            self.order
+                .partition_point(|(rank, name)| rank_key(*rank, name) < key),
+        )
+        .min(n - 1);
+        to_usize(band_of(position, n, to_u64(self.labels.len())))
     }
 
     /// A band's label, as [`Reason::Group`] shows it.
@@ -628,6 +657,56 @@ mod tests {
             labels,
             ["1 to 9", "10 to 17", "18 to 25", "26 to 33", "34 to 41"].map(|l| Some(l.to_owned()))
         );
+    }
+
+    #[test]
+    fn band_arithmetic_is_exact_at_any_size() {
+        // In a 32-bit usize, band × n and position × bands overflow from about 207,000
+        // validators; in 64 bits the bands are exact for every pool below 2^32 validators, so
+        // WebAssembly and native builds agree. Checked against 128-bit arithmetic.
+        let sizes = [
+            1u64,
+            9,
+            10,
+            11,
+            71,
+            65_536,
+            207_243,
+            207_244,
+            1 << 20,
+            1 << 31,
+            u64::from(u32::MAX),
+        ];
+        for n in sizes {
+            let count = band_count(n);
+            assert_eq!(u128::from(count), u128::from(n).div_ceil(10), "{n}");
+            let bands = [0, 1, count / 2, count.saturating_sub(1), count];
+            for band in bands {
+                let exact = (u128::from(band) * u128::from(n)).div_ceil(u128::from(count));
+                assert_eq!(u128::from(band_start(band, n, count)), exact, "{n} {band}");
+                if band < count {
+                    // The first validator of a band is in it, and the one before is not.
+                    let start = band_start(band, n, count);
+                    assert_eq!(band_of(start, n, count), band, "{n} {band}");
+                    if start > 0 {
+                        assert_eq!(band_of(start - 1, n, count), band - 1, "{n} {band}");
+                    }
+                }
+            }
+            assert_eq!(band_start(count, n, count), n);
+            for position in [0, n / 3, n / 2, n - 1] {
+                let exact = u128::from(position) * u128::from(count) / u128::from(n);
+                assert_eq!(
+                    u128::from(band_of(position, n, count)),
+                    exact,
+                    "{n} {position}"
+                );
+            }
+            // Band sizes differ by at most one.
+            let first = band_start(1, n, count) - band_start(0, n, count);
+            let last = n - band_start(count - 1, n, count);
+            assert!(first.abs_diff(last) <= 1, "{n}: {first} and {last}");
+        }
     }
 
     #[test]

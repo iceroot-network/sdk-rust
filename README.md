@@ -26,12 +26,16 @@ Every byte and verdict of a key, address, signature or transaction comes from `h
 
 ## Using it
 
+Releases are tags of this repository, `v0.1.0`, `v0.2.0` and so on, each with a release page on GitHub that states the `heartwood-crypto` revision it contains and what changed. Depend on the crates at a release tag:
+
 ```toml
 [dependencies]
 iceroot-sdk = { git = "https://github.com/iceroot-network/sdk-rust", tag = "v0.1.0" }
 # With the async HTTP transport (native targets only):
 # iceroot-sdk = { git = "https://github.com/iceroot-network/sdk-rust", tag = "v0.1.0", features = ["http"] }
 ```
+
+`Cargo.lock` then records the exact commit. Nothing is published to crates.io yet. JavaScript and TypeScript applications use the package of [sdk-typescript](https://github.com/iceroot-network/sdk-typescript) instead: its release of the same version attaches the npm package tarball, built from this release, which installs by URL with `npm install https://github.com/iceroot-network/sdk-typescript/releases/download/v0.1.0/iceroot-network-sdk-0.1.0.tgz`.
 
 The node API client is `iceroot_sdk::api`. The example in the documentation of `iceroot-sdk` builds and signs a transfer (`cargo doc --open -p iceroot-sdk`).
 
@@ -74,6 +78,14 @@ CC_wasm32_unknown_unknown=clang AR_wasm32_unknown_unknown=llvm-ar \
 `.github/workflows/ci.yml` runs on pull requests to `dev` and `prod` and on pushes to `prod`: formatting, clippy (native with every feature, and wasm32), the tests with both vector sets, the documentation, the wasm32 build, the dependency guard and the `NOTICE` check. A second job builds and tests against Heartwood Core's `dev` branch, so a change there is seen before the next `heartwood-crypto` tag; it does not block a merge.
 
 The workflows read `heartwood-core` with a read-only deploy key of that repository, stored in this repository as the secret `HEARTWOOD_DEPLOY_KEY`; `tools/ci/heartwood-access.sh` installs it for the host alias. Pull requests from forks get no secrets, so their runs stop at that step.
+
+### Releasing
+
+1. Set the version in `Cargo.toml` (`[workspace.package]`) on `dev` and merge `dev` into `prod` through a pull request.
+2. Tag the merge commit on `prod` with `v` and the version, and push the tag: `git tag -a v0.1.0 -m "IceRoot SDK for Rust 0.1.0"`, then `git push origin v0.1.0`.
+3. `.github/workflows/release.yml` runs the tests again and publishes the release page with `tools/release.mjs`, which refuses a tag that differs from the version or is not on `prod`. `node tools/release.mjs --tag v0.1.0 --dry-run` shows the notes without publishing.
+
+Release sdk-rust first: the TypeScript package of the same version is built from this tag.
 
 ### Vectors
 

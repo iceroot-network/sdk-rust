@@ -1,0 +1,45 @@
+[package]
+name = "iceroot-keystore"
+description = "The IceRoot keystore format: a recovery seed encrypted under a password with Argon2id and XChaCha20-Poly1305"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Tests only: `Bounds::TEST`, which lowers the parameter floor to Argon2's own minimums so that
+# the vectors run in milliseconds. The ceilings stay. No published build enables it; the crate's
+# own tests turn it on through the dev-dependency on itself below.
+test-params = []
+
+[dependencies]
+argon2.workspace = true
+base64ct.workspace = true
+chacha20poly1305.workspace = true
+getrandom = { workspace = true, features = ["sys_rng"] }
+rand_core.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+unicode-normalization.workspace = true
+zeroize.workspace = true
+
+# In a browser, a worker or Node, randomness comes from crypto.getRandomValues.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { workspace = true, features = ["sys_rng", "wasm_js"] }
+
+[dev-dependencies]
+iceroot-keystore = { path = ".", features = ["test-params"] }
+hex.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+# The tests in WebAssembly, under Node (wasm-bindgen-test-runner), and their clock.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
+js-sys = "0.3"
+wasm-bindgen-test = "0.3"

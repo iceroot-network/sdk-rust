@@ -28,6 +28,7 @@ indexing_slicing = "deny"
 [workspace.dependencies]
 iceroot-sdk-core = { path = "crates/iceroot-sdk-core" }
 iceroot-sdk-api = { path = "crates/iceroot-sdk-api" }
+iceroot-keystore = { path = "crates/iceroot-keystore" }
 
 # Heartwood Core's byte-exact layer: keys, addresses, signatures, the transaction codec and the
 # milestone rules. No feature is enabled here; tools/check-deps.sh keeps it that way. The consensus
@@ -48,6 +49,13 @@ unicode-normalization = "0.1.25"
 
 zeroize = "1.9"
 getrandom = "0.4"
+rand_core = "0.10"
+
+# The keystore format (iceroot-keystore): Argon2id, XChaCha20-Poly1305 and the text armor's
+# base64url, all pure Rust so that the same code runs natively and in WebAssembly.
+argon2 = { version = "0.6", default-features = false, features = ["alloc", "zeroize"] }
+chacha20poly1305 = { version = "0.11", default-features = false, features = ["zeroize"] }
+base64ct = { version = "1.8", features = ["alloc"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip", "preserve_order", "raw_value"] }
 thiserror = "2"

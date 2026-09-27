@@ -1,9 +1,10 @@
 //! Attempts to game the draw, with bounds on how often the gamed validators are picked.
 //!
 //! Declarations are statements, not verified facts. A validator that invents unique values
-//! must not win near-certain picks, one that declares nothing must not be pushed out, the
-//! validators of a small last rank band must not be favoured, and one very large payer must not
-//! flatten the Maximum Rewards weights of everyone else.
+//! must not win near-certain picks, one that declares nothing must not be pushed out (not even
+//! when every other validator invents unique values), the validators of a small last rank band
+//! must not be favoured, and one very large payer must not flatten the Maximum Rewards weights
+//! of everyone else.
 
 #![allow(
     clippy::unwrap_used,
@@ -207,6 +208,43 @@ fn declaring_nothing_is_not_pushed_out() {
     assert!(silent > 0.8 * uniform, "{silent:.3}");
     for i in (0..80).filter(|i| i % 8 != 0) {
         assert!(rates[i] > 0.6 * uniform, "{}: {:.3}", name(i), rates[i]);
+    }
+}
+
+#[test]
+fn declaring_nothing_costs_at_most_half_when_everyone_else_invents() {
+    // The worst case for silence: 60 validators each declare an operator and a hosting provider
+    // that no one else has, spread over all seven regions, and 6 declare nothing. Each draw can
+    // weigh a declaring validator at most twice as much as a silent one.
+    let regions = ["DE", "US", "BR", "ZA", "AU", "JP", "AQ"];
+    let silent = [4usize, 15, 26, 37, 48, 59];
+    let mut declaring_index = 0;
+    let records: Vec<ValidatorRecord> = (0..66)
+        .map(|i| {
+            let mut record = validator(i, u32::try_from(i + 1).unwrap());
+            if !silent.contains(&i) {
+                let k = declaring_index;
+                declaring_index += 1;
+                record.declarations = declared(
+                    &format!("Solo {k}"),
+                    &format!("Own rack {k}"),
+                    regions[k % regions.len()],
+                );
+            }
+            record
+        })
+        .collect();
+    let s = snapshot(records);
+    let rates = pick_rates(&s, Mode::Diversity);
+    let uniform = 20.0 / 66.0;
+    let quiet = mean(silent.iter().map(|&i| rates[i]));
+    let declaring = mean((0..66).filter(|i| !silent.contains(i)).map(|i| rates[i]));
+    println!("declaring nothing {quiet:.3}, all unique {declaring:.3}, uniform {uniform:.3}");
+    assert!(quiet > 0.5 * declaring, "{quiet:.3} against {declaring:.3}");
+    assert!(quiet > 0.55 * uniform, "{quiet:.3}");
+    assert!(declaring < 1.15 * uniform, "{declaring:.3}");
+    for &i in &silent {
+        assert!(rates[i] > 0.5 * uniform, "{}: {:.3}", name(i), rates[i]);
     }
 }
 

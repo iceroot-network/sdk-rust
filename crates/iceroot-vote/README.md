@@ -23,7 +23,7 @@ Declarations are the validators' own statements, not verified facts, so Diversit
   weight = ⌊ ⌊2^64 / (1 + r)⌋ × (1 + (o + h + g) / 3) ⌋
   ```
 
-So a candidate weighs at most twice as much as a candidate in the same rank band whose declared operator, hosting provider and region are all common or undeclared. Inventing unique values gains at most that factor of two, and declaring nothing costs at most the same, so neither pays off much: among 60 validators on common infrastructure, 5 that declare invented unique values are picked by about 40 % of holders against 30 % for the rest (with an unbounded bonus it was 99 % against 25 %), and among 70 validators that declare nothing and 10 that declare unique values, the silent ones are picked by 24 % of holders against 25 % for a uniform draw (it was 14 %).
+So a candidate weighs at most twice as much as a candidate in the same rank band whose declared operator, hosting provider and region are all common or undeclared. Inventing unique values gains at most that factor of two, and declaring nothing costs at most the same, so neither pays off much: among 60 validators on common infrastructure, 5 that declare invented unique values are picked by about 40 % of holders against 30 % for the rest (with an unbounded bonus it was 99 % against 25 %), and among 70 validators that declare nothing and 10 that declare unique values, the silent ones are picked by 24 % of holders against 25 % for a uniform draw (it was 14 %). The worst case for silence is a pool where every other validator invents unique values: 6 silent validators among 60 such are picked by 18 % of holders, against 32 % for the others and 30 % for a uniform draw. Declaring one's real values is never worse than declaring nothing, since a common value and an undeclared one count the same.
 
 ## How a selection is drawn
 
@@ -75,7 +75,7 @@ for finding in check(&selection, &newer_snapshot)? {
 - a property test: 10,000 random snapshots and vote rules, each with a selection attempted in all four modes; every selection is a valid vote under its rules, the longest start of its draw that fits them, reproducible, drawn from the right pools, within the Diversity weight bound at every pick, and meets its criteria under `check`;
 - reproducibility vectors (`tests/data/select-v1.jsonl`): fixture, account, mode, count, draw and vote rules to the exact selection, some with a tighter size limit;
 - each mode's criteria and weights on a synthetic snapshot of 80 validators (`tests/data/synthetic-80.json`), against pools, weights and rank bands computed independently from the rules above (`synthetic-80.expected.json`);
-- attempts to game the draw, each with bounds on pick frequencies over 2,000 selections: validators that invent unique declarations, a crowd that declares nothing, a small last rank band, and one very large payer (up to a billion times the next best);
+- attempts to game the draw, each with bounds on pick frequencies over 2,000 selections: validators that invent unique declarations, a crowd that declares nothing, a few that declare nothing among validators that all invent unique values, a small last rank band, and one very large payer (up to a billion times the next best);
 - the size limits of both stages, with long names;
 - a devnet-shaped snapshot from relay data (`tests/data/devnet-relay.json`), including a fresh chain where Reliability tops up;
 - top-up and `check` cases.

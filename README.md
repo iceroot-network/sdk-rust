@@ -10,9 +10,11 @@ The SDK is in early development. Releases are tagged here on GitHub; nothing is 
 
 | Crate | What it holds |
 |---|---|
-| `iceroot-sdk` | The one crate applications depend on. It re-exports the others. |
+| `iceroot-sdk` | The one crate applications depend on. It re-exports the others: the keystore behind the feature `keystore`, which is on by default. |
 | `iceroot-sdk-core` | Network profiles and capabilities, the rules and economics in force, BIP39 recovery phrases and hardened key derivation, accounts, addresses, amounts, transaction drafts and signing, serialized drafts, message signing and the sign-in message, and the error type with its stable codes. No input or output: it reads what the node API client decodes (the chain, a draft's nonce, height and second key, submission outcomes) and checks it on the way. |
 | `iceroot-sdk-api` | A sans-IO node API client: it builds each request and decodes each answer into IceRoot-shaped values (accounts, validators, transactions, blocks, node facts), and plans submissions within the pool's limits. The host performs the HTTP exchange; the optional `http` feature adds an async reqwest transport on native targets, and the optional `serde` feature gives every request value and answer the JSON form the SDK's bindings share. See [its README](crates/iceroot-sdk-api/README.md). |
+| `iceroot-vote` | Vote selection for wallets: the four vote modes (Diversity, Reliability, Maximum Rewards, Support Newcomers) that fill a vote from validator data for the holder to review, with the reasons for every pick; the network's vote rules and `validate_vote` for manual votes; and `check`, which reports picks that no longer meet their criteria and never recasts a vote. Pure functions: no I/O, no clock, no floating point. See [its README](crates/iceroot-vote/README.md). |
+| `iceroot-keystore` | The keystore format: a recovery phrase's entropy encrypted under a password with Argon2id and XChaCha20-Poly1305, with per-platform presets and bounds on the parameters. Pure functions that store nothing; no dependency on Heartwood Core. See [its README](crates/iceroot-keystore/README.md) and [the format specification](docs/keystore-format.md). |
 
 Every byte and verdict of a key, address, signature or transaction comes from `heartwood-crypto`. The SDK adds only client code and never enables a `heartwood-crypto` feature; `tools/check-deps.sh` enforces that, and keeps Heartwood Core's consensus crates out of the dependency tree.
 
@@ -23,6 +25,8 @@ Every byte and verdict of a key, address, signature or transaction comes from `h
 - **Drafts.** A draft is built from an operation and the facts a node reports (nonce, height, second key), checked against every rule, and signed as a separate step. A draft can be serialized, signed in another context (a sandboxed page, a native plugin, another device) and sent back.
 - **Nodes.** Reads of today's devnet API (node status and configuration, accounts and history, transactions and the pool, blocks, validators, rounds, supply and fee statistics), submissions batched by the pool's limits with each refusal's reason, and a request budget for the node's rate limit. The chain a node serves is loaded and pinned from its own configuration, and a node of another chain is refused.
 - **Fees.** A draft always carries an explicit fee and says where it comes from. The default fee is the exact fee floor of the milestone in force for the transaction's type and size, computed by `heartwood-crypto`'s own function, the one the node checks every fee with; an exact fee or a multiple of the floor can be chosen instead. Where the milestone has no enabled dynamic fee table there is no floor, since the node's pool then applies settings of its own: the default fee is refused with `FeeUnavailable` and a draft needs an exact fee. The SDK never guesses a fee from what other transactions paid. A draft read back from its serialized form computes the floor again and calls its fee the floor only when it is.
+- **Votes.** Four vote modes fill a vote of 20 to 53 validators from a snapshot of validator data, for the holder to review and sign: Diversity (recommended), Reliability, Maximum Rewards and Support Newcomers. Each draw is seeded per account, so holders of one mode do not all vote alike, and anyone with the same data reproduces it; every pick carries its reasons for the review screen, and a mode short of validators tops up from Diversity and says so. The pools are bounded by rank, so validators registered in bulk cannot crowd a draw, and a selection keeps within the network's vote rules. `check` reports the picks of an earlier selection that no longer meet their criteria; nothing recasts a vote. On today's devnet a snapshot comes from the node's validator list (`VoteSnapshot::from_relay`), which has only lifetime counters and is marked approximate.
+- **Keystore.** A recovery phrase's entropy encrypted under a password (Argon2id and XChaCha20-Poly1305), with presets for desktops, phones and web pages, and bounds that refuse weak or oversized parameters. The app stores the bytes, or their text form; the SDK stores nothing.
 
 ## Using it
 
@@ -36,11 +40,14 @@ iceroot-sdk = { git = "https://github.com/iceroot-network/sdk-rust", tag = "v0.1
 # With Serialize and Deserialize on the node API client's values (for example to hand them to a
 # web page as JSON):
 # iceroot-sdk = { git = "https://github.com/iceroot-network/sdk-rust", tag = "v0.1.0", features = ["serde"] }
+# Without the keystore (the feature `keystore`, on by default), for a server that never holds a
+# user's recovery seed:
+# iceroot-sdk = { git = "https://github.com/iceroot-network/sdk-rust", tag = "v0.1.0", default-features = false }
 ```
 
 `Cargo.lock` then records the exact commit. Nothing is published to crates.io yet. JavaScript and TypeScript applications use the package of [sdk-typescript](https://github.com/iceroot-network/sdk-typescript) instead: its release of the same version attaches the npm package tarball, built from this release, which installs by URL with `npm install https://github.com/iceroot-network/sdk-typescript/releases/download/v0.1.0/iceroot-network-sdk-0.1.0.tgz`.
 
-The node API client is `iceroot_sdk::api`. The example in the documentation of `iceroot-sdk` builds and signs a transfer (`cargo doc --open -p iceroot-sdk`).
+The node API client is `iceroot_sdk::api`, the vote library `iceroot_sdk::vote` and the keystore `iceroot_sdk::keystore`. The examples in the documentation of `iceroot-sdk` build and sign a transfer, share a vote and refuse a selection, and encrypt a recovery phrase's entropy and restore the phrase (`cargo doc --open -p iceroot-sdk`). Every error has a stable code and structured details, the same in every crate and in the TypeScript SDK; the documentation of `iceroot-sdk` lists the codes.
 
 Building from source needs read access to the `heartwood-core` repository while it is private. `Cargo.toml` fetches it over SSH from `ssh://git@github.com/iceroot-network/heartwood-core.git`, so any SSH key GitHub accepts for that repository works: the default key, or the one `~/.ssh/config` names for `github.com`. `.cargo/config.toml` makes Cargo fetch with the `git` command line, so the machine's SSH and git configuration apply; an application that depends on the SDK needs the same in its own `.cargo/config.toml`:
 
@@ -99,6 +106,9 @@ Release sdk-rust first: the TypeScript package of the same version is built from
   ```sh
   node tools/oracle/gen-sdk-vectors.js <built reference checkout> <browser wallet checkout>
   ```
+
+  `vectors/sdk/S07-keystore.jsonl` holds the keystore's vectors (encryption with fixed salts and nonces, decryption, wrong passwords, a change to every field, parameters out of range, the text form), generated from the format specification with an implementation independent of the crate by `tools/oracle/gen-keystore-vectors.js`, and run by `crates/iceroot-keystore/tests/vectors.rs`; see [its README](crates/iceroot-keystore/README.md).
+- `crates/iceroot-vote/tests/data/`: the vote library's vectors: selections reproduced exactly from fixture, account, mode, count, draw and vote rules (`select-v1.jsonl`), and each mode's pools, weights and rank bands on a synthetic snapshot of 80 validators against an independently computed expected file; see [its README](crates/iceroot-vote/README.md).
 
 ### Devnet end-to-end test
 

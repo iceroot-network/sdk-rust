@@ -7,7 +7,15 @@
 //!   message signing and the sign-in message;
 //! - the node API client ([`api`], the crate `iceroot_sdk_api`): a sans-IO client that builds each
 //!   request and decodes each answer into IceRoot-shaped values, with an optional async HTTP
-//!   transport (feature `http`, native targets only).
+//!   transport (feature `http`, native targets only);
+//! - the vote selection library ([`vote`], the crate `iceroot_vote`): the four vote modes that
+//!   fill a vote for the holder to review, the network's vote rules and the check that reports
+//!   picks that no longer meet their criteria, as pure functions;
+//! - the keystore (`keystore`, the crate `iceroot_keystore`, feature `keystore`, on by
+//!   default): a recovery phrase's entropy ([`Mnemonic::entropy`](phrase::Mnemonic::entropy))
+//!   encrypted under a password with Argon2id and XChaCha20-Poly1305. A server that never holds
+//!   a user's seed can turn the feature off (`default-features = false`) and build without those
+//!   primitives.
 //!
 //! The core reads what the client decodes ([`node`]): [`Chain::from_node`] loads the chain a node
 //! serves, [`OnlineFacts::from_node`] gives a draft its nonce, height and second key, and
@@ -86,6 +94,22 @@
 //! # }
 //! ```
 
+//!
+//! # Errors
+//!
+//! Every error of the SDK's crates has a stable code and structured details, which the
+//! TypeScript and Go SDKs report the same way: the core's [`Error`] ([`Error::code`], one of
+//! [`ErrorCode`], and [`Error::details`]), the vote library's [`vote::SelectError`],
+//! [`vote::SnapshotError`] and [`vote::SplitError`], and the keystore's `keystore::Error` (each
+//! with `code()` and `details()`). The codes form one set: a code two crates give has the
+//! same meaning in both.
+//!
+//! | Crate | Codes |
+//! |---|---|
+//! | Core | The codes of [`ErrorCode`] |
+//! | Vote library | `InvalidPickCount`, `ValidatorCannotVote`, `InvalidSnapshot`, `NotEnoughValidators`, `DoesNotFit`, `BreaksRules`; `InvalidVote` (the core's code) for a split that cannot be made |
+//! | Keystore | `WrongPasswordOrCorrupt`, `Malformed`, `UnsupportedVersion`, `UnsupportedKdf`, `UnsupportedPayload`, `ParamsOutOfRange`, `InvalidPayload`, `InvalidPassword`, `OutOfMemory`; `RandomnessUnavailable` (the core's code) |
+
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
@@ -93,3 +117,57 @@ pub use iceroot_sdk_core::*;
 
 /// The node API client: request builders, typed answers and the backend mappers.
 pub use iceroot_sdk_api as api;
+
+/// The vote selection library: the vote modes, the network's vote rules, and the check of an
+/// earlier selection against newer data. It never recasts a vote; a selection is the holder's to
+/// review and sign.
+///
+/// ```
+/// use iceroot_sdk::vote::{Mode, SelectError, SelectRequest, VoteRules, select, split};
+/// # use iceroot_sdk::vote::{SnapshotSource, VoteSnapshot};
+/// # let snapshot = VoteSnapshot {
+/// #     height: 1_000_000,
+/// #     window_days: 30,
+/// #     seats: 53,
+/// #     block_time_seconds: 8,
+/// #     source: SnapshotSource::RelayApproximate,
+/// #     records: Vec::new(),
+/// # };
+///
+/// // Manual voting: 10,000 basis points shared evenly, in the canonical order.
+/// let entries = split(&["alpha", "beta", "gamma"])?;
+/// assert_eq!(entries[0].basis_points, 3_334);
+///
+/// // A mode's selection, refused here with a stable code: the snapshot has no validators.
+/// let request = SelectRequest { rules: VoteRules::SOLAR_COMPATIBLE, ..SelectRequest::new(Mode::Diversity, "holder") };
+/// let refused = select(&snapshot, &request).unwrap_err();
+/// assert_eq!(refused.code(), "NotEnoughValidators");
+/// assert!(matches!(refused, SelectError::NotEnoughValidators { available: 0, .. }));
+/// # Ok::<(), iceroot_sdk::vote::SplitError>(())
+/// ```
+pub use iceroot_vote as vote;
+
+/// The keystore (feature `keystore`, on by default): a recovery phrase's entropy encrypted under a
+/// password. It stores nothing; the app keeps the bytes where its platform keeps secrets best.
+///
+/// ```
+/// use iceroot_sdk::keystore::{self, Params, Payload};
+/// use iceroot_sdk::phrase::Mnemonic;
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let phrase = Mnemonic::generate()?;
+/// let payload = Payload::bip39_entropy(phrase.entropy())?;
+/// // An app passes its platform's preset, such as `Preset::Mobile`. This example uses the lowest
+/// // parameters the format accepts, to run quickly.
+/// let stored = keystore::encrypt(&payload, "correct horse", Params::new(19 * 1024, 2, 1))?;
+///
+/// let opened = keystore::decrypt(&stored, "correct horse")?;
+/// let again = Mnemonic::from_entropy(opened.secret_bytes())?;
+/// assert_eq!(again.phrase(), phrase.phrase());
+/// let refused = keystore::decrypt(&stored, "wrong horse").unwrap_err();
+/// assert_eq!(refused.code(), "WrongPasswordOrCorrupt");
+/// # Ok(())
+/// # }
+/// ```
+#[cfg(feature = "keystore")]
+pub use iceroot_keystore as keystore;

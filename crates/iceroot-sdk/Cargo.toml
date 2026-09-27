@@ -12,7 +12,14 @@ publish.workspace = true
 workspace = true
 
 [features]
-default = []
+# The keystore is on by default, since wallets need it. A server that never holds a user's
+# recovery seed (an explorer or a validator portal backend) can turn it off with
+# `default-features = false` and leave Argon2id, XChaCha20-Poly1305 and their dependencies out of
+# its build.
+default = ["keystore"]
+# The keystore format (`keystore`, the crate `iceroot_keystore`): a recovery seed encrypted under a
+# password.
+keystore = ["dep:iceroot-keystore"]
 # The node API client's async HTTP transport over reqwest (`api::HttpClient`). Native targets
 # only: on wasm32 the feature adds nothing, and the host language performs the requests.
 http = ["iceroot-sdk-api/http"]
@@ -26,8 +33,10 @@ fixed-aux = ["iceroot-sdk-core/fixed-aux"]
 e2e = ["http"]
 
 [dependencies]
+iceroot-keystore = { workspace = true, optional = true }
 iceroot-sdk-api.workspace = true
 iceroot-sdk-core.workspace = true
+iceroot-vote.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

@@ -608,8 +608,10 @@ dependencies = [
 name = "iceroot-sdk"
 version = "0.1.0"
 dependencies = [
+ "iceroot-keystore",
  "iceroot-sdk-api",
  "iceroot-sdk-core",
+ "iceroot-vote",
  "serde_json",
  "tokio",
 ]

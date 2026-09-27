@@ -1,0 +1,66 @@
+# iceroot-sdk-api
+
+A sans-IO client for IceRoot node APIs. The crate builds every request and decodes every answer; the host performs the HTTP exchange with its own stack (`fetch` in browsers and webviews, reqwest natively, `net/http` in Go). One mapping from the node's resources to the SDK's IceRoot-shaped types therefore serves every language the SDK is built for.
+
+## Backends
+
+| Backend | Serves | Type |
+|---|---|---|
+| Solar-compatible | The REST API of the reference implementation under its `/api` base path, as today's devnet serves it | `SolarCompat` |
+
+The mappers speak IceRoot's terms: a validator is never a "delegate", a validator's name is never a "username", vote shares are whole basis points and amounts are integers in base units.
+
+## Calls
+
+`SolarCompat` prepares one `Call` per operation. `call.request()` is what to send; `call.decode(&response)` turns the answer into a typed value or a typed `ApiError`.
+
+| Call | Route | Returns |
+|---|---|---|
+| `node_status` | `GET /node/status` | `NodeStatus` |
+| `node_configuration` | `GET /node/configuration` | `NodeConfiguration` (chain identity, milestone at the tip, `PoolLimits` with `max_transactions_per_request` and `max_transaction_bytes`, pool fees) |
+| `crypto_configuration` | `GET /node/configuration/crypto` | `CryptoConfiguration` (network, milestones, genesis block as the node's JSON text) |
+| `supply` | `GET /blockchain` | `Supply` |
+| `fee_statistics` | `GET /node/fees` | `FeeStatistics` |
+| `account` | `GET /wallets/{address}` | `AccountInfo` |
+| `history`, `account_votes` | `GET /wallets/{address}/transactions[/sent\|/received]`, `/votes` | `Page<TxRecord>` with directions |
+| `transaction`, `unconfirmed_transaction` | `GET /transactions/{id}`, `/transactions/unconfirmed/{id}` | `Option<TxRecord>` |
+| `transactions`, `unconfirmed_transactions`, `votes`, `vote` | `GET /transactions`, `/transactions/unconfirmed`, `/votes`, `/votes/{id}` | `Page<TxRecord>`, `Option<TxRecord>` |
+| `submit` | `POST /transactions` | `SubmitPlan`, then `SubmitReport` with an accepted or rejected outcome per transaction |
+| `latest_block`, `genesis_block`, `block`, `blocks`, `block_transactions`, `missed_slots` | `GET /blocks/...` | `BlockInfo`, `Page<BlockInfo>`, `Page<TxRecord>`, `Page<MissedSlot>` |
+| `validators`, `validator`, `voters`, `validator_blocks`, `validator_missed_slots` | `GET /delegates/...` | `ValidatorInfo` with rank, status, vote weight, voters and production counters |
+| `resolve_name` | `GET /delegates/{name}` | `Option<ResolvedName>` |
+| `round_validators` | `GET /rounds/{round}/delegates` | `Vec<RoundValidator>` |
+
+Submissions are split into requests of at most the pool's `maxTransactionsPerRequest`, and a transaction above `maxTransactionBytes` is refused with reason `too-large` before it is sent. Refusals by the node keep its code (`ERR_LOW_FEE`, `ERR_APPLY`, ...) and get a normalized reason: `low-fee`, `nonce`, `balance`, `duplicate`, `invalid`, `pool-full`, `wrong-network`, `too-large` or `other`.
+
+## Rate limit
+
+The reference implementation allows 100 requests per 60 seconds per client address and answers HTTP 429 beyond that. `RequestBudget` spends requests against a `RateLimit` before they are sent, and `Backoff` spaces retries after a 429. Both take the time as an argument, so they work in WebAssembly as well.
+
+## Feature `http`
+
+`HttpClient` sends calls with reqwest (rustls) to a list of relays: reads go to the first relay that answers, 429 is retried after the backoff, and requests keep to the request budget. It is available on native targets only; a WebAssembly build never contains reqwest, hyper or tokio.
+
+```rust,no_run
+use iceroot_sdk_api::{HttpClient, Relay, SolarCompat};
+
+# async fn run() -> Result<(), iceroot_sdk_api::ApiError> {
+let client = HttpClient::new(vec![Relay::parse("http://127.0.0.1:4003/api")?])?;
+let configuration = client.send(&SolarCompat::new(0).node_configuration()).await?;
+let api = SolarCompat::for_configuration(&configuration);
+let validators = client.send(&api.validators(Default::default())).await?;
+# Ok(())
+# }
+```
+
+## Tests
+
+```sh
+cargo test -p iceroot-sdk-api --all-features
+```
+
+The mappers are tested against responses recorded from a local devnet (`tests/fixtures/devnet`). `tests/live.rs` runs every call against a running node when `ICEROOT_SDK_LIVE_RELAY` names its API:
+
+```sh
+ICEROOT_SDK_LIVE_RELAY=http://127.0.0.1:4003/api cargo test -p iceroot-sdk-api --features http --test live -- --ignored
+```

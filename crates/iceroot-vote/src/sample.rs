@@ -13,17 +13,21 @@ pub const SEED_TAG: &[u8] = b"iceroot/vote-select/v1";
 /// SHA-256( "iceroot/vote-select/v1"
 ///        ‖ u32 length of the account address ‖ the address (UTF-8)
 ///        ‖ u32 length of the mode id ‖ the mode id (for example "maximum-rewards")
-///        ‖ u64 snapshot height ‖ u32 draw )
+///        ‖ u64 election height ‖ u32 draw )
 /// ```
 ///
-/// with every integer big-endian. Anyone with the same account, mode, snapshot height, draw number
-/// and library version draws the same selection.
-pub fn seed(account: &str, mode: Mode, height: u64, draw: u32) -> [u8; 32] {
+/// with every integer big-endian. The election height is the snapshot's height rounded down to a
+/// multiple of the election interval, 24 rounds of the snapshot's seats (see
+/// [`VoteSnapshot::election_height`](crate::VoteSnapshot::election_height)): every snapshot
+/// within one interval gives an account the same seed, so whoever supplies the snapshot cannot
+/// steer the picks by choosing among recent heights. Anyone with the same account, mode, snapshot,
+/// draw number and library version draws the same selection.
+pub fn seed(account: &str, mode: Mode, election_height: u64, draw: u32) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(SEED_TAG);
     update_with_length(&mut hasher, account.as_bytes());
     update_with_length(&mut hasher, mode.id().as_bytes());
-    hasher.update(height.to_be_bytes());
+    hasher.update(election_height.to_be_bytes());
     hasher.update(draw.to_be_bytes());
     hasher.finalize().into()
 }

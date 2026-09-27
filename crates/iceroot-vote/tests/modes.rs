@@ -272,26 +272,35 @@ fn diversity_spreads_the_vote() {
             "dimension {dimension}: diverse {diverse}, uniform {baseline}"
         );
     }
-    // Frostline has five eligible validators; Diversity takes more than two of them at least a
-    // quarter less often than a uniform draw does.
-    let heavy = |picks: &[Vec<&str>]| {
-        picks
-            .iter()
-            .filter(|names| names.iter().filter(|n| key(n, 0) == "frostline").count() > 2)
-            .count()
+    // Frostline has five eligible validators; Diversity takes more than two of them less often
+    // than a uniform draw, whose chance of doing so is exact (hypergeometric). The operator
+    // bonus is bounded, so the effect is modest: about 11 % of selections against 13 %.
+    let frostline = eligible.iter().filter(|n| key(n, 0) == "frostline").count();
+    assert_eq!(frostline, 5);
+    let choose = |n: usize, k: usize| -> u128 {
+        (0..k).fold(1u128, |c, i| {
+            c * u128::try_from(n - i).unwrap() / u128::try_from(i + 1).unwrap()
+        })
     };
-    let diverse_names: Vec<Vec<&str>> = selections
+    let n = eligible.len();
+    let favourable: u128 = (3..=frostline)
+        .map(|k| choose(frostline, k) * choose(n - frostline, 20 - k))
+        .sum();
+    let diverse_heavy = selections
         .iter()
-        .map(|sel| sel.entries.iter().map(|p| p.validator.as_str()).collect())
-        .collect();
-    let uniform_names: Vec<Vec<&str>> = uniform
-        .iter()
-        .map(|picks| picks.iter().map(String::as_str).collect())
-        .collect();
-    let (diverse_heavy, uniform_heavy) = (heavy(&diverse_names), heavy(&uniform_names));
+        .filter(|sel| {
+            sel.entries
+                .iter()
+                .filter(|p| key(&p.validator, 0) == "frostline")
+                .count()
+                > 2
+        })
+        .count();
+    // diverse_heavy / 2,000 < favourable / C(n, 20)
     assert!(
-        diverse_heavy * 4 < uniform_heavy * 3,
-        "diverse {diverse_heavy}, uniform {uniform_heavy}"
+        u128::try_from(diverse_heavy).unwrap() * choose(n, 20) < 2_000 * favourable,
+        "diverse {diverse_heavy} of 2,000, uniform {favourable} of {}",
+        choose(n, 20)
     );
     // Every pick explains its groups and its draw.
     for pick in &selections[0].entries {
@@ -692,6 +701,37 @@ fn maximum_rewards_top_ups_keep_the_operator_cap() {
     }
     // Top-ups do come from declared operators with room left.
     assert!(declared_top_ups > 0);
+}
+
+#[test]
+fn heights_within_an_election_interval_draw_the_same_picks() {
+    // Whoever supplies the snapshot cannot steer an account's picks by choosing among recent
+    // heights: every height of an election interval (24 rounds of 53 blocks, 1,272 blocks) seeds
+    // the same draw. Diversity's criteria do not depend on the height, so the picks are the same.
+    let s = synthetic();
+    let at = |height: u64, account: &str| {
+        let snapshot = VoteSnapshot {
+            height,
+            ..s.clone()
+        };
+        select(&snapshot, &SelectRequest::new(Mode::Diversity, account)).unwrap()
+    };
+    // 5,000,000 rounded down to a multiple of 1,272.
+    let start = 4_998_960;
+    for i in 0..50 {
+        let account = account(i);
+        let first = at(start, &account);
+        for height in [start + 1, 5_000_000, start + 1_271] {
+            let later = at(height, &account);
+            assert_eq!(later.seed, first.seed, "{height}");
+            assert_eq!(later.entries, first.entries, "{height}");
+            assert_eq!(later.snapshot_height, height);
+        }
+        // The next interval draws anew.
+        let next = at(start + 1_272, &account);
+        assert_ne!(next.seed, first.seed);
+        assert_ne!(next.entries, first.entries);
+    }
 }
 
 #[test]

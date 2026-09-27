@@ -190,7 +190,12 @@ fn the_first_vector_by_hand() {
         first["input"],
         json!({"fixture": "synthetic-80", "account": "holder-a", "mode": "diversity", "count": 20, "draw": 0, "rules": "iceroot"})
     );
-    let seed = iceroot_vote::seed("holder-a", Mode::Diversity, 5_000_000, 0);
+    // The fixture's height, 5,000,000, rounded down to its election interval of 24 rounds of 53
+    // blocks.
+    let election_height = 5_000_000 - 5_000_000 % (24 * 53);
+    assert_eq!(election_height, 4_998_960);
+    assert_eq!(fixture("synthetic-80").election_height(), election_height);
+    let seed = iceroot_vote::seed("holder-a", Mode::Diversity, election_height, 0);
     let hex: String = seed.iter().map(|b| format!("{b:02x}")).collect();
     assert_eq!(first["output"]["seed"], json!(hex));
     let entries = first["output"]["entries"].as_array().unwrap();

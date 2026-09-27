@@ -7,6 +7,12 @@ use crate::rules::is_solar_compatible_name;
 /// The length of the rolling window, in days, that windowed data covers.
 pub const WINDOW_DAYS: u32 = 30;
 
+/// The election interval in rounds: the network checks its election every 24 rounds, and a round
+/// has one block per seat, so the interval is 24 × 53 = 1,272 blocks on IceRoot. Selections are
+/// seeded with the snapshot's height rounded down to a multiple of it (see
+/// [`VoteSnapshot::election_height`]).
+pub const ELECTION_INTERVAL_ROUNDS: u32 = 24;
+
 /// Seconds in a day.
 const SECONDS_PER_DAY: u64 = 86_400;
 
@@ -209,11 +215,12 @@ impl ValidatorRecord {
 /// The input of every selection: validator data at one height.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VoteSnapshot {
-    /// The height the data describes; part of the selection seed.
+    /// The height the data describes. Rounded down to its election interval, it is part of the
+    /// selection seed (see [`VoteSnapshot::election_height`]).
     pub height: u64,
     /// The window of the windowed data, in days; must be [`WINDOW_DAYS`].
     pub window_days: u32,
-    /// The number of seats.
+    /// The number of seats: the active set, which also sets the length of a round.
     pub seats: u32,
     /// The target block time, in seconds, to turn heights into days.
     pub block_time_seconds: u32,
@@ -367,6 +374,16 @@ impl VoteSnapshot {
         } else {
             Voter::Ordinary
         }
+    }
+
+    /// The height a selection's seed uses: the snapshot's height rounded down to a multiple of the
+    /// election interval, [`ELECTION_INTERVAL_ROUNDS`] rounds of `seats` blocks (1,272 blocks with
+    /// 53 seats). Every snapshot within one interval seeds the same draw, so whoever supplies the
+    /// snapshot cannot steer an account's picks by choosing among recent heights. The height itself
+    /// when the snapshot has no seats.
+    pub fn election_height(&self) -> u64 {
+        let interval = u64::from(ELECTION_INTERVAL_ROUNDS) * u64::from(self.seats);
+        self.height - self.height.checked_rem(interval).unwrap_or(0)
     }
 
     /// Whole days between two heights at the snapshot's block time (zero when `to` is not after
@@ -601,6 +618,28 @@ mod tests {
             }
             .at_least(9_500)
         );
+    }
+
+    #[test]
+    fn election_height_rounds_down_to_the_interval() {
+        let mut s = snapshot(Vec::new());
+        for (height, start) in [
+            (0, 0),
+            (1_271, 0),
+            (1_272, 1_272),
+            (2_543, 1_272),
+            (5_000_000, 4_998_960),
+            (u64::MAX, u64::MAX - u64::MAX % 1_272),
+        ] {
+            s.height = height;
+            assert_eq!(s.election_height(), start, "{height}");
+        }
+        // The interval follows the snapshot's seats: 24 rounds of 21 blocks.
+        s.seats = 21;
+        s.height = 1_000;
+        assert_eq!(s.election_height(), 504);
+        s.seats = 0;
+        assert_eq!(s.election_height(), 1_000);
     }
 
     #[test]

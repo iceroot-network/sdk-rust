@@ -88,7 +88,8 @@ pub struct Selection {
     pub mode: Mode,
     /// The voting account's address.
     pub account: String,
-    /// The snapshot's height.
+    /// The snapshot's height. The seed uses it rounded down to its election interval (see
+    /// [`VoteSnapshot::election_height`]).
     pub snapshot_height: u64,
     /// The snapshot's source; [`SnapshotSource::RelayApproximate`] means production figures are
     /// lifetime counts.
@@ -310,7 +311,8 @@ impl OperatorPicks {
 
 /// Draw a selection.
 ///
-/// The seed (see [`seed`](crate::seed)) starts a SHA-256 counter stream. Picks are drawn one at a
+/// The seed (see [`seed`](crate::seed)), from the account, the mode, the snapshot's height rounded
+/// down to its election interval and the draw number, starts a SHA-256 counter stream. Picks are drawn one at a
 /// time without replacement from the mode's pool (see [`evaluate`](crate::evaluate)), candidates
 /// in name order: a number `r` below the total weight is taken from the stream by rejection, and
 /// the pick is the first candidate whose running sum of weights exceeds `r`. Maximum Rewards
@@ -375,7 +377,12 @@ pub fn select(
         return Err(SelectError::ValidatorAccount);
     }
     let count = usize::from(request.count);
-    let seed = seed(request.account, request.mode, snapshot.height, request.draw);
+    let seed = seed(
+        request.account,
+        request.mode,
+        snapshot.election_height(),
+        request.draw,
+    );
     let mut stream = Stream::new(seed);
     let mut spread = Spread::default();
     let mut picks: Vec<Pick> = Vec::with_capacity(count);

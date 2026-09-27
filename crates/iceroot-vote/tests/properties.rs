@@ -240,7 +240,12 @@ fn assert_valid(snapshot: &VoteSnapshot, request: &SelectRequest<'_>, selection:
     assert_eq!(selection.snapshot_source, snapshot.source);
     assert_eq!(
         selection.seed,
-        seed(request.account, request.mode, snapshot.height, request.draw)
+        seed(
+            request.account,
+            request.mode,
+            snapshot.election_height(),
+            request.draw
+        )
     );
 
     // The longest start of the whole draw that fits the rules, and the same selection as one

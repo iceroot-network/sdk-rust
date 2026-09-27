@@ -93,11 +93,22 @@ Release sdk-rust first: the TypeScript package of the same version is built from
 ### Vectors
 
 - `vectors/heartwood/`: copies of Heartwood Core's golden vectors of `heartwood-crypto` at the pinned tag, generated from the reference implementation, with `MANIFEST.sha256`. `crates/iceroot-sdk-core/tests/heartwood_vectors.rs` runs every record through the SDK's public API, except the reference's raw signatures of chosen 32-byte inputs, which go through the test seam of the feature `fixed-aux` because no public function signs a chosen digest; records the SDK has no operation for (blocks, peer status) are skipped by an explicit rule, and each class asserts how many records matched, differed as documented, or were skipped. Updating the pinned tag updates these files in the same change.
-- `vectors/sdk/`: the SDK's own vectors, in the same `heartwood-vectors/1` format: BIP39 phrases and seeds (the published vectors, non-ASCII passphrases, validation, and the genesis passphrases of Heartwood Core's devnet), hardened derivation (the BIP32 test vectors and wallet paths), message signatures, and sign-in messages. `tools/oracle/gen-sdk-vectors.js` generates them with the reference implementation's own libraries as the oracle:
+- `vectors/sdk/`: the SDK's own vectors, in the same `heartwood-vectors/1` format: BIP39 phrases and seeds (the published vectors, non-ASCII passphrases, validation, and the genesis passphrases of Heartwood Core's devnet), hardened derivation (the BIP32 test vectors and wallet paths), message signatures, sign-in messages, transactions of every operation (transfers to 1, 2 and 256 recipients, memos at the 255-byte limit, votes of 1, 20 and 53 entries, second-signed transactions, keys from legacy passphrases and from recovery phrases) built by the SDK and compared with the reference's bytes, ids and JSON, and the fee floor of every operation at sizes on both sides of its rounding. `tools/oracle/gen-sdk-vectors.js` generates them with the reference implementation as the oracle: its own libraries, transaction builders and transaction handlers (Node 18):
 
   ```sh
   node tools/oracle/gen-sdk-vectors.js <built reference checkout> <browser wallet checkout>
   ```
+
+### Devnet end-to-end test
+
+`crates/iceroot-sdk/tests/e2e.rs`, behind the `e2e` feature, runs against a local devnet: it connects and pins the chain, imports a genesis wallet with the legacy passphrase import, creates an account from a new recovery phrase, funds it, sends a transfer with a memo and a vote, waits until each is forged and reads it back through the node API client, and checks that a fee one base unit below the floor is refused with the node's own code. `tools/e2e/devnet.sh` starts a fresh one-node devnet of the reference implementation through its devnet tooling (`ICEROOT_DEVNET_TOOLS`), runs the test, and stops and removes the devnet; the chain never runs more than five rounds:
+
+```sh
+ICEROOT_DEVNET_TOOLS=<devnet tooling> tools/e2e/devnet.sh run -- \
+  cargo test -p iceroot-sdk --features e2e --test e2e -- --ignored
+```
+
+The TypeScript SDK's `npm run test:e2e` runs the same harness for its Node and Chromium tests and then this test, which also verifies the messages they signed.
 
 ## License
 

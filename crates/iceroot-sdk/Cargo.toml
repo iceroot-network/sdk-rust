@@ -21,6 +21,9 @@ http = ["iceroot-sdk-api/http"]
 serde = ["iceroot-sdk-api/serde"]
 # Test seam of the bindings only: see the feature of the same name in iceroot-sdk-core.
 fixed-aux = ["iceroot-sdk-core/fixed-aux"]
+# The devnet end-to-end test (tests/e2e.rs), over the HTTP transport. It needs a running devnet,
+# which tools/e2e/devnet.sh starts and stops, and runs only when asked for (`-- --ignored`).
+e2e = ["http"]
 
 [dependencies]
 iceroot-sdk-api.workspace = true
@@ -28,3 +31,4 @@ iceroot-sdk-core.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+tokio = { version = "1", default-features = false, features = ["macros", "rt", "time"] }

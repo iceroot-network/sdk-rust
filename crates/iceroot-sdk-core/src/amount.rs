@@ -154,28 +154,10 @@ fn group_thousands(digits: &str) -> String {
     out
 }
 
-/// An asset's identity. Assets are identified by id, never by symbol.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum AssetId {
-    /// ROOT, the network's own asset. Today it is the only asset.
-    Root,
-}
-
-impl AssetId {
-    /// The stable string form: `ROOT` for ROOT.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            AssetId::Root => "ROOT",
-        }
-    }
-}
-
-impl fmt::Display for AssetId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+/// An asset's identity: 32 bytes, with [`AssetId::ROOT`] reserved for the network's own asset.
+/// Assets are identified by id, never by symbol. The node API client and the core share this
+/// type.
+pub use iceroot_sdk_api::AssetId;
 
 #[cfg(test)]
 mod tests {

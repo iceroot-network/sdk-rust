@@ -11,14 +11,8 @@ use crate::address::Address;
 use crate::amount::Amount;
 use crate::chain::Chain;
 
-/// The supply figures a node reports.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Supply {
-    /// The total supply.
-    pub total: Amount,
-    /// The amount burned so far.
-    pub burned: Amount,
-}
+/// The supply figures a node reports (the node API client's [`iceroot_sdk_api::Supply`]).
+pub use iceroot_sdk_api::Supply;
 
 /// A donation recipient: a share of every block reward.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -142,8 +136,8 @@ impl Economics {
     }
 
     /// The supply figures, when a node reported them.
-    pub fn supply(&self) -> Option<Supply> {
-        self.supply
+    pub fn supply(&self) -> Option<&Supply> {
+        self.supply.as_ref()
     }
 }
 
@@ -183,9 +177,18 @@ mod tests {
             None
         );
         let supply = Supply {
-            total: Amount::from_base_units(10),
-            burned: Amount::ZERO,
+            height: 80,
+            block_id: "a".repeat(64),
+            supply: 10,
+            burned: iceroot_sdk_api::Burned {
+                fees: 0,
+                transactions: 0,
+                total: 0,
+            },
         };
-        assert_eq!(economics.with_supply(supply).supply(), Some(supply));
+        assert_eq!(
+            economics.with_supply(supply.clone()).supply(),
+            Some(&supply)
+        );
     }
 }

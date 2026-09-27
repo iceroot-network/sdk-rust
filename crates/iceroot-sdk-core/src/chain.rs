@@ -167,7 +167,7 @@ impl Chain {
     /// The network's own asset.
     pub fn token(&self) -> Token {
         Token {
-            asset: AssetId::Root,
+            asset: AssetId::ROOT,
             name: self.inner.network.token.clone(),
             symbol: self.inner.network.symbol.clone(),
             decimals: S1_DECIMALS,

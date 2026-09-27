@@ -14,6 +14,9 @@ workspace = true
 [dependencies]
 getrandom.workspace = true
 heartwood-crypto.workspace = true
+# The node API client's IceRoot-shaped values, which the core reads into its own inputs
+# (src/node.rs). No I/O and no HTTP: the client's `http` feature stays off here.
+iceroot-sdk-api.workspace = true
 hmac.workspace = true
 pbkdf2.workspace = true
 secp256k1.workspace = true

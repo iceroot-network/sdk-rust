@@ -134,44 +134,36 @@ pub struct Recipient {
     pub amount: Amount,
 }
 
-/// One entry of a vote.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct VoteEntry {
-    /// The validator's name, which is what a vote names.
-    pub validator: String,
-    /// The share of the vote, in basis points (10,000 is all of it).
-    pub basis_points: u16,
-}
+/// One entry of a vote: a validator's name and its share in basis points. The node API client
+/// reports an account's vote with the same type, so a vote read from a node can be built again.
+pub use iceroot_sdk_api::VoteEntry;
 
-impl VoteEntry {
-    /// The entries of a vote in the relay API's form, a JSON object of validator names and
-    /// percentages, read as a node reads a vote: keys that are not validator names are dropped,
-    /// every share must be a multiple of 0.01 from 0.01 to 100 (it becomes whole basis points),
-    /// and the shares must add up to 100 unless there are none. The entries keep the object's
-    /// order.
-    pub fn from_percentages(votes: &Map<String, Value>) -> Result<Vec<VoteEntry>, Error> {
-        let kept = votes_from_json(votes).map_err(|error| Error::InvalidVote {
-            problem: match error {
-                SchemaError::VoteSum { basis_points } => VoteProblem::Sum { basis_points },
-                SchemaError::Invalid { field, .. } | SchemaError::Missing { field } => {
-                    VoteProblem::Percentage {
-                        validator: field
-                            .strip_prefix("asset.votes['")
-                            .and_then(|rest| rest.strip_suffix("']"))
-                            .unwrap_or(&field)
-                            .to_owned(),
-                    }
+/// The entries of a vote in the relay API's form, a JSON object of validator names and
+/// percentages, read as a node reads a vote: keys that are not validator names are dropped, every
+/// share must be a multiple of 0.01 from 0.01 to 100 (it becomes whole basis points), and the
+/// shares must add up to 100 unless there are none. The entries keep the object's order.
+pub fn vote_from_percentages(votes: &Map<String, Value>) -> Result<Vec<VoteEntry>, Error> {
+    let kept = votes_from_json(votes).map_err(|error| Error::InvalidVote {
+        problem: match error {
+            SchemaError::VoteSum { basis_points } => VoteProblem::Sum { basis_points },
+            SchemaError::Invalid { field, .. } | SchemaError::Missing { field } => {
+                VoteProblem::Percentage {
+                    validator: field
+                        .strip_prefix("asset.votes['")
+                        .and_then(|rest| rest.strip_suffix("']"))
+                        .unwrap_or(&field)
+                        .to_owned(),
                 }
-            },
-        })?;
-        Ok(kept
-            .into_iter()
-            .map(|(validator, basis_points)| VoteEntry {
-                validator,
-                basis_points,
-            })
-            .collect())
-    }
+            }
+        },
+    })?;
+    Ok(kept
+        .into_iter()
+        .map(|(validator, basis_points)| VoteEntry {
+            validator,
+            basis_points,
+        })
+        .collect())
 }
 
 /// The kind of a validator resignation.

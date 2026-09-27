@@ -1,0 +1,30 @@
+[package]
+name = "iceroot-sdk-api"
+description = "Sans-IO client for IceRoot node APIs: request builders, typed responses and backend mappers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# An async HTTP client over reqwest. Native targets only: on wasm32 the feature compiles to nothing,
+# and the host (fetch in TypeScript) performs the requests instead.
+http = ["dep:reqwest", "dep:tokio"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", default-features = false, features = ["macros", "net", "io-util", "rt"] }

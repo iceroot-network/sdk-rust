@@ -1,6 +1,14 @@
 //! Drafts end to end: building every operation, the rules applied before signing, signing with
 //! one and two keys, and the serialized forms, on the devnet chain of the vector files.
 
+// Tests may panic on a broken vector or fixture: that is how they fail.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
+
 mod common;
 
 use common::DEVNET;
@@ -16,7 +24,7 @@ use iceroot_sdk_core::phrase::Mnemonic;
 use iceroot_sdk_core::profile::DevnetOptions;
 use iceroot_sdk_core::transaction::{
     Draft, DraftRequest, OnlineFacts, Operation, OperationKind, Recipient, Resignation,
-    SignedTransaction, VoteEntry,
+    SignedTransaction, VoteEntry, vote_from_percentages,
 };
 use iceroot_sdk_core::{Chain, Error, Profile, PublicKeyBytes};
 
@@ -598,7 +606,7 @@ fn legacy_and_phrase_accounts_sign_the_same_way() {
 fn votes_in_the_relay_form() {
     let votes: serde_json::Map<String, serde_json::Value> =
         serde_json::from_str(r#"{"genesis_1": 50.5, "genesis_2": 49.5, "0": 12}"#).unwrap();
-    let entries = VoteEntry::from_percentages(&votes).unwrap();
+    let entries = vote_from_percentages(&votes).unwrap();
     assert_eq!(
         entries,
         vec![
@@ -615,7 +623,7 @@ fn votes_in_the_relay_form() {
     let bad: serde_json::Map<String, serde_json::Value> =
         serde_json::from_str(r#"{"genesis_1": 50.005, "genesis_2": 49.995}"#).unwrap();
     assert!(matches!(
-        VoteEntry::from_percentages(&bad),
+        vote_from_percentages(&bad),
         Err(Error::InvalidVote {
             problem: VoteProblem::Percentage { .. }
         })

@@ -16,6 +16,9 @@
 //! - [`message`] and [`signin`]: message signatures and the sign-in message.
 //! - [`error`]: the one error type, with stable codes.
 //!
+//! The values both this crate and the node API client use (asset ids, vote entries, supply
+//! figures and rejection reasons) are the client's own types, re-exported here.
+//!
 //! Every byte and verdict of a transaction, key, address or signature comes from
 //! `heartwood-crypto`, Heartwood Core's byte-exact layer; this crate adds only client code.
 //!

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/iceroot-sdk-core", "crates/iceroot-sdk"]
+members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -18,8 +18,16 @@ unsafe_code = "forbid"
 unused_must_use = "deny"
 missing_docs = "warn"
 
+# No panics on untrusted input. Tests may unwrap (clippy.toml).
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+
 [workspace.dependencies]
 iceroot-sdk-core = { path = "crates/iceroot-sdk-core" }
+iceroot-sdk-api = { path = "crates/iceroot-sdk-api" }
 
 # Heartwood Core's byte-exact layer: keys, addresses, signatures, the transaction codec and the
 # milestone rules. No feature is enabled here; tools/check-deps.sh keeps it that way. The consensus
@@ -40,8 +48,13 @@ unicode-normalization = "0.1.25"
 
 zeroize = "1.9"
 getrandom = "0.4"
-serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order", "raw_value"] }
 thiserror = "2"
+
+# Native HTTP for the optional `http` feature of iceroot-sdk-api. Never part of a WebAssembly build.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+tokio = { version = "1", default-features = false, features = ["time"] }
 
 # Tests only.
 hex = "0.4"

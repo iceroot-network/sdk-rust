@@ -1022,53 +1022,9 @@ impl fmt::Display for SignInProblem {
     }
 }
 
-/// The normalized reason of a node's refusal of a submitted transaction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum RejectReason {
-    /// The fee is below the node's minimum.
-    LowFee,
-    /// The nonce is not the next one.
-    Nonce,
-    /// The balance does not cover the amount and fee.
-    Balance,
-    /// The transaction is already known.
-    Duplicate,
-    /// The transaction breaks a rule.
-    Invalid,
-    /// The node's pool is full.
-    PoolFull,
-    /// The transaction is for another network.
-    WrongNetwork,
-    /// The transaction is too large.
-    TooLarge,
-    /// Any other reason.
-    Other,
-}
-
-impl RejectReason {
-    /// A stable string for the reason: `low-fee`, `nonce`, `balance`, `duplicate`, `invalid`,
-    /// `pool-full`, `wrong-network`, `too-large` or `other`.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            RejectReason::LowFee => "low-fee",
-            RejectReason::Nonce => "nonce",
-            RejectReason::Balance => "balance",
-            RejectReason::Duplicate => "duplicate",
-            RejectReason::Invalid => "invalid",
-            RejectReason::PoolFull => "pool-full",
-            RejectReason::WrongNetwork => "wrong-network",
-            RejectReason::TooLarge => "too-large",
-            RejectReason::Other => "other",
-        }
-    }
-}
-
-impl fmt::Display for RejectReason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+/// The normalized reason of a node's refusal of a submitted transaction. The node API client
+/// and the core share this type.
+pub use iceroot_sdk_api::RejectReason;
 
 #[cfg(test)]
 mod tests {

@@ -6,6 +6,14 @@
 //! such operation (blocks, peer status, the legacy Schnorr scheme). Every class ends by asserting
 //! how many records took each path, so a new record is never skipped without a change here.
 
+// Tests may panic on a broken vector or fixture: that is how they fail.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
+
 mod common;
 
 use std::collections::HashMap;
@@ -28,7 +36,7 @@ use iceroot_sdk_core::message;
 use iceroot_sdk_core::phrase::bip39;
 use iceroot_sdk_core::transaction::{
     Draft, DraftRequest, OnlineFacts, Operation, Recipient, Resignation, SignedTransaction,
-    VoteEntry,
+    VoteEntry, vote_from_percentages,
 };
 use iceroot_sdk_core::{Chain, Error, OperationKind, PublicKey, PublicKeyBytes};
 use serde_json::{Map, Value, json};
@@ -821,7 +829,7 @@ fn vote_splits(record: &Record) -> Outcome {
         let first = a as f64 / 100.0;
         let second = (10_000 - a) as f64 / 100.0;
         let object = percentages(&[(names[0], first), (names[1], second)]);
-        let accepted = VoteEntry::from_percentages(&object).is_ok();
+        let accepted = vote_from_percentages(&object).is_ok();
         if !accepted {
             refused.push(a);
         }
@@ -886,7 +894,7 @@ fn vote_shares(record: &Record) -> Outcome {
             if basis_points < 10_000.0 {
                 votes.insert("b".into(), json!((10_000.0 - basis_points) / 100.0));
             }
-            let ok = VoteEntry::from_percentages(&votes).is_ok();
+            let ok = vote_from_percentages(&votes).is_ok();
             verdicts.push(if ok { b'1' } else { b'0' });
             if ok {
                 accepted += 1;
@@ -930,7 +938,7 @@ fn v07_vote_rules() {
         "vote.shares" => vote_shares(record),
         "vote.validate" => {
             let object = record.input["votes"].as_object().expect("votes");
-            match (&record.expected, VoteEntry::from_percentages(object)) {
+            match (&record.expected, vote_from_percentages(object)) {
                 // The kept entries as given, in the object's property order.
                 (Ok(expected), Ok(kept)) => compare(
                     expected,

@@ -2,6 +2,14 @@
 //! reference implementation's libraries as the oracle) run through the SDK's public API:
 //! phrases, hardened derivation, message signatures and sign-in messages.
 
+// Tests may panic on a broken vector or fixture: that is how they fail.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
+
 mod common;
 
 use common::{

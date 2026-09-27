@@ -629,6 +629,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "iceroot-sdk-bindings"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "iceroot-keystore",
+ "iceroot-sdk",
+ "js-sys",
+ "serde",
+ "serde_json",
+ "sha2",
+ "wasm-bindgen",
+ "zeroize",
+]
+
+[[package]]
 name = "iceroot-sdk-core"
 version = "0.1.0"
 dependencies = [

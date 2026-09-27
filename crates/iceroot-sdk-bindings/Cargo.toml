@@ -1,0 +1,41 @@
+[package]
+name = "iceroot-sdk-bindings"
+description = "The boundary the IceRoot SDK's bindings share: arguments read and answers written in the JSON forms of the TypeScript API, with errors keeping their stable codes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Test seam of the bindings' test builds: signatures and ownership proofs with fixed auxiliary
+# randomness, and the vote library's constants and relay-form snapshots. No build that ships may
+# enable it.
+fixed-aux = ["iceroot-sdk/fixed-aux"]
+# Test seam of the bindings' test builds: the keystore vectors' own salts and nonces and their
+# lowered parameter floor. It turns on the keystore's test-only feature, which no build that ships
+# may enable.
+keystore-testing = ["dep:iceroot-keystore"]
+# A binding error as a JavaScript `Error` (`From<BindingError> for JsValue`), for the exports of
+# the WebAssembly module, which return the bindings' results unchanged.
+wasm-bindgen = ["dep:js-sys", "dep:wasm-bindgen"]
+
+[dependencies]
+iceroot-sdk = { workspace = true, features = ["serde", "keystore"] }
+# The keystore crate itself, only for the test seam above: the same crate the facade re-exports as
+# `iceroot_sdk::keystore`, with its test-only feature.
+iceroot-keystore = { workspace = true, optional = true, features = ["testing"] }
+js-sys = { version = "0.3", optional = true }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+wasm-bindgen = { version = "=0.2.129", optional = true }
+zeroize.workspace = true
+
+[dev-dependencies]
+hex.workspace = true

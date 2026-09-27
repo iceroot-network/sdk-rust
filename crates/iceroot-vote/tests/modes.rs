@@ -97,10 +97,10 @@ fn pools_and_weights_match_the_criteria() {
             assert_eq!(judged[name].weight, weight, "{mode} {name}");
         }
     }
-    assert_eq!(pool(&snapshot, Mode::Diversity).len(), 71);
+    assert_eq!(pool(&snapshot, Mode::Diversity).len(), 58);
     assert_eq!(pool(&snapshot, Mode::Reliability).len(), 48);
     assert_eq!(pool(&snapshot, Mode::MaximumRewards).len(), 46);
-    assert_eq!(pool(&snapshot, Mode::SupportNewcomers).len(), 26);
+    assert_eq!(pool(&snapshot, Mode::SupportNewcomers).len(), 23);
 }
 
 /// Each validator's rank band as the independently computed file gives it.
@@ -115,16 +115,16 @@ fn expected_bands() -> BTreeMap<String, String> {
 
 #[test]
 fn rank_bands_are_sized_in_proportion_to_the_pool() {
-    // 71 validators in Diversity's pool: eight bands of 9 or 8, not seven of 10 and one of 1.
+    // 58 validators in Diversity's pool: six bands of 10 or 9, not five of 10 and one of 8.
     let s = synthetic();
     let expected = expected_bands();
-    assert_eq!(expected.len(), 71);
+    assert_eq!(expected.len(), 58);
     let mut sizes: BTreeMap<&str, usize> = BTreeMap::new();
     for band in expected.values() {
         *sizes.entry(band).or_insert(0) += 1;
     }
-    assert_eq!(sizes.len(), 8);
-    assert!(sizes.values().all(|&n| n == 8 || n == 9), "{sizes:?}");
+    assert_eq!(sizes.len(), 6);
+    assert!(sizes.values().all(|&n| n == 9 || n == 10), "{sizes:?}");
     // Every pick names the band the file gives.
     let mut seen = BTreeMap::new();
     for selection in many(&s, Mode::Diversity, 53, 40) {
@@ -145,7 +145,7 @@ fn rank_bands_are_sized_in_proportion_to_the_pool() {
             seen.insert(pick.validator.clone(), band);
         }
     }
-    assert_eq!(seen.len(), 71);
+    assert_eq!(seen.len(), 58);
 }
 
 #[test]
@@ -200,18 +200,42 @@ fn diversity_criteria() {
     ));
     // Undeclared validators are eligible and form one group.
     assert!(shortfalls(&s, m, "quince").is_empty());
+    // The seated validators and the next 10 by rank: 63 is in, 64 and below are out.
+    assert!(shortfalls(&s, m, "alder").is_empty()); // rank 63
+    for (name, rank) in [("damson", 64), ("lime", 76)] {
+        assert_eq!(
+            shortfalls(&s, m, name),
+            vec![Shortfall::FarBelowCutoff {
+                rank,
+                seats: 53,
+                ranks_below: 10
+            }]
+        );
+    }
+    // Only ranked validators: one without a rank is outside, and says so unless it resigned.
+    let mut unranked = s.clone();
+    unranked
+        .records
+        .iter_mut()
+        .find(|r| r.name == "quince")
+        .unwrap()
+        .rank = None;
+    assert_eq!(shortfalls(&unranked, m, "quince"), vec![Shortfall::NoRank]);
 }
 
 #[test]
 fn diversity_spreads_the_vote() {
+    // Enough selections that sampling noise stays well inside the margins below: the true
+    // figures (over 40,000 selections) are given with each check.
+    const SELECTIONS: usize = 8_000;
     let s = synthetic();
     let bands = expected_bands();
-    let selections = many(&s, Mode::Diversity, 20, 2_000);
+    let selections = many(&s, Mode::Diversity, 20, SELECTIONS);
     let eligible: Vec<String> = pool(&s, Mode::Diversity).into_iter().collect();
     // A uniform draw from the same pool, as a baseline.
     let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
     let mut uniform = Vec::new();
-    for _ in 0..2_000 {
+    for _ in 0..SELECTIONS {
         let mut left = eligible.clone();
         let mut picks = Vec::new();
         for _ in 0..20 {
@@ -264,9 +288,11 @@ fn diversity_spreads_the_vote() {
                 largest(&names, dimension)
             })
             .sum();
-        // Rank bands spread the picks first; declarations, whose bonus is bounded (each
-        // dimension adds at most a third to a weight), spread them less but still.
-        let (numerator, denominator) = if dimension == 3 { (9, 10) } else { (49, 50) };
+        // Rank bands spread the picks first: the largest band of a selection holds 11 % fewer
+        // picks than in a uniform draw. Declarations, whose bonus is bounded (each dimension
+        // adds at most a third to a weight), spread them less but still: 4 % fewer for the
+        // largest hosting provider and region.
+        let (numerator, denominator) = if dimension == 3 { (92, 100) } else { (98, 100) };
         assert!(
             diverse * denominator < baseline * numerator,
             "dimension {dimension}: diverse {diverse}, uniform {baseline}"
@@ -274,7 +300,7 @@ fn diversity_spreads_the_vote() {
     }
     // Frostline has five eligible validators; Diversity takes more than two of them less often
     // than a uniform draw, whose chance of doing so is exact (hypergeometric). The operator
-    // bonus is bounded, so the effect is modest: about 11 % of selections against 13 %.
+    // bonus is bounded, so the effect is modest: 19.9 % of selections against 21.8 %.
     let frostline = eligible.iter().filter(|n| key(n, 0) == "frostline").count();
     assert_eq!(frostline, 5);
     let choose = |n: usize, k: usize| -> u128 {
@@ -296,10 +322,11 @@ fn diversity_spreads_the_vote() {
                 > 2
         })
         .count();
-    // diverse_heavy / 2,000 < favourable / C(n, 20)
+    // diverse_heavy / SELECTIONS < favourable / C(n, 20)
+    let total = u128::try_from(SELECTIONS).unwrap();
     assert!(
-        u128::try_from(diverse_heavy).unwrap() * choose(n, 20) < 2_000 * favourable,
-        "diverse {diverse_heavy} of 2,000, uniform {favourable} of {}",
+        u128::try_from(diverse_heavy).unwrap() * choose(n, 20) < total * favourable,
+        "diverse {diverse_heavy} of {total}, uniform {favourable} of {}",
         choose(n, 20)
     );
     // Every pick explains its groups and its draw.
@@ -502,7 +529,8 @@ fn support_newcomers_criteria_and_weights() {
     let s = synthetic();
     let m = Mode::SupportNewcomers;
     let judged = candidates(&s, m);
-    // Near the cutoff: the last ten seats and everything below; rank 43 is not.
+    // Near the cutoff: the last ten seats and the twenty ranks below; rank 43 is not, and
+    // neither is rank 74.
     assert_eq!(
         shortfalls(&s, m, "kapok"),
         vec![Shortfall::NotNearCutoff {
@@ -513,6 +541,17 @@ fn support_newcomers_criteria_and_weights() {
     assert!(judged["acacia"].eligible); // rank 44
     assert!(judged["pear"].eligible); // rank 53, the last seat
     assert!(judged["papaya"].eligible); // rank 54, the first below
+    assert!(judged["sassafras"].eligible); // rank 73, the twentieth below
+    for (name, rank) in [("tamarack", 74), ("lime", 76)] {
+        assert_eq!(
+            shortfalls(&s, m, name),
+            vec![Shortfall::FarBelowCutoff {
+                rank,
+                seats: 53,
+                ranks_below: 20
+            }]
+        );
+    }
     // Registered 3 days, 7 days exactly, and one hour short of 7 days.
     assert_eq!(
         shortfalls(&s, m, "hazel"),
@@ -558,24 +597,89 @@ fn support_newcomers_criteria_and_weights() {
     // A validator without a penalty record is not refused for it.
     assert!(judged["buckeye"].eligible);
     assert!(judged["buckeye"].reasons.contains(&Reason::NoPenaltyRecord));
-    // Weight rises towards the cutoff from both sides.
+    // Weight rises towards the cutoff from both sides, from 3,448 twenty ranks below.
     assert_eq!(judged["pear"].weight, 10_000);
     assert_eq!(judged["papaya"].weight, 10_000);
     assert_eq!(judged["acacia"].weight, 100_000 / 19);
-    assert_eq!(judged["lime"].weight, 100_000 / 32);
+    assert_eq!(judged["sassafras"].weight, 100_000 / 29);
     let freq = frequency(&many(&s, m, 20, 600));
-    assert!(freq["papaya"] > freq["lime"]);
+    assert!(freq["papaya"] > freq["sassafras"]);
     assert!(freq["pear"] > freq["acacia"]);
-    // Far below the cutoff the weight bottoms out at 1: still eligible, never dropped unexplained.
+    // A rank far below the cutoff is outside the pool, whatever its size, and says so.
     let mut far = s.clone();
     far.records
         .iter_mut()
         .find(|r| r.name == "papaya")
         .unwrap()
-        .rank = Some(1_000_000);
-    let papaya = &candidates(&far, m)["papaya"];
-    assert!(papaya.eligible && papaya.shortfalls.is_empty());
-    assert_eq!(papaya.weight, 1);
+        .rank = Some(u32::MAX);
+    assert_eq!(
+        shortfalls(&far, m, "papaya"),
+        vec![Shortfall::FarBelowCutoff {
+            rank: u32::MAX,
+            seats: 53,
+            ranks_below: 20
+        }]
+    );
+}
+
+#[test]
+fn support_newcomers_caps_each_operator() {
+    // Five newcomers now declare one operator. At most two of them are picked, and top-ups from
+    // Diversity never add a third; each of the two says where it stands under the cap.
+    let mut s = synthetic();
+    let grove = ["papaya", "hemlock", "elm", "pine", "willow"];
+    for record in &mut s.records {
+        if grove.contains(&record.name.as_str()) {
+            record.declarations.as_mut().unwrap().operator = Some("Grove Partners".to_owned());
+        }
+    }
+    assert!(
+        grove
+            .iter()
+            .all(|n| pool(&s, Mode::SupportNewcomers).contains(*n))
+    );
+    for count in [20u8, 53] {
+        let selections = many(&s, Mode::SupportNewcomers, count, 300);
+        let mut grove_picks = 0;
+        for selection in &selections {
+            let picked: Vec<_> = selection
+                .entries
+                .iter()
+                .filter(|p| grove.contains(&p.validator.as_str()))
+                .collect();
+            assert!(picked.len() <= 2, "{count}: {}", picked.len());
+            grove_picks += picked.len();
+            for pick in picked {
+                assert!(pick.reasons.iter().any(|r| matches!(
+                    r,
+                    Reason::OperatorPicks { operator: Some(o), maximum: 2, .. } if o == "Grove Partners"
+                )));
+            }
+            // Every pick of the mode names its operator's count against the cap.
+            for pick in &selection.entries {
+                if pick.source == PickSource::Mode {
+                    assert!(
+                        pick.reasons
+                            .iter()
+                            .any(|r| matches!(r, Reason::OperatorPicks { maximum: 2, .. }))
+                    );
+                }
+            }
+        }
+        // With 20 or more picks from a pool of 23, Grove Partners reaches its cap in most
+        // selections.
+        assert!(grove_picks > 300 * 3 / 2, "{count}: {grove_picks}");
+    }
+    // With 53 picks the pool gives 23 less the three held back, and Diversity the rest.
+    let mut request = SelectRequest::new(Mode::SupportNewcomers, "addr-holder-cap");
+    request.count = 53;
+    let selection = select(&s, &request).unwrap();
+    assert_eq!(selection.pool, 23);
+    assert_eq!(selection.topped_up, 33);
+    assert_eq!(
+        selection.top_up_notice().unwrap(),
+        "23 validators meet the Support Newcomers criteria, at most 2 per operator, so 20 picks come from Support Newcomers and 33 from Diversity"
+    );
 }
 
 #[test]
@@ -604,18 +708,18 @@ fn full_selections_on_the_synthetic_snapshot() {
 #[test]
 fn small_pools_top_up_from_diversity_and_say_so() {
     let s = synthetic();
-    // Support Newcomers has 26 eligible validators.
+    // Support Newcomers has 23 eligible validators, each with an operator of its own.
     let mut request = SelectRequest::new(Mode::SupportNewcomers, "addr-holder-top-up");
     request.count = 30;
     let selection = select(&s, &request).unwrap();
-    assert_eq!(selection.pool, 26);
-    assert_eq!(selection.topped_up, 4);
+    assert_eq!(selection.pool, 23);
+    assert_eq!(selection.topped_up, 7);
     let top_ups: Vec<_> = selection
         .entries
         .iter()
         .filter(|p| p.source == PickSource::TopUp)
         .collect();
-    assert_eq!(top_ups.len(), 4);
+    assert_eq!(top_ups.len(), 7);
     let newcomers = pool(&s, Mode::SupportNewcomers);
     let diverse = pool(&s, Mode::Diversity);
     for pick in &selection.entries {
@@ -628,17 +732,17 @@ fn small_pools_top_up_from_diversity_and_say_so() {
                     pick.reasons[0],
                     Reason::TopUp {
                         mode: Mode::SupportNewcomers,
-                        mode_picks: 26
+                        mode_picks: 23
                     }
                 );
-                assert!(pick.step > 26);
+                assert!(pick.step > 23);
             }
             PickSource::Holder => unreachable!(),
         }
     }
     assert_eq!(
         selection.top_up_notice().unwrap(),
-        "26 validators meet the Support Newcomers criteria, so 26 picks come from Support Newcomers and 4 from Diversity"
+        "23 validators meet the Support Newcomers criteria, so 23 picks come from Support Newcomers and 7 from Diversity"
     );
     // Maximum Rewards: 46 eligible, but the operator cap leaves 42 picks.
     let mut request = SelectRequest::new(Mode::MaximumRewards, "addr-holder-top-up");

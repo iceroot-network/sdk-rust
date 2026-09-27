@@ -4,26 +4,29 @@
 //! fill a vote in one of four modes, or leave it to the holder:
 //!
 //! - [`Mode::Diversity`], the recommended default, spreads the vote across rank bands first and
-//!   declared operators, hosting providers and regions second, among validators in good health;
-//!   declarations can at most double a validator's weight, so invented values buy little;
+//!   declared operators, hosting providers and regions second, among the seated validators and
+//!   the next 10 by rank that are in good health; declarations can at most double a validator's
+//!   weight, so invented values buy little;
 //! - [`Mode::Reliability`] favours validators with a strong record over a rolling 30-day window,
 //!   from chain data alone, after at least 7 days of seated history;
 //! - [`Mode::MaximumRewards`] favours the highest measured payouts per unit of vote weight, never
 //!   declared rates, with at most two picks per declared operator;
-//! - [`Mode::SupportNewcomers`] favours healthy validators near or below the seat cutoff,
-//!   registered for at least 7 days, with complete declarations and no penalties;
+//! - [`Mode::SupportNewcomers`] favours healthy validators within the last 10 seats or the 20
+//!   ranks below the cutoff, registered for at least 7 days, with complete declarations and no
+//!   penalties, with at most two picks per declared operator;
 //! - Manual voting has no mode: the holder names the validators, and [`validate_vote`] checks the
 //!   vote against the network's rules.
 //!
 //! Each mode draws its picks from its eligible pool, weighted by score and seeded per account
 //! ([`seed`]), so holders who choose the same mode do not all vote for the same validators, and
-//! anyone with the same data reproduces a selection exactly. A mode whose pool is too small for
-//! the requested number of picks tops up from Diversity and says so, and a selection keeps within
-//! the network's [`VoteRules`] (at most 1,280 bytes from IceRoot's genesis, 1,024 on the
-//! Solar-compatible stage), with fewer picks when long names need it. Every pick carries its
-//! [`Reason`]s for the review screen. The library never recasts a vote: [`check`] only reports
-//! the picks that no longer meet their criteria, and any new selection is the holder's to review
-//! and sign.
+//! anyone with the same data reproduces a selection exactly. The pools are bounded by rank, which
+//! follows vote weight, so validators registered in bulk without votes cannot crowd a draw. A mode
+//! whose pool is too small for the requested number of picks tops up from Diversity and says so,
+//! and a selection keeps within the network's [`VoteRules`] (at most 1,280 bytes from IceRoot's
+//! genesis, 1,024 on the Solar-compatible stage), with fewer picks when long names need it. Every
+//! pick carries its [`Reason`]s for the review screen. The library never recasts a vote: [`check`]
+//! only reports the picks that no longer meet their criteria, and any new selection is the holder's
+//! to review and sign.
 //!
 //! Everything is a pure function of a [`VoteSnapshot`]: no I/O, no clock, no floating point.
 //! [`VoteSnapshot::from_relay`] builds a snapshot from a node's relay data, which has only
@@ -96,8 +99,9 @@ pub use rules::{
 };
 pub use sample::{SEED_TAG, seed};
 pub use score::{
-    Candidate, MAX_PICKS_PER_OPERATOR, MIN_PRODUCTION_BP, MIN_REGISTERED_DAYS, MIN_SEATED_DAYS,
-    NEAR_CUTOFF_SEATS, RANK_BAND_SIZE, evaluate,
+    Candidate, DIVERSITY_RANKS_BELOW_CUTOFF, MAX_PICKS_PER_OPERATOR, MIN_PRODUCTION_BP,
+    MIN_REGISTERED_DAYS, MIN_SEATED_DAYS, NEAR_CUTOFF_SEATS, NEWCOMER_RANKS_BELOW_CUTOFF,
+    RANK_BAND_SIZE, evaluate,
 };
 pub use select::{
     DEFAULT_PICKS, LIBRARY_VERSION, MAX_PICKS, MIN_PICKS, Pick, PickSource, SelectError,

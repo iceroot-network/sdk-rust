@@ -60,8 +60,8 @@ pub enum Reason {
     TopUp {
         /// The selection's mode.
         mode: Mode,
-        /// Picks the mode gave: every eligible validator, or fewer when the Maximum Rewards
-        /// operator cap held some back.
+        /// Picks the mode gave: every eligible validator, or fewer when the operator cap of
+        /// Maximum Rewards or Support Newcomers held some back.
         mode_picks: u32,
     },
     /// The validator's status and rank.
@@ -107,9 +107,8 @@ pub enum Reason {
         /// The grouping.
         dimension: Dimension,
         /// The declared operator, hosting provider or region, or the rank band by its first and
-        /// last rank (for example `37 to 45`, or `73 and below` for a band that includes
-        /// validators without a rank); `None` for the one group of validators that declared
-        /// nothing, or for a band of validators without a rank.
+        /// last rank (for example `37 to 45`); `None` for the one group of validators that
+        /// declared nothing.
         value: Option<String>,
         /// Earlier picks in the same group.
         earlier_picks: u32,
@@ -206,6 +205,16 @@ pub enum Shortfall {
         rank: u32,
         /// The number of seats.
         seats: u32,
+    },
+    /// Ranked further below the last seat than the mode's pool reaches: 10 ranks for Diversity,
+    /// 20 for Support Newcomers.
+    FarBelowCutoff {
+        /// The rank.
+        rank: u32,
+        /// The number of seats.
+        seats: u32,
+        /// How many ranks below the last seat the pool reaches.
+        ranks_below: u32,
     },
     /// More picks from this operator than the cap.
     OperatorCap {
@@ -549,6 +558,15 @@ impl fmt::Display for Shortfall {
             Shortfall::NotNearCutoff { rank, seats } => {
                 write!(f, "Rank {rank} is not near the last seat ({seats})")
             }
+            Shortfall::FarBelowCutoff {
+                rank,
+                seats,
+                ranks_below,
+            } => write!(
+                f,
+                "Rank {rank} is more than {} below the last seat ({seats})",
+                Count(u128::from(*ranks_below), "rank", "ranks")
+            ),
             Shortfall::OperatorCap { operator, maximum } => match operator {
                 Some(operator) => write!(
                     f,
@@ -640,6 +658,24 @@ mod tests {
             }
             .to_string(),
             "Rank 50, within 3 of the last seat (53)"
+        );
+        assert_eq!(
+            Shortfall::FarBelowCutoff {
+                rank: 64,
+                seats: 53,
+                ranks_below: 10
+            }
+            .to_string(),
+            "Rank 64 is more than 10 ranks below the last seat (53)"
+        );
+        assert_eq!(
+            Shortfall::FarBelowCutoff {
+                rank: 5,
+                seats: 3,
+                ranks_below: 1
+            }
+            .to_string(),
+            "Rank 5 is more than 1 rank below the last seat (3)"
         );
         assert_eq!(
             Shortfall::LowProduction {

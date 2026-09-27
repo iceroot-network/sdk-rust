@@ -18,10 +18,19 @@ pub const MIN_REGISTERED_DAYS: u32 = 7;
 /// `⌈n / 10⌉` bands whose sizes differ by at most one, so that no band is a small remainder whose
 /// few members would be picked more often than the rest.
 pub const RANK_BAND_SIZE: u32 = 10;
+/// How many ranks below the last seat Diversity's pool reaches: the seated validators and the next
+/// 10 by rank, ranks 1 to 63 with 53 seats. Rank follows vote weight, so validators registered in
+/// bulk without votes rank below them and stay outside the pool however many they are.
+pub const DIVERSITY_RANKS_BELOW_CUTOFF: u32 = 10;
 /// How many of the last seats count as near the cutoff for Support Newcomers: with 53 seats,
-/// ranks 44 to 53, besides every rank below the cutoff.
+/// ranks 44 to 53, besides the ranks just below the cutoff (see
+/// [`NEWCOMER_RANKS_BELOW_CUTOFF`]).
 pub const NEAR_CUTOFF_SEATS: u32 = 10;
-/// The most Maximum Rewards picks from one declared operator.
+/// How many ranks below the last seat count for Support Newcomers: with 53 seats, ranks 54 to 73.
+/// With the last 10 seats, the pool has at most 30 ranks however many validators register.
+pub const NEWCOMER_RANKS_BELOW_CUTOFF: u32 = 20;
+/// The most picks from one declared operator in Maximum Rewards and Support Newcomers; the
+/// validators that declare no operator form one group with the same cap.
 pub const MAX_PICKS_PER_OPERATOR: u32 = 2;
 
 /// Every Diversity candidate's weight before the spread: 2^64.
@@ -61,13 +70,13 @@ pub struct Candidate {
 ///
 /// The criteria (every mode also requires that the validator has not resigned):
 ///
-/// - **Diversity:** no jailing or equivocation in the window, and at least 95 % of assigned slots
-///   forged when there is a production record. Every candidate has the same weight, which each
-///   draw spreads over rank bands first and declarations second (see [`select`](crate::select)):
-///   it is divided by one plus the picks already made in the candidate's rank band, then raised
-///   for each declared operator, hosting provider and region that fewer earlier picks share than
-///   the most common one, to at most twice the weight of a candidate whose declared values are
-///   all common or undeclared.
+/// - **Diversity:** ranked within the seats or the next 10 ranks (1 to 63 with 53 seats), no
+///   jailing or equivocation in the window, and at least 95 % of assigned slots forged when there
+///   is a production record. Every candidate has the same weight, which each draw spreads over rank
+///   bands first and declarations second (see [`select`](crate::select)): it is divided by one plus
+///   the picks already made in the candidate's rank band, then raised for each declared operator,
+///   hosting provider and region that fewer earlier picks share than the most common one, to at
+///   most twice the weight of a candidate whose declared values are all common or undeclared.
 /// - **Reliability:** at least 7 days seated in the window, a production record, at least 95 %
 ///   of assigned slots forged, and no jailing or equivocation in the window. Weight
 ///   `1,000,000 × assigned / (assigned + 100 × missed)`: missing 1 % of the slots halves it.
@@ -78,13 +87,17 @@ pub struct Candidate {
 ///   they still have shares of a million parts or more. At most two picks per declared
 ///   operator; validators that declare no operator form one group. Picks that top the selection
 ///   up from Diversity never give a declared operator a third pick either.
-/// - **Support Newcomers:** ranked within the last 10 seats or below the cutoff, registered for
-///   at least 7 days, complete declarations, no penalty ever, and at least 95 % of assigned slots
-///   forged when there is a production record from earlier seated time. Weight
-///   `100,000 / (10 + distance)`, at least 1, where the distance counts the ranks between the
-///   validator and the cutoff (0 for the last seat and the first rank below it).
+/// - **Support Newcomers:** ranked within the last 10 seats or the 20 ranks below the cutoff (44
+///   to 73 with 53 seats), registered for at least 7 days, complete declarations, no penalty
+///   ever, and at least 95 % of assigned slots forged when there is a production record from
+///   earlier seated time. Weight `100,000 / (10 + distance)`, where the distance counts the ranks
+///   between the validator and the cutoff (0 for the last seat and the first rank below it), so
+///   from 3,448 to 10,000. At most two picks per declared operator, as in Maximum Rewards,
+///   top-ups included.
 ///
-/// A snapshot without penalty records (a node's relay data) counts no penalties.
+/// Ranks are taken as the snapshot gives them; a validator without a rank is outside the
+/// Diversity and Support Newcomers pools. A snapshot without penalty records (a node's relay
+/// data) counts no penalties.
 pub fn evaluate(snapshot: &VoteSnapshot, mode: Mode) -> Result<Vec<Candidate>, SnapshotError> {
     snapshot.validate()?;
     Ok(candidates(snapshot, mode))
@@ -144,6 +157,9 @@ pub(crate) fn assess(
     let approximate = snapshot.source == SnapshotSource::RelayApproximate;
     let weight = match mode {
         Mode::Diversity => {
+            if let Err(shortfall) = rank_window(snapshot, record, DIVERSITY_RANKS_BELOW_CUTOFF) {
+                shortfalls.extend(shortfall);
+            }
             production_health(record, approximate, &mut reasons, &mut shortfalls);
             penalties_in_window(record, &mut reasons, &mut shortfalls);
             DIVERSITY_WEIGHT
@@ -197,29 +213,26 @@ pub(crate) fn assess(
             weight
         }
         Mode::SupportNewcomers => {
-            let weight = match record.rank {
-                None => {
-                    shortfalls.push(Shortfall::NoRank);
+            let seats = snapshot.seats;
+            let weight = match rank_window(snapshot, record, NEWCOMER_RANKS_BELOW_CUTOFF) {
+                Err(shortfall) => {
+                    shortfalls.extend(shortfall);
                     0
                 }
-                Some(rank) => {
-                    let seats = snapshot.seats;
-                    if rank <= seats.saturating_sub(NEAR_CUTOFF_SEATS) {
-                        shortfalls.push(Shortfall::NotNearCutoff { rank, seats });
-                        0
+                Ok(rank) if rank <= seats.saturating_sub(NEAR_CUTOFF_SEATS) => {
+                    shortfalls.push(Shortfall::NotNearCutoff { rank, seats });
+                    0
+                }
+                Ok(rank) => {
+                    reasons.push(Reason::NearCutoff { rank, seats });
+                    // Within the last 10 seats or the 20 ranks below: a distance of at most 19.
+                    let distance = if rank <= seats {
+                        seats - rank
                     } else {
-                        reasons.push(Reason::NearCutoff { rank, seats });
-                        let distance = if rank <= seats {
-                            seats - rank
-                        } else {
-                            rank - seats - 1
-                        };
-                        // At least 1, so that a healthy validator far below the cutoff stays
-                        // eligible (with the least weight) rather than dropping out unexplained.
-                        (NEWCOMER_SCALE * NEWCOMER_HALF_DISTANCE
-                            / (NEWCOMER_HALF_DISTANCE + u128::from(distance)))
-                        .max(1)
-                    }
+                        rank - seats - 1
+                    };
+                    NEWCOMER_SCALE * NEWCOMER_HALF_DISTANCE
+                        / (NEWCOMER_HALF_DISTANCE + u128::from(distance))
                 }
             };
             match record.registered_days(snapshot) {
@@ -281,6 +294,28 @@ fn rewards_shortfalls(record: &ValidatorRecord) -> Vec<Shortfall> {
         shortfalls.push(Shortfall::NoMeasuredPayouts);
     }
     shortfalls
+}
+
+/// A validator's rank when it is at most `below` ranks under the last seat, or the shortfall: no
+/// rank, or ranked further down. Ranks are compared in 64 bits, so no seat count overflows. A
+/// resigned validator without a rank has no shortfall here, since its resignation is reported.
+fn rank_window(
+    snapshot: &VoteSnapshot,
+    record: &ValidatorRecord,
+    below: u32,
+) -> Result<u32, Option<Shortfall>> {
+    match record.rank {
+        None if record.status.is_resigned() => Err(None),
+        None => Err(Some(Shortfall::NoRank)),
+        Some(rank) if u64::from(rank) > u64::from(snapshot.seats) + u64::from(below) => {
+            Err(Some(Shortfall::FarBelowCutoff {
+                rank,
+                seats: snapshot.seats,
+                ranks_below: below,
+            }))
+        }
+        Some(rank) => Ok(rank),
+    }
 }
 
 /// At least 95 % of assigned slots forged, when there is a production record.
@@ -359,11 +394,11 @@ pub(crate) fn declared_key(value: Option<&String>) -> (Option<String>, Option<St
     }
 }
 
-/// Diversity's rank bands over one snapshot. The validators that meet Diversity's criteria, in
-/// rank order (validators without a rank last, then by name), are split into
-/// `⌈n / RANK_BAND_SIZE⌉` bands: the validator at position `i`, from 0, is in band
-/// `⌊i × bands / n⌋`, so band sizes differ by at most one. A validator outside the pool is in the
-/// band of the position it would take.
+/// Diversity's rank bands over one snapshot. The validators that meet Diversity's criteria, all of
+/// them ranked, in rank order (then by name), are split into `⌈n / RANK_BAND_SIZE⌉` bands: the
+/// validator at position `i`, from 0, is in band `⌊i × bands / n⌋`, so band sizes differ by at
+/// most one. A validator outside the pool is in the band of the position it would take, the last
+/// one when it has no rank.
 ///
 /// The band arithmetic is done in 64-bit integers, never in `usize`, so that 32-bit targets such
 /// as WebAssembly and 64-bit native builds compute the same bands for any pool: the products stay

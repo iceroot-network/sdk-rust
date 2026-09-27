@@ -10,14 +10,32 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use iceroot_vote::{
-    Declarations, Dimension, MAX_PICKS_PER_OPERATOR, MIN_PICKS, Mode, NameRule, Payouts, Penalties,
-    PickSource, Production, Reason, SelectError, SelectRequest, Selection, SnapshotSource,
+    DIVERSITY_RANKS_BELOW_CUTOFF, Declarations, Dimension, MAX_PICKS_PER_OPERATOR, MIN_PICKS, Mode,
+    NEAR_CUTOFF_SEATS, NEWCOMER_RANKS_BELOW_CUTOFF, NameRule, Payouts, Penalties, PickSource,
+    Production, Reason, SelectError, SelectRequest, Selection, Shortfall, SnapshotSource,
     ValidatorRecord, ValidatorStatus, VoteRules, VoteSnapshot, Voter, canonical_order, check,
     evaluate, seed, select, validate_vote, vote_bytes,
 };
 use proptest::prelude::*;
 
-const OPERATORS: [&str; 6] = ["Northwind", "northwind ", "Ridge", "Cove", "", "Delta"];
+/// Operators, with two spellings of one and an empty one; enough of them that the operator cap
+/// of Maximum Rewards and Support Newcomers leaves most snapshots enough validators.
+const OPERATORS: [&str; 14] = [
+    "Northwind",
+    "northwind ",
+    "Ridge",
+    "Cove",
+    "",
+    "Delta",
+    "Aurora",
+    "Basalt",
+    "Cinder",
+    "Drift",
+    "Ember",
+    "Fjord",
+    "Glacier",
+    "Harbor",
+];
 const HOSTS: [&str; 5] = ["Hostco", "Cloudnine", "Metalbox", "hostco", "Orbit"];
 const COUNTRIES: [&str; 7] = ["DE", "US", "fi", "SG", "ZZ", "BR", "KE"];
 
@@ -100,8 +118,14 @@ fn payouts() -> impl Strategy<Value = Option<Payouts>> {
 }
 
 prop_compose! {
-    fn record(height: u64)(
-        rank in prop::option::weighted(0.95, prop_oneof![19 => 1u32..140, 1 => any::<u32>()]),
+    /// A record ranked mostly within 12 ranks below the seats and sometimes further down, so
+    /// that the bounded pools of Diversity and Support Newcomers are often but not always large
+    /// enough.
+    fn record(height: u64, seats: u32)(
+        rank in prop::option::weighted(
+            0.95,
+            prop_oneof![15 => 1u32..=seats + 12, 4 => 1u32..=seats + 40, 1 => any::<u32>()],
+        ),
         status in status(),
         seated_roll in prop::bool::weighted(0.8),
         registered in prop::option::weighted(0.95, 0..=height),
@@ -145,7 +169,7 @@ fn snapshot() -> impl Strategy<Value = VoteSnapshot> {
             let n = names.len();
             (
                 Just((height, seats, block_time, relay, names)),
-                prop::collection::vec(record(height), n),
+                prop::collection::vec(record(height, seats), n),
             )
         })
         .prop_map(|((height, seats, block_time, relay, names), mut records)| {
@@ -344,7 +368,7 @@ fn assert_valid(snapshot: &VoteSnapshot, request: &SelectRequest<'_>, selection:
     assert!(top_ups.iter().all(|p| p.step > last_mode_step));
     match request.mode {
         Mode::Diversity => assert!(top_ups.is_empty()),
-        Mode::MaximumRewards => {
+        Mode::MaximumRewards | Mode::SupportNewcomers => {
             let mut per_operator: BTreeMap<Option<String>, u32> = BTreeMap::new();
             for pick in &from_mode {
                 *per_operator
@@ -373,8 +397,16 @@ fn assert_valid(snapshot: &VoteSnapshot, request: &SelectRequest<'_>, selection:
                 per_declared.values().all(|&n| n <= MAX_PICKS_PER_OPERATOR),
                 "{per_declared:?}"
             );
+            // A validator of the mode's pool comes as a top-up only when it declares no operator
+            // and the mode's picks already gave that group its two.
+            for pick in &top_ups {
+                if mode_pool.contains(&pick.validator) {
+                    assert_eq!(operator_key(snapshot, &pick.validator), None);
+                    assert_eq!(per_operator.get(&None), Some(&MAX_PICKS_PER_OPERATOR));
+                }
+            }
         }
-        _ => {
+        Mode::Reliability => {
             if !top_ups.is_empty() {
                 assert_eq!(from_mode.len(), mode_pool.len());
             }
@@ -446,6 +478,39 @@ proptest! {
                 prop_assert_eq!(candidate.eligible, candidate.weight > 0);
             }
         }
+        // The pools are bounded by rank: Diversity to the seats and the next 10 ranks, Support
+        // Newcomers to the last 10 seats and the next 20 ranks. A validator ranked further down
+        // says so, and one without a rank too unless it resigned.
+        let seats = u64::from(snapshot.seats);
+        for (mode, below) in [
+            (Mode::Diversity, DIVERSITY_RANKS_BELOW_CUTOFF),
+            (Mode::SupportNewcomers, NEWCOMER_RANKS_BELOW_CUTOFF),
+        ] {
+            let below = u64::from(below);
+            for candidate in evaluate(&snapshot, mode).unwrap() {
+                let record = snapshot.record(&candidate.validator).unwrap();
+                let rank = record.rank.map(u64::from);
+                let far = rank.is_some_and(|r| r > seats + below);
+                prop_assert_eq!(
+                    candidate
+                        .shortfalls
+                        .iter()
+                        .any(|s| matches!(s, Shortfall::FarBelowCutoff { .. })),
+                    far
+                );
+                prop_assert_eq!(
+                    candidate.shortfalls.contains(&Shortfall::NoRank),
+                    rank.is_none() && !record.status.is_resigned()
+                );
+                if candidate.eligible {
+                    let rank = rank.unwrap();
+                    prop_assert!(rank <= seats + below);
+                    if mode == Mode::SupportNewcomers {
+                        prop_assert!(rank > seats.saturating_sub(u64::from(NEAR_CUTOFF_SEATS)));
+                    }
+                }
+            }
+        }
         for (mode, count) in Mode::ALL.into_iter().zip(counts) {
             let request = SelectRequest { mode, account: &account, count, draw, rules };
             match select(&snapshot, &request) {
@@ -460,7 +525,7 @@ proptest! {
                         .union(&eligible(&snapshot, Mode::Diversity))
                         .cloned()
                         .collect();
-                    if mode == Mode::MaximumRewards {
+                    if matches!(mode, Mode::MaximumRewards | Mode::SupportNewcomers) {
                         // The operator cap can hold some back.
                         prop_assert!(available <= u32::try_from(union.len()).unwrap());
                     } else {

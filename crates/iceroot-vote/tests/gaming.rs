@@ -4,7 +4,8 @@
 //! must not win near-certain picks, one that declares nothing must not be pushed out (not even
 //! when every other validator invents unique values), the validators of a small last rank band
 //! must not be favoured, and one very large payer must not flatten the Maximum Rewards weights
-//! of everyone else.
+//! of everyone else. Validators registered in bulk must not crowd the Diversity and Support
+//! Newcomers draws, however many they are.
 
 #![allow(
     clippy::unwrap_used,
@@ -16,8 +17,9 @@
 use std::collections::BTreeMap;
 
 use iceroot_vote::{
-    Declarations, Dimension, Mode, Payouts, Penalties, Production, Reason, SelectRequest,
-    SnapshotSource, ValidatorRecord, ValidatorStatus, VoteSnapshot, evaluate, select,
+    DIVERSITY_RANKS_BELOW_CUTOFF, Declarations, Dimension, Mode, NEWCOMER_RANKS_BELOW_CUTOFF,
+    Payouts, Penalties, Production, Reason, SelectRequest, Selection, Shortfall, SnapshotSource,
+    ValidatorRecord, ValidatorStatus, VoteSnapshot, evaluate, select,
 };
 
 /// Selections per scenario.
@@ -74,6 +76,28 @@ fn snapshot(records: Vec<ValidatorRecord>) -> VoteSnapshot {
         block_time_seconds: 8,
         source: SnapshotSource::Indexer,
         records,
+    }
+}
+
+/// A snapshot whose seats keep every validator within Diversity's pool (the seats and the next 10
+/// ranks), so that a test measures the Diversity weights alone: at least 53 seats, more when
+/// there are more than 63 validators.
+fn open_snapshot(mut records: Vec<ValidatorRecord>) -> VoteSnapshot {
+    let seats = u32::try_from(records.len())
+        .unwrap()
+        .saturating_sub(DIVERSITY_RANKS_BELOW_CUTOFF)
+        .max(53);
+    for record in &mut records {
+        record.seated = record.rank.is_some_and(|rank| rank <= seats);
+        record.status = if record.seated {
+            ValidatorStatus::Active
+        } else {
+            ValidatorStatus::Standby
+        };
+    }
+    VoteSnapshot {
+        seats,
+        ..snapshot(records)
     }
 }
 
@@ -161,7 +185,7 @@ fn invented_unique_declarations_do_not_buy_near_certain_picks() {
         };
         records.push(record);
     }
-    let s = snapshot(records);
+    let s = open_snapshot(records);
     let rates = pick_rates(&s, Mode::Diversity);
     let uniform = 20.0 / 65.0;
     let clustered = mean(cluster.iter().map(|&i| rates[i]));
@@ -193,7 +217,7 @@ fn declaring_nothing_is_not_pushed_out() {
             record
         })
         .collect();
-    let s = snapshot(records);
+    let s = open_snapshot(records);
     let rates = pick_rates(&s, Mode::Diversity);
     let uniform = 20.0 / 80.0;
     let declaring = mean((0..80).filter(|i| i % 8 == 0).map(|i| rates[i]));
@@ -234,7 +258,7 @@ fn declaring_nothing_costs_at_most_half_when_everyone_else_invents() {
             record
         })
         .collect();
-    let s = snapshot(records);
+    let s = open_snapshot(records);
     let rates = pick_rates(&s, Mode::Diversity);
     let uniform = 20.0 / 66.0;
     let quiet = mean(silent.iter().map(|&i| rates[i]));
@@ -253,7 +277,7 @@ fn a_small_last_rank_band_is_not_favoured() {
     // Without declarations only rank bands spread the picks. With bands of ten ranks, the
     // validator ranked 41st of 41 formed a band of its own and was picked far more often.
     for n in [21usize, 41, 42, 51, 53, 56, 61, 71] {
-        let s = snapshot(
+        let s = open_snapshot(
             (0..n)
                 .map(|i| validator(i, u32::try_from(i + 1).unwrap()))
                 .collect(),
@@ -334,5 +358,209 @@ fn one_huge_payer_does_not_flatten_the_others() {
         );
         assert!(better > 0.5, "{times}: {better:.3}");
         assert!(lesser < 0.25, "{times}: {lesser:.3}");
+    }
+}
+
+/// 53 seated validators on common infrastructure: operators in pairs, three hosting providers,
+/// mostly in Europe, every declaration complete.
+fn seated() -> Vec<ValidatorRecord> {
+    let hosts = [
+        "Hostco",
+        "Hostco",
+        "Hostco",
+        "Metalbox",
+        "Metalbox",
+        "Cloudnine",
+    ];
+    let countries = ["DE", "DE", "US", "FI", "FR", "DE", "US", "NL"];
+    (0..53)
+        .map(|i| {
+            let mut record = validator(i, u32::try_from(i + 1).unwrap());
+            record.declarations = declared(
+                &format!("Pair {}", i / 2),
+                hosts[i % hosts.len()],
+                countries[i % countries.len()],
+            );
+            record
+        })
+        .collect()
+}
+
+/// `count` validators ranked from 54 down, below the seated ones: registered long ago, never
+/// assigned a slot, with complete declarations naming `operator(k)` for the k-th of them and a
+/// hosting provider and region no one else declares (the most a declaration can gain).
+fn below_the_seats(count: usize, operator: impl Fn(usize) -> String) -> Vec<ValidatorRecord> {
+    let far = ["BR", "ZA", "AU", "JP", "AQ", "MX", "NZ"];
+    (0..count)
+        .map(|k| {
+            let i = 53 + k;
+            let mut record = validator(i, u32::try_from(i + 1).unwrap());
+            record.production = None;
+            record.seated_days_in_window = Some(0);
+            record.declarations = declared(&operator(k), &format!("Own rack {k}"), far[k % 7]);
+            record
+        })
+        .collect()
+}
+
+/// A first draw of 20 for each of [`HOLDERS`] accounts.
+fn selections(s: &VoteSnapshot, mode: Mode) -> Vec<Selection> {
+    (0..HOLDERS)
+        .map(|holder| {
+            let account = format!("holder-{holder}");
+            select(s, &SelectRequest::new(mode, &account)).unwrap()
+        })
+        .collect()
+}
+
+/// The picks ranked below the seats, per selection on average, and the deepest rank picked.
+fn below_the_seats_picked(s: &VoteSnapshot, selections: &[Selection]) -> (f64, u32) {
+    let mut below = 0usize;
+    let mut deepest = 0;
+    for selection in selections {
+        for pick in &selection.entries {
+            let rank = s.record(&pick.validator).unwrap().rank.unwrap();
+            deepest = deepest.max(rank);
+            below += usize::from(rank > 53);
+        }
+    }
+    (below as f64 / selections.len() as f64, deepest)
+}
+
+/// How many validators ranked below the seats meet a mode's criteria.
+fn eligible_below_the_seats(s: &VoteSnapshot, mode: Mode) -> usize {
+    evaluate(s, mode)
+        .unwrap()
+        .iter()
+        .filter(|c| c.eligible && s.record(&c.validator).unwrap().rank.unwrap() > 53)
+        .count()
+}
+
+#[test]
+fn a_standby_flood_gains_nothing_from_its_size() {
+    // Validators registered in bulk at the registration fee and without votes rank below every
+    // validator that has votes. With open pools, 100 of them declaring nothing took 13 of 20
+    // Diversity picks. Diversity now draws from the seats and the next 10 ranks, Support
+    // Newcomers from the last 10 seats and the 20 ranks below the cutoff, so 20, 53 and 100 of
+    // them give exactly the same selections. Here each invents an operator, a hosting provider
+    // and a region, the most a declaration can gain.
+    let mut first: Option<(Vec<Selection>, Vec<Selection>)> = None;
+    for flood in [20usize, 53, 100] {
+        let mut records = seated();
+        records.extend(
+            below_the_seats(flood, |k| format!("Solo {k}"))
+                .into_iter()
+                .map(|record| ValidatorRecord {
+                    vote_weight: 0,
+                    voters: 0,
+                    ..record
+                }),
+        );
+        let s = snapshot(records);
+        assert_eq!(eligible_below_the_seats(&s, Mode::Diversity), 10);
+        assert_eq!(eligible_below_the_seats(&s, Mode::SupportNewcomers), 20);
+        // The last of them is outside a pool whose ranks it passes, and the review screen says
+        // why.
+        let last = name(52 + flood);
+        let rank = u32::try_from(53 + flood).unwrap();
+        for (mode, ranks_below) in [
+            (Mode::Diversity, DIVERSITY_RANKS_BELOW_CUTOFF),
+            (Mode::SupportNewcomers, NEWCOMER_RANKS_BELOW_CUTOFF),
+        ] {
+            let judged = evaluate(&s, mode).unwrap();
+            let candidate = judged.iter().find(|c| c.validator == last).unwrap();
+            let outside = if rank > 53 + ranks_below {
+                vec![Shortfall::FarBelowCutoff {
+                    rank,
+                    seats: 53,
+                    ranks_below,
+                }]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(candidate.shortfalls, outside, "{flood} {mode}");
+        }
+
+        let diverse = selections(&s, Mode::Diversity);
+        let (diverse_mean, diverse_deepest) = below_the_seats_picked(&s, &diverse);
+        let newcomers = selections(&s, Mode::SupportNewcomers);
+        let (newcomer_mean, newcomer_deepest) = below_the_seats_picked(&s, &newcomers);
+        println!(
+            "{flood} standby validators: {diverse_mean:.2} of 20 Diversity picks (deepest rank {diverse_deepest}), {newcomer_mean:.2} of 20 Support Newcomers picks (deepest rank {newcomer_deepest})"
+        );
+        // Ten of 63 validators in Diversity's pool, with at most twice the weight for their
+        // invented values: under a fifth of the picks.
+        assert!(diverse_deepest <= 63);
+        assert!(diverse_mean < 4.0, "{diverse_mean:.2}");
+        // Under names of their own the operator cap cannot hold them back: they fill 20 of the 30
+        // ranks Support Newcomers draws from and take about 13 of 20 picks, never more as they
+        // grow, and nothing ranked below 73.
+        assert!(newcomer_deepest <= 73);
+        assert!(newcomer_mean < 13.5, "{newcomer_mean:.2}");
+        match &first {
+            None => first = Some((diverse, newcomers)),
+            Some((d, n)) => {
+                assert!(&diverse == d, "{flood}: Diversity selections differ");
+                assert!(
+                    &newcomers == n,
+                    "{flood}: Support Newcomers selections differ"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_party_below_the_cutoff_is_held_to_its_ranks_and_its_operator_cap() {
+    // One party runs 30 validators ranked 54 to 83, just below 53 seated ones. With open pools it
+    // took 13.8 of 20 Support Newcomers picks and 8 of 20 Diversity picks.
+    for one_operator in [true, false] {
+        let mut records = seated();
+        records.extend(below_the_seats(30, |k| {
+            if one_operator {
+                "Party".to_owned()
+            } else {
+                format!("Party {k}")
+            }
+        }));
+        let s = snapshot(records);
+        let newcomers = selections(&s, Mode::SupportNewcomers);
+        let (newcomer_mean, newcomer_deepest) = below_the_seats_picked(&s, &newcomers);
+        let diverse = selections(&s, Mode::Diversity);
+        let (diverse_mean, diverse_deepest) = below_the_seats_picked(&s, &diverse);
+        let label = if one_operator {
+            "one operator"
+        } else {
+            "different names"
+        };
+        println!(
+            "a party of 30 under {label}: {newcomer_mean:.2} of 20 Support Newcomers picks, {diverse_mean:.2} of 20 Diversity picks"
+        );
+        assert!(newcomer_deepest <= 73 && diverse_deepest <= 63);
+        assert!(diverse_mean < 4.0, "{label}: {diverse_mean:.2}");
+        if one_operator {
+            // Two picks, in every selection: the mode's pool gives only 12 (the last 10 seats and
+            // two of the party), and the 8 top-ups from Diversity pass over the party's
+            // validators ranked 54 to 63.
+            for selection in &newcomers {
+                assert_eq!(selection.topped_up, 8);
+                let party: Vec<_> = selection
+                    .entries
+                    .iter()
+                    .filter(|p| s.record(&p.validator).unwrap().rank.unwrap() > 53)
+                    .collect();
+                assert_eq!(party.len(), 2);
+                for pick in party {
+                    assert!(pick.reasons.iter().any(|r| matches!(
+                        r,
+                        Reason::OperatorPicks { operator: Some(o), maximum: 2, .. } if o == "Party"
+                    )));
+                }
+            }
+        } else {
+            // Different names dodge the cap, which only a verified declaration could close: the
+            // party fills 20 of the 30 ranks the mode draws from and takes about 13 of 20 picks.
+            assert!(newcomer_mean < 13.5, "{newcomer_mean:.2}");
+        }
     }
 }

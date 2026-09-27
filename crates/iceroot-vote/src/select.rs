@@ -275,7 +275,8 @@ struct Entrant<'a> {
     groups: Groups,
 }
 
-/// Picks per operator group so far, for the Maximum Rewards cap.
+/// Picks per operator group so far, for the operator cap of Maximum Rewards and Support
+/// Newcomers.
 #[derive(Debug, Default)]
 struct OperatorPicks(Vec<u32>);
 
@@ -312,14 +313,20 @@ impl OperatorPicks {
 /// Draw a selection.
 ///
 /// The seed (see [`seed`](crate::seed)), from the account, the mode, the snapshot's height rounded
-/// down to its election interval and the draw number, starts a SHA-256 counter stream. Picks are drawn one at a
-/// time without replacement from the mode's pool (see [`evaluate`](crate::evaluate)), candidates
-/// in name order: a number `r` below the total weight is taken from the stream by rejection, and
-/// the pick is the first candidate whose running sum of weights exceeds `r`. Maximum Rewards
-/// drops an operator's validators once it has two picks. When the mode's pool runs out before
-/// `count` picks, the rest is drawn the same way from Diversity's pool, with its spread counting
-/// every pick so far, and each such pick says so. A Maximum Rewards top-up still gives no declared
-/// operator more than two picks in all.
+/// down to its election interval and the draw number, starts a SHA-256 counter stream. Picks are
+/// drawn one at a time without replacement from the mode's pool (see
+/// [`evaluate`](crate::evaluate)), candidates in name order: a number `r` below the total weight is
+/// taken from the stream by rejection, and the pick is the first candidate whose running sum of
+/// weights exceeds `r`. Maximum Rewards and Support Newcomers drop an operator's validators once it
+/// has two picks, the validators that declare no operator counting as one operator. When the mode's
+/// pool runs out before `count` picks, the rest is drawn the same way from Diversity's pool, with
+/// its spread counting every pick so far, and each such pick says so. A top-up of those two modes
+/// still gives no declared operator more than two picks in all.
+///
+/// The pools are bounded, so that validators registered in bulk cannot crowd a draw: Diversity
+/// draws only from the seated validators and the next 10 by rank, Support Newcomers only from the
+/// last 10 seats and the 20 ranks below the cutoff. Rank follows vote weight, so validators
+/// without votes rank below everyone else.
 ///
 /// Diversity recomputes every weight before each draw, spreading picks over rank bands first and
 /// declarations second:
@@ -329,11 +336,11 @@ impl OperatorPicks {
 /// ```
 ///
 /// - **Rank bands.** `r` counts the picks so far in the candidate's rank band. Diversity's pool,
-///   in rank order (validators without a rank last, then by name), is split into
-///   `⌈n / 10⌉` bands whose sizes differ by at most one: the validator at position `i`, from 0,
-///   is in band `⌊i × bands / n⌋`. A pick from outside that pool (a Maximum Rewards pick, before a
-///   top-up) counts in the band of the position it would take. Ranks are chain data, so this part
-///   cannot be declared falsely, and it has no bound.
+///   in rank order (then by name), is split into `⌈n / 10⌉` bands whose sizes differ by at most
+///   one: the validator at position `i`, from 0, is in band `⌊i × bands / n⌋`, computed in 64-bit
+///   integers so that every target gives the same bands. A pick from outside that pool (a pick of
+///   another mode, before a top-up) counts in the band of the position it would take. Ranks are
+///   chain data, so this part cannot be declared falsely, and it has no bound.
 /// - **Declarations.** `o`, `h` and `g` are the candidate's bonuses for its declared operator,
 ///   hosting provider and region (from its declared country). In each of these dimensions the
 ///   common value is the declared value that the most picks so far share, `m` of them; a
@@ -433,8 +440,8 @@ pub fn select(
             mode: request.mode,
             mode_picks: u32::try_from(mode_picks).unwrap_or(u32::MAX),
         };
-        // Top-up picks never take a declared operator past the Maximum Rewards cap.
-        let cap = (request.mode == Mode::MaximumRewards).then_some(&mut operators);
+        // Top-up picks never take a declared operator past the mode's operator cap.
+        let cap = request.mode.caps_operators().then_some(&mut operators);
         draw_diverse(
             &mut fill,
             count,
@@ -530,9 +537,9 @@ fn entrants<'a>(
         .collect()
 }
 
-/// Draw from `pool` by static weights until `count` picks or the pool is empty. Maximum Rewards
-/// skips operator groups with [`MAX_PICKS_PER_OPERATOR`] picks, the group of validators that
-/// declare no operator included, and counts its picks in `operators`.
+/// Draw from `pool` by static weights until `count` picks or the pool is empty. Maximum Rewards and
+/// Support Newcomers skip operator groups with [`MAX_PICKS_PER_OPERATOR`] picks, the group of
+/// validators that declare no operator included, and count their picks in `operators`.
 fn draw_weighted(
     mode: Mode,
     pool: &mut Vec<Entrant<'_>>,
@@ -542,8 +549,9 @@ fn draw_weighted(
     operators: &mut OperatorPicks,
     picks: &mut Vec<Pick>,
 ) {
+    let capped = mode.caps_operators();
     while picks.len() < count {
-        if mode == Mode::MaximumRewards {
+        if capped {
             pool.retain(|entrant| !operators.full(entrant));
         }
         let weights: Vec<u128> = pool.iter().map(|e| e.candidate.weight).collect();
@@ -552,12 +560,12 @@ fn draw_weighted(
         };
         let entrant = pool.remove(drawn.index);
         let step = u32::try_from(picks.len() + 1).unwrap_or(u32::MAX);
-        let capped = (mode == Mode::MaximumRewards).then(|| {
+        let cap = capped.then(|| {
             let picked = operators.add(&entrant);
             OperatorPicks::reason(&entrant, picked)
         });
         let mut reasons = entrant.candidate.reasons;
-        reasons.extend(capped);
+        reasons.extend(cap);
         reasons.push(Reason::Drawn {
             pool: mode,
             step,
@@ -578,9 +586,9 @@ fn draw_weighted(
 
 /// Draw from `pool` by Diversity weights, recomputed before each draw, until `count` picks or
 /// the pool is empty. `top_up` marks picks that fill another mode's selection. With `cap` (a
-/// Maximum Rewards top-up), validators whose declared operator has [`MAX_PICKS_PER_OPERATOR`]
-/// picks are skipped; validators that declare no operator are not limited here, as Diversity
-/// already spreads them.
+/// top-up of Maximum Rewards or Support Newcomers), validators whose declared operator has
+/// [`MAX_PICKS_PER_OPERATOR`] picks are skipped; validators that declare no operator are not
+/// limited here, as Diversity already spreads them.
 fn draw_diverse(
     pool: &mut Vec<Entrant<'_>>,
     count: usize,

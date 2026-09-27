@@ -147,6 +147,67 @@ fn a_newcomer_that_climbed_no_longer_needs_support() {
 }
 
 #[test]
+fn newcomer_picks_that_fall_far_below_or_exceed_the_operator_cap() {
+    let mut snapshot = synthetic();
+    let chosen = selection(&snapshot, Mode::SupportNewcomers, "addr-holder-check");
+    assert_eq!(chosen.topped_up, 0);
+    let mut by_step: Vec<_> = chosen.entries.iter().collect();
+    by_step.sort_by_key(|p| p.step);
+    // One pick falls to rank 74, more than 20 ranks below the last seat.
+    let fell = by_step[0].validator.clone();
+    record_mut(&mut snapshot, &fell).rank = Some(74);
+    // Three later picks now declare the same operator: the third by draw order exceeds the cap.
+    let same: Vec<String> = by_step[1..4].iter().map(|p| p.validator.clone()).collect();
+    for name in &same {
+        let record = record_mut(&mut snapshot, name);
+        record.declarations.as_mut().unwrap().operator = Some("Merged Operator".to_owned());
+    }
+    let findings = check(&chosen, &snapshot).unwrap();
+    let failed = failing(&findings);
+    assert_eq!(failed.len(), 2, "{failed:?}");
+    assert!(failed.contains(&(
+        fell.as_str(),
+        &[Shortfall::FarBelowCutoff {
+            rank: 74,
+            seats: 53,
+            ranks_below: 20
+        }][..]
+    )));
+    assert!(failed.contains(&(
+        same[2].as_str(),
+        &[Shortfall::OperatorCap {
+            operator: Some("Merged Operator".to_owned()),
+            maximum: 2
+        }][..]
+    )));
+    let finding = findings.iter().find(|f| f.validator == fell).unwrap();
+    assert_eq!(
+        finding.why(),
+        "Rank 74 is more than 20 ranks below the last seat (53)"
+    );
+}
+
+#[test]
+fn a_diversity_pick_that_falls_out_of_the_ranks_is_flagged() {
+    let mut snapshot = synthetic();
+    let chosen = selection(&snapshot, Mode::Diversity, "addr-holder-check");
+    let name = chosen.entries[2].validator.clone();
+    record_mut(&mut snapshot, &name).rank = Some(64);
+    let findings = check(&chosen, &snapshot).unwrap();
+    assert_eq!(
+        failing(&findings),
+        vec![(
+            name.as_str(),
+            &[Shortfall::FarBelowCutoff {
+                rank: 64,
+                seats: 53,
+                ranks_below: 10
+            }][..]
+        )]
+    );
+}
+
+#[test]
 fn rewards_picks_that_stop_paying_or_exceed_the_operator_cap() {
     let mut snapshot = synthetic();
     let chosen = selection(&snapshot, Mode::MaximumRewards, "addr-holder-check");

@@ -9,7 +9,8 @@ use core::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Mode {
     /// The recommended default: spread the vote across rank bands first and declared operators,
-    /// hosting providers and regions second, among validators in good health.
+    /// hosting providers and regions second, among the seated validators and the next 10 by rank
+    /// that are in good health.
     Diversity,
     /// Favour validators with a strong record over the 30-day window: slots forged against slots
     /// assigned, with no jailing or equivocation, after at least 7 days of seated history.
@@ -17,8 +18,9 @@ pub enum Mode {
     /// Favour validators with the highest measured payouts per unit of vote weight, at most two
     /// picks per declared operator.
     MaximumRewards,
-    /// Favour healthy validators near or below the seat cutoff: registered for at least 7 days,
-    /// with complete declarations and no penalties.
+    /// Favour healthy validators within the last 10 seats or the 20 ranks below the cutoff:
+    /// registered for at least 7 days, with complete declarations and no penalties, at most two
+    /// picks per declared operator.
     SupportNewcomers,
 }
 
@@ -45,6 +47,12 @@ impl Mode {
     /// The mode for a stable identifier (see [`Mode::id`]).
     pub fn from_id(id: &str) -> Option<Mode> {
         Mode::ALL.into_iter().find(|mode| mode.id() == id)
+    }
+
+    /// Whether the mode gives at most [`MAX_PICKS_PER_OPERATOR`](crate::MAX_PICKS_PER_OPERATOR)
+    /// picks to one declared operator: Maximum Rewards and Support Newcomers.
+    pub(crate) const fn caps_operators(self) -> bool {
+        matches!(self, Mode::MaximumRewards | Mode::SupportNewcomers)
     }
 
     /// The mode's name as wallets show it, for example `Maximum Rewards`.

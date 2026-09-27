@@ -41,10 +41,10 @@ impl Finding {
 ///
 /// A pick drawn from the mode's pool is judged by the selection's mode, a top-up pick by
 /// Diversity, and a pick the holder chose only by whether the validator is still registered and
-/// has not resigned. For Maximum Rewards, picks beyond two per operator (by current
-/// declarations, in draw order) no longer meet the cap: among the mode's picks, validators that
-/// declare no operator count as one operator; top-up picks count only towards a declared
-/// operator's two.
+/// has not resigned. For Maximum Rewards and Support Newcomers, picks beyond two per operator (by
+/// current declarations, in draw order) no longer meet the cap: among the mode's picks,
+/// validators that declare no operator count as one operator; top-up picks count only towards a
+/// declared operator's two.
 pub fn check(
     selection: &Selection,
     snapshot: &VoteSnapshot,
@@ -105,15 +105,15 @@ pub fn check(
             shortfalls,
         });
     }
-    if selection.mode == Mode::MaximumRewards {
+    if selection.mode.caps_operators() {
         apply_operator_cap(selection, snapshot, &mut findings);
     }
     Ok(findings)
 }
 
-/// Mark Maximum Rewards picks beyond the cap of their operator, in draw order, as `select`
-/// applies it: mode picks count towards their operator group, the group of validators that
-/// declare no operator included; top-up picks count only towards a declared operator.
+/// Mark picks beyond the cap of their operator, in draw order, as `select` applies it: mode picks
+/// count towards their operator group, the group of validators that declare no operator
+/// included; top-up picks count only towards a declared operator.
 fn apply_operator_cap(selection: &Selection, snapshot: &VoteSnapshot, findings: &mut [Finding]) {
     let mut drawn: Vec<(&Pick, &mut Finding)> = selection
         .entries

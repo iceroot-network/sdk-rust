@@ -19,6 +19,9 @@
 // lowered to Argon2's own minimums, the ceilings unchanged). Records with the bounds "standard"
 // use the format's real bounds, including one keystore at the floor that is fully derived.
 //
+// It writes S07-keystore.jsonl into [out dir] (vectors/sdk by default) and rewrites the directory's
+// MANIFEST.sha256 over every vector file in it.
+//
 // The file is in the heartwood-vectors/1 record format: a meta record, then one record per case,
 // {"op", "network", "height", "name", "input", "output"} or the same with "error" in place of
 // "output". A keystore belongs to no network, so every record has network "any" and height 0.
@@ -51,6 +54,8 @@ const HEADER_LEN = 60;
 const MAX_PASSWORD_BYTES = 1024;
 const ARMOR_PREFIX = 'irks:';
 const MAX_DECODED_LEN = 1024;
+// The unpadded base64url length of MAX_DECODED_LEN bytes: 1,366 characters.
+const MAX_ENCODED_LEN = Math.ceil((MAX_DECODED_LEN * 4) / 3);
 
 const KINDS = {
     1: { name: 'bip39-entropy', lengths: [24, 28, 32], supported: true },
@@ -231,18 +236,24 @@ function armor(bytes) {
     return ARMOR_PREFIX + Buffer.from(bytes).toString('base64url');
 }
 
+// The checks in the order the format fixes: the prefix, the alphabet, the length, and then the
+// canonical decoding.
 function dearmor(text) {
     if (!text.startsWith(ARMOR_PREFIX)) {
         throw malformed('armor-prefix', 'the text does not start with the keystore prefix');
     }
     const encoded = text.slice(ARMOR_PREFIX.length);
-    if (encoded.length > Math.ceil(MAX_DECODED_LEN / 3) * 4) {
+    const notCanonical = () => malformed('armor-encoding', 'the text is not canonical unpadded base64url');
+    if (!/^[A-Za-z0-9_-]*$/.test(encoded)) {
+        throw notCanonical();
+    }
+    if (encoded.length > MAX_ENCODED_LEN) {
         throw malformed('armor-length', 'the text is longer than any keystore');
     }
     // Node's decoder is lenient; the canonical form is the one its encoder writes back.
     const bytes = Buffer.from(encoded, 'base64url');
-    if (!/^[A-Za-z0-9_-]*$/.test(encoded) || encoded.length % 4 === 1 || bytes.toString('base64url') !== encoded) {
-        throw malformed('armor-encoding', 'the text is not canonical unpadded base64url');
+    if (encoded.length % 4 === 1 || bytes.toString('base64url') !== encoded) {
+        throw notCanonical();
     }
     return bytes;
 }
@@ -314,6 +325,10 @@ const P_SMALL = { memoryKib: 32, iterations: 1, parallelism: 1 };
 const P_TWO = { memoryKib: 64, iterations: 2, parallelism: 2 };
 const P_FOUR = { memoryKib: 256, iterations: 3, parallelism: 4 };
 const P_FLOOR = { memoryKib: 19456, iterations: 2, parallelism: 1 };
+// Memory that is not a multiple of 4 KiB per lane: Argon2 fills 4p * floor(m / 4p) blocks but
+// hashes m itself into its first block, a point where implementations can differ.
+const P_ODD_FOUR = { memoryKib: 67, iterations: 2, parallelism: 4 };
+const P_ODD_THREE = { memoryKib: 29, iterations: 1, parallelism: 3 };
 
 const ASCII = 'correct horse battery staple';
 const NFC = 'pässwörd Ångström';
@@ -407,6 +422,16 @@ async function main() {
     const kLig = encryptCase('24 words, compatibility characters', { secret: E32, password: LIGATURE, params: P_SMALL });
     const kCjk = encryptCase('24 words, CJK and emoji password', { secret: E32, password: CJK, params: P_SMALL });
     const kLong = encryptCase('24 words, longest password', { secret: E32, password: LONGEST, params: P_SMALL });
+    const kOdd4 = encryptCase('24 words, memory not a multiple of four blocks per lane, four lanes', {
+        secret: E32,
+        password: ASCII,
+        params: P_ODD_FOUR,
+    });
+    const kOdd3 = encryptCase('21 words, memory not a multiple of four blocks per lane, three lanes', {
+        secret: E28,
+        password: ASCII,
+        params: P_ODD_THREE,
+    });
     const kFloor = encryptCase('24 words, at the standard floor', {
         secret: E32,
         password: ASCII,
@@ -448,6 +473,8 @@ async function main() {
     decryptCase('compatibility characters typed decomposed', kLig.bytes, LIGATURE.normalize('NFKD'), 'test');
     decryptCase('CJK and emoji password', kCjk.bytes, CJK, 'test');
     decryptCase('longest password', kLong.bytes, LONGEST, 'test');
+    decryptCase('memory not a multiple of four blocks per lane, four lanes', kOdd4.bytes, ASCII, 'test');
+    decryptCase('memory not a multiple of four blocks per lane, three lanes', kOdd3.bytes, ASCII, 'test');
     decryptCase('at the standard floor', kFloor.bytes, ASCII, 'standard');
     decryptCase('wrong password', k32.bytes, 'correct horse battery stapler', 'test');
     decryptCase('wrong password, case', k32.bytes, ASCII.toUpperCase(), 'test');
@@ -604,6 +631,15 @@ async function main() {
     inspectRefused('payload length 16', (b) => {
         b[59] = 16;
     });
+    const inspectRefusedFrom = (name, bytes, edit) => {
+        const result = clone(bytes);
+        edit(result);
+        const outcome = inspectCase(name, result);
+        check(outcome instanceof KeystoreError, `${name} must fail`);
+    };
+    inspectRefusedFrom('the reserved kind with 24 bytes, a length it does not allow', k24.bytes, (b) => {
+        b[58] = 2;
+    });
     inspectRefused('one byte more', (b) => Buffer.concat([b, Buffer.from([0])]));
     inspectRefused('not a keystore', () => Buffer.from('{"version":3,"crypto":{}}', 'utf8'));
 
@@ -617,6 +653,7 @@ async function main() {
     decryptTextCase('decrypt from the text form', text32, ASCII);
     const body = text32.slice(ARMOR_PREFIX.length);
     dearmorCase('uppercase prefix', `IRKS:${body}`);
+    dearmorCase('mixed-case prefix', `Irks:${body}`);
     dearmorCase('no prefix', body);
     dearmorCase('prefix without the colon', `irks${body}`);
     dearmorCase('padding', `${text24}==`);
@@ -631,7 +668,20 @@ async function main() {
     const index = alphabet.indexOf(last);
     check(index % 16 === 0, 'the last character of a 100-byte text has four zero bits');
     dearmorCase('unused bits set in the last character', `${text24.slice(0, -1)}${alphabet[index + 1]}`);
+    dearmorCase('a character outside ASCII', `${ARMOR_PREFIX}${body.slice(0, 10)}\u00e9${body.slice(11)}`);
+    dearmorCase('a fullwidth letter', `${ARMOR_PREFIX}\uff21${body.slice(1)}`);
     dearmorCase('longer than any keystore', `${ARMOR_PREFIX}${'A'.repeat(1372)}`);
+    // The length limit is exact: 1,366 characters decode to 1,024 bytes; 1,367 and 1,368 would
+    // decode to 1,025 and 1,026, and are refused for their length.
+    check(MAX_ENCODED_LEN === 1366, 'the longest text');
+    const longest = armor(bytesOf('longest', MAX_DECODED_LEN));
+    check(longest.length === ARMOR_PREFIX.length + MAX_ENCODED_LEN, 'the longest text length');
+    dearmorCase('the longest text, 1,024 bytes', longest);
+    dearmorCase('one character longer than the longest text', `${longest}A`);
+    dearmorCase('two characters longer than the longest text', `${longest}AA`);
+    // The alphabet is checked before the length: long text that is not base64url is refused as
+    // such, whether its length is counted in bytes, UTF-16 units or characters.
+    dearmorCase('long text outside the alphabet', `${ARMOR_PREFIX}${'\u00e9'.repeat(700)}`);
     dearmorCase('empty after the prefix', ARMOR_PREFIX);
 
     const file = path.join(outDir, `${CLASS}.jsonl`);
@@ -649,6 +699,15 @@ async function main() {
     const lines = [meta, ...records].map((r) => JSON.stringify(r));
     fs.writeFileSync(file, lines.join('\n') + '\n');
     console.log(`${CLASS}: ${records.length} records`);
+
+    // MANIFEST.sha256, in the format of sha256sum, over every vector file of the directory, as
+    // gen-sdk-vectors.js writes it.
+    const manifest = fs
+        .readdirSync(outDir)
+        .filter((name) => name.endsWith('.jsonl'))
+        .sort()
+        .map((name) => `${hex(sha256(fs.readFileSync(path.join(outDir, name))))}  ${name}`);
+    fs.writeFileSync(path.join(outDir, 'MANIFEST.sha256'), manifest.join('\n') + '\n');
 
     function decryptTextCase(name, text, password) {
         const outcome = attempt(() => decrypt(dearmor(text), password, 'test'));

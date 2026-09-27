@@ -10,12 +10,9 @@
     clippy::indexing_slicing
 )]
 
-use std::convert::Infallible;
-
-use iceroot_keystore::rand_core::{TryCryptoRng, TryRng};
 use iceroot_keystore::{
-    ARMOR_PREFIX, Bounds, Error, HEADER_LEN, Malformed, Param, Params, Payload, PayloadKind,
-    Preset, SALT_LEN, SystemRng, TAG_LEN, armor, change_password, dearmor, decrypt,
+    ARMOR_PREFIX, Bounds, Error, HEADER_LEN, Header, Malformed, Param, Params, Payload,
+    PayloadKind, Preset, SALT_LEN, TAG_LEN, armor, change_password, dearmor, decrypt,
     decrypt_with_bounds, encrypt, encrypt_with_salt_and_nonce, inspect, reencrypt,
 };
 
@@ -32,108 +29,47 @@ fn entropy() -> Payload {
     Payload::bip39_entropy(&[0x42; 32]).unwrap()
 }
 
-/// A counter, for reproducible salts and nonces.
-struct Counter(u8);
-
-impl TryRng for Counter {
-    type Error = Infallible;
-
-    fn try_next_u32(&mut self) -> Result<u32, Infallible> {
-        self.0 = self.0.wrapping_add(1);
-        Ok(u32::from(self.0))
-    }
-
-    fn try_next_u64(&mut self) -> Result<u64, Infallible> {
-        self.try_next_u32().map(u64::from)
-    }
-
-    fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Infallible> {
-        for byte in dst {
-            self.0 = self.0.wrapping_add(1);
-            *byte = self.0;
-        }
-        Ok(())
-    }
+/// Neither the salt nor the nonce of `after` is the one of `before`.
+fn fresh(before: &[u8], after: &[u8]) {
+    let (before, after): (Header, Header) = (inspect(before).unwrap(), inspect(after).unwrap());
+    assert_ne!(before.salt(), after.salt());
+    assert_ne!(before.nonce(), after.nonce());
 }
-
-impl TryCryptoRng for Counter {}
-
-/// A generator that always fails.
-struct Broken;
-
-#[derive(Debug)]
-struct Unavailable;
-
-impl std::fmt::Display for Unavailable {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("unavailable")
-    }
-}
-
-impl std::error::Error for Unavailable {}
-
-impl TryRng for Broken {
-    type Error = Unavailable;
-
-    fn try_next_u32(&mut self) -> Result<u32, Unavailable> {
-        Err(Unavailable)
-    }
-
-    fn try_next_u64(&mut self) -> Result<u64, Unavailable> {
-        Err(Unavailable)
-    }
-
-    fn try_fill_bytes(&mut self, _: &mut [u8]) -> Result<(), Unavailable> {
-        Err(Unavailable)
-    }
-}
-
-impl TryCryptoRng for Broken {}
 
 #[test]
-fn encrypt_and_decrypt_with_the_system_rng() {
-    let keystore = encrypt(&entropy(), "hunter2 hunter2", FLOOR, &mut SystemRng).unwrap();
+fn encrypt_and_decrypt_with_the_system_generator() {
+    let keystore = encrypt(&entropy(), "hunter2 hunter2", FLOOR).unwrap();
     assert_eq!(keystore.len(), HEADER_LEN + 32 + TAG_LEN);
     assert_eq!(decrypt(&keystore, "hunter2 hunter2").unwrap(), entropy());
     assert_eq!(
         decrypt(&keystore, "hunter3 hunter3").unwrap_err(),
         Error::WrongPasswordOrCorrupt
     );
-    // Two encryptions of the same payload share no salt or nonce.
-    let again = encrypt(&entropy(), "hunter2 hunter2", FLOOR, &mut SystemRng).unwrap();
-    let (first, second) = (inspect(&keystore).unwrap(), inspect(&again).unwrap());
-    assert_ne!(first.salt(), second.salt());
-    assert_ne!(first.nonce(), second.nonce());
-}
-
-#[test]
-fn the_rng_supplies_salt_then_nonce() {
-    let keystore = encrypt(&entropy(), "password", FLOOR, &mut Counter(0)).unwrap();
+    // Two encryptions of the same payload share no salt or nonce, and the two are not equal.
+    let again = encrypt(&entropy(), "hunter2 hunter2", FLOOR).unwrap();
+    fresh(&keystore, &again);
     let header = inspect(&keystore).unwrap();
-    let salt: Vec<u8> = (1..=16).collect();
-    let nonce: Vec<u8> = (17..=40).collect();
-    assert_eq!(header.salt().as_slice(), salt.as_slice());
-    assert_eq!(header.nonce().as_slice(), nonce.as_slice());
-    assert_eq!(
-        keystore,
-        encrypt_with_salt_and_nonce(
-            &entropy(),
-            "password",
-            FLOOR,
-            &salt.try_into().unwrap(),
-            &nonce.try_into().unwrap(),
-            &Bounds::STANDARD,
-        )
-        .unwrap()
-    );
+    assert_ne!(header.salt(), &[0; SALT_LEN]);
+    assert_ne!(header.salt().as_slice(), &header.nonce()[..SALT_LEN]);
 }
 
 #[test]
-fn a_failing_rng_is_reported() {
-    assert_eq!(
-        encrypt(&entropy(), "password", FLOOR, &mut Broken).unwrap_err(),
-        Error::RandomnessUnavailable
-    );
+fn the_explicit_salt_and_nonce_are_the_headers() {
+    let salt: [u8; 16] = std::array::from_fn(|i| i as u8 + 1);
+    let nonce: [u8; 24] = std::array::from_fn(|i| i as u8 + 17);
+    let keystore = encrypt_with_salt_and_nonce(
+        &entropy(),
+        "password",
+        FLOOR,
+        &salt,
+        &nonce,
+        &Bounds::STANDARD,
+    )
+    .unwrap();
+    let header = inspect(&keystore).unwrap();
+    assert_eq!(header.salt(), &salt);
+    assert_eq!(header.nonce(), &nonce);
+    assert_eq!(decrypt(&keystore, "password").unwrap(), entropy());
 }
 
 #[test]
@@ -145,12 +81,7 @@ fn encrypt_takes_a_preset_or_explicit_parameters() {
         tight.check(&Preset::Desktop.into()).unwrap_err().code(),
         "ParamsOutOfRange"
     );
-    let below = encrypt(
-        &entropy(),
-        "password",
-        Params::new(19 * 1024 - 1, 2, 1),
-        &mut SystemRng,
-    );
+    let below = encrypt(&entropy(), "password", Params::new(19 * 1024 - 1, 2, 1));
     assert_eq!(
         below.unwrap_err(),
         Error::ParamsOutOfRange {
@@ -164,41 +95,29 @@ fn encrypt_takes_a_preset_or_explicit_parameters() {
 
 #[test]
 fn change_password_and_reencrypt() {
-    let keystore = encrypt(&entropy(), "old password", FLOOR, &mut SystemRng).unwrap();
-    let changed = change_password(
-        &keystore,
-        "old password",
-        "new password",
-        FLOOR,
-        &mut SystemRng,
-    )
-    .unwrap();
+    let keystore = encrypt(&entropy(), "old password", FLOOR).unwrap();
+    let changed = change_password(&keystore, "old password", "new password", FLOOR).unwrap();
+    fresh(&keystore, &changed);
     assert_eq!(decrypt(&changed, "new password").unwrap(), entropy());
     assert_eq!(
         decrypt(&changed, "old password").unwrap_err(),
         Error::WrongPasswordOrCorrupt
     );
     assert_eq!(
-        change_password(&keystore, "wrong", "new password", FLOOR, &mut SystemRng).unwrap_err(),
+        change_password(&keystore, "wrong", "new password", FLOOR).unwrap_err(),
         Error::WrongPasswordOrCorrupt
     );
     // The new password and parameters are refused before the old password is tried.
     assert_eq!(
-        change_password(&keystore, "wrong", "", FLOOR, &mut SystemRng)
+        change_password(&keystore, "wrong", "", FLOOR)
             .unwrap_err()
             .code(),
         "InvalidPassword"
     );
     assert_eq!(
-        change_password(
-            &keystore,
-            "wrong",
-            "new",
-            Params::new(8, 1, 1),
-            &mut SystemRng
-        )
-        .unwrap_err()
-        .code(),
+        change_password(&keystore, "wrong", "new", Params::new(8, 1, 1))
+            .unwrap_err()
+            .code(),
         "ParamsOutOfRange"
     );
 
@@ -209,23 +128,21 @@ fn change_password_and_reencrypt() {
             .params()
             .is_weaker_than(&stronger)
     );
-    let upgraded = reencrypt(&keystore, "old password", stronger, &mut SystemRng).unwrap();
+    let upgraded = reencrypt(&keystore, "old password", stronger).unwrap();
     let header = inspect(&upgraded).unwrap();
     assert_eq!(header.params(), stronger);
     assert!(!header.params().is_weaker_than(&stronger));
-    assert_ne!(header.salt(), inspect(&keystore).unwrap().salt());
+    fresh(&keystore, &upgraded);
     assert_eq!(decrypt(&upgraded, "old password").unwrap(), entropy());
+    // Re-encrypting with the same parameters still draws a new salt and nonce.
+    let again = reencrypt(&keystore, "old password", FLOOR).unwrap();
+    fresh(&keystore, &again);
+    assert_eq!(decrypt(&again, "old password").unwrap(), entropy());
 }
 
 #[test]
 fn a_tighter_memory_ceiling_refuses_before_deriving() {
-    let keystore = encrypt(
-        &entropy(),
-        "password",
-        Params::new(24 * 1024, 2, 1),
-        &mut SystemRng,
-    )
-    .unwrap();
+    let keystore = encrypt(&entropy(), "password", Params::new(24 * 1024, 2, 1)).unwrap();
     let tight = Bounds::STANDARD.with_memory_ceiling_kib(20 * 1024);
     assert_eq!(
         decrypt_with_bounds(&keystore, "password", &tight).unwrap_err(),
@@ -301,7 +218,7 @@ fn errors_have_codes_and_details() {
 
 #[test]
 fn the_reserved_kind_is_inspected_but_not_decrypted() {
-    let mut keystore = encrypt(&entropy(), "password", FLOOR, &mut SystemRng).unwrap();
+    let mut keystore = encrypt(&entropy(), "password", FLOOR).unwrap();
     keystore[58] = PayloadKind::MlDsa65Seed.code();
     let header = inspect(&keystore).unwrap();
     assert_eq!(header.payload_kind(), PayloadKind::MlDsa65Seed);
@@ -314,7 +231,7 @@ fn the_reserved_kind_is_inspected_but_not_decrypted() {
 
 #[test]
 fn text_form() {
-    let keystore = encrypt(&entropy(), "password", FLOOR, &mut SystemRng).unwrap();
+    let keystore = encrypt(&entropy(), "password", FLOOR).unwrap();
     let text = armor(&keystore);
     assert!(text.starts_with(ARMOR_PREFIX));
     assert!(

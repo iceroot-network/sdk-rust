@@ -53,10 +53,17 @@ impl Params {
         self.memory_kib as u64 * self.iterations as u64
     }
 
-    /// Whether these parameters cost an attacker less than `other`: less memory or fewer passes.
-    /// An app re-encrypts a keystore whose parameters are weaker than its platform's preset.
+    /// Whether a keystore with these parameters should move to `other`, the parameters an app
+    /// writes now: when they have less memory, or the same memory and fewer passes. An app
+    /// re-encrypts a keystore whose parameters are weaker than its platform's preset.
+    ///
+    /// Memory comes first, since it is what makes an attacker's guesses expensive, and a keystore
+    /// never moves to less memory: one written with the desktop preset (256 MiB, 3 passes) and
+    /// opened by a web app is not weaker than the web preset (64 MiB, 4 passes) and keeps its
+    /// 256 MiB.
     pub const fn is_weaker_than(&self, other: &Params) -> bool {
-        self.memory_kib < other.memory_kib || self.iterations < other.iterations
+        self.memory_kib < other.memory_kib
+            || (self.memory_kib == other.memory_kib && self.iterations < other.iterations)
     }
 }
 
@@ -133,11 +140,10 @@ impl Bounds {
         max_work: 2 * 1024 * 1024,
     };
 
-    /// Tests only (feature `test-params`): the standard ceilings with the floor lowered to
-    /// Argon2's own minimums (8 KiB, 1 iteration, 1 lane), so that vectors run in milliseconds.
-    /// A keystore written under these bounds below the standard floor never opens with
-    /// [`crate::decrypt`].
-    #[cfg(feature = "test-params")]
+    /// Tests only (feature `testing`): the standard ceilings with the floor lowered to Argon2's
+    /// own minimums (8 KiB, 1 iteration, 1 lane), so that vectors run in milliseconds. A keystore
+    /// written under these bounds below the standard floor never opens with [`crate::decrypt`].
+    #[cfg(feature = "testing")]
     pub const TEST: Bounds = Bounds {
         floor: Params::new(8, 1, 1),
         ceiling: Bounds::STANDARD.ceiling,
@@ -283,6 +289,29 @@ mod tests {
             }
         );
         bounds.check(&Params::new(512 * 1024, 4, 1)).unwrap();
+    }
+
+    #[test]
+    fn a_keystore_never_moves_to_less_memory() {
+        let [desktop, mobile, web] = Preset::ALL.map(Preset::params);
+        // Across platforms: up in memory only.
+        assert!(web.is_weaker_than(&desktop) && web.is_weaker_than(&mobile));
+        assert!(mobile.is_weaker_than(&desktop));
+        assert!(!desktop.is_weaker_than(&web) && !mobile.is_weaker_than(&web));
+        assert!(!desktop.is_weaker_than(&mobile));
+        // A preset that rises in passes only, or in memory only.
+        assert!(desktop.is_weaker_than(&Params::new(256 * 1024, 4, 4)));
+        assert!(desktop.is_weaker_than(&Params::new(384 * 1024, 2, 4)));
+        // Lanes play no part, and equal parameters are not weaker.
+        for preset in Preset::ALL {
+            let params = preset.params();
+            assert!(!params.is_weaker_than(&params));
+            assert!(!params.is_weaker_than(&Params::new(
+                params.memory_kib(),
+                params.iterations(),
+                1
+            )));
+        }
     }
 
     #[test]

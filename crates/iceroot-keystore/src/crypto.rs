@@ -4,8 +4,18 @@
 use argon2::{Algorithm, Argon2, Block, Version};
 use chacha20poly1305::aead::AeadInOut;
 use chacha20poly1305::{KeyInit, Tag, XChaCha20Poly1305, XNonce};
-use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::char::{canonical_combining_class, decompose_compatible};
 use zeroize::{Zeroize, Zeroizing};
+
+// The state that holds secrets inside the primitives is wiped when dropped only with the `zeroize`
+// features the manifest turns on: the Blake2b state in which Argon2 absorbs the password, and
+// XChaCha20's keystream buffer, which with the stored ciphertext gives the payload. Without them
+// this does not build. (Poly1305's feature has no marker to check.)
+const _: () = {
+    const fn wiped_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+    wiped_on_drop::<blake2::Blake2bVarCore>();
+};
+use cipher::zeroize as _;
 
 use crate::error::{Error, PasswordProblem};
 use crate::format::{NONCE_LEN, SALT_LEN, TAG_LEN};
@@ -20,6 +30,10 @@ pub const MAX_PASSWORD_BYTES: usize = 1024;
 /// The password as the KDF reads it: the UTF-8 bytes of its NFKD normalization, so that the same
 /// text typed on different systems gives the same key. Empty and over-long passwords are refused
 /// before any work is done.
+///
+/// The normalization is done here, over buffers of exact size that are wiped, rather than with
+/// `unicode-normalization`'s iterator, whose buffer moves to the heap for a character with a long
+/// decomposition or a run of combining marks, and is then freed without being wiped.
 pub(crate) fn password_bytes(password: &str) -> Result<Zeroizing<Vec<u8>>, Error> {
     if password.is_empty() {
         return Err(Error::InvalidPassword {
@@ -34,15 +48,47 @@ pub(crate) fn password_bytes(password: &str) -> Result<Zeroizing<Vec<u8>>, Error
             },
         });
     }
-    // Sized exactly first, so that the buffer never reallocates and leaves a copy behind.
-    let length: usize = password.nfkd().map(char::len_utf8).sum();
-    let mut bytes = Zeroizing::new(Vec::with_capacity(length));
-    let mut buffer = [0u8; 4];
-    for c in password.nfkd() {
-        bytes.extend_from_slice(c.encode_utf8(&mut buffer).as_bytes());
+    // Each buffer is sized exactly first, so that it never reallocates and leaves a copy behind.
+    let mut count = 0usize;
+    for c in password.chars() {
+        decompose_compatible(c, |_| count += 1);
     }
-    buffer.zeroize();
+    let mut chars: Zeroizing<Vec<char>> = Zeroizing::new(Vec::with_capacity(count));
+    for c in password.chars() {
+        decompose_compatible(c, |d| chars.push(d));
+    }
+    canonical_order(&mut chars);
+    let length: usize = chars.iter().map(|c| c.len_utf8()).sum();
+    let mut bytes = Zeroizing::new(Vec::with_capacity(length));
+    let mut buffer = Zeroizing::new([0u8; 4]);
+    for c in chars.iter() {
+        bytes.extend_from_slice(c.encode_utf8(buffer.as_mut_slice()).as_bytes());
+    }
     Ok(bytes)
+}
+
+/// The canonical ordering of the Unicode Standard (section 3.11), the last step of NFKD: each run
+/// of characters with a non-zero canonical combining class is sorted by class, keeping the order
+/// of equal classes. An insertion sort in place, so no scratch copy is made; a starter (class 0)
+/// is never passed.
+fn canonical_order(chars: &mut [char]) {
+    for i in 1..chars.len() {
+        let class = chars.get(i).map_or(0, |&c| canonical_combining_class(c));
+        if class == 0 {
+            continue;
+        }
+        let mut j = i;
+        while j > 0 {
+            let before = chars
+                .get(j - 1)
+                .map_or(0, |&c| canonical_combining_class(c));
+            if before <= class {
+                break;
+            }
+            chars.swap(j - 1, j);
+            j -= 1;
+        }
+    }
 }
 
 /// Argon2id of `password` and `salt` under `params`, which the caller has checked against its
@@ -129,6 +175,63 @@ mod tests {
         let decomposed = password_bytes("cafe\u{301} fi").unwrap();
         assert_eq!(composed.as_slice(), decomposed.as_slice());
         assert_eq!(composed.as_slice(), "cafe\u{301} fi".as_bytes());
+    }
+
+    /// The library's NFKD, which the normalization here must equal.
+    fn library_nfkd(text: &str) -> Vec<u8> {
+        use unicode_normalization::UnicodeNormalization;
+        text.nfkd().collect::<String>().into_bytes()
+    }
+
+    #[test]
+    fn nfkd_matches_the_library_for_every_character() {
+        for code in 0..=0x10_ffff_u32 {
+            let Some(c) = char::from_u32(code) else {
+                continue;
+            };
+            let text = c.to_string();
+            assert_eq!(
+                password_bytes(&text).unwrap().as_slice(),
+                library_nfkd(&text),
+                "U+{code:04X}"
+            );
+        }
+    }
+
+    #[test]
+    fn nfkd_matches_the_library_for_mixed_text() {
+        // Starters, combining marks of several classes (including out of order and repeated
+        // classes), Hangul, and characters with long compatibility decompositions.
+        const POOL: &str = concat!(
+            "aeZ1 \u{e9}\u{1e69}\u{1e0b}\u{301}\u{323}\u{302}\u{316}\u{31b}\u{345}",
+            "\u{5b0}\u{5b1}\u{5bc}\u{591}\u{94d}\u{93c}\u{f71}\u{f72}\u{f74}\u{f73}",
+            "\u{ac00}\u{d7a3}\u{1100}\u{1161}\u{11a8}\u{fb01}\u{fdfa}\u{3316}\u{2474}",
+            "\u{2460}\u{ff21}\u{1d400}\u{1f511}\u{5bc6}\u{f900}\u{2126}\u{212b}\u{344}",
+            "\u{1f82}\u{1dc0}\u{20d0}\u{302a}\u{3099}\u{ff9e}",
+        );
+        let pool: Vec<char> = POOL.chars().collect();
+        let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = move || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 33) as usize
+        };
+        for _ in 0..20_000 {
+            let length = 1 + next() % 24;
+            let text: String = (0..length).map(|_| pool[next() % pool.len()]).collect();
+            assert_eq!(
+                password_bytes(&text).unwrap().as_slice(),
+                library_nfkd(&text),
+                "{text:?}"
+            );
+        }
+        // A long run of combining marks in reverse class order.
+        let text = format!("a{}", "\u{345}\u{302}\u{323}\u{316}\u{31b}".repeat(40));
+        assert_eq!(
+            password_bytes(&text).unwrap().as_slice(),
+            library_nfkd(&text)
+        );
     }
 
     #[test]

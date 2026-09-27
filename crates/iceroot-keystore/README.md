@@ -7,11 +7,11 @@ The byte layout, the checks a reader makes and the rules for wallets are in [the
 ## Using it
 
 ```rust
-use iceroot_keystore::{Payload, Preset, SystemRng, decrypt, encrypt, inspect};
+use iceroot_keystore::{Payload, Preset, decrypt, encrypt, inspect};
 
 // The entropy of an 18-, 21- or 24-word recovery phrase: 24, 28 or 32 bytes.
 let payload = Payload::bip39_entropy(&entropy)?;
-let keystore: Vec<u8> = encrypt(&payload, password, Preset::Mobile, &mut SystemRng)?;
+let keystore: Vec<u8> = encrypt(&payload, password, Preset::Mobile)?;
 
 // Later: the header without the password, then the payload with it.
 let header = inspect(&keystore)?;
@@ -21,18 +21,19 @@ let entropy = payload.secret_bytes(); // wiped when `payload` is dropped
 
 | Function | What it does |
 |---|---|
-| `encrypt(payload, password, params, rng)` | Encrypt under a `Preset` or explicit `Params`, with a fresh salt and nonce from `rng` (`SystemRng` is the operating system's generator, `crypto.getRandomValues` in WebAssembly) |
+| `encrypt(payload, password, params)` | Encrypt under a `Preset` or explicit `Params`, with a fresh salt and nonce from the operating system's generator (`crypto.getRandomValues` in WebAssembly) |
 | `decrypt(bytes, password)` | Check the layout, the parameters and the password; return the `Payload` |
 | `decrypt_with_bounds(bytes, password, bounds)` | The same under tighter bounds, for example `Bounds::STANDARD.with_memory_ceiling_kib(...)` on a platform short of memory |
 | `inspect(bytes)` | The `Header` (version, KDF, parameters, salt, nonce, payload kind and length), without the password |
-| `change_password(bytes, old, new, params, rng)` | Decrypt and encrypt again under a new password, salt and nonce |
-| `reencrypt(bytes, password, params, rng)` | Move a keystore to new parameters, for example after `header.params().is_weaker_than(&Preset::Mobile.params())` |
+| `change_password(bytes, old, new, params)` | Decrypt and encrypt again under a new password, salt and nonce |
+| `reencrypt(bytes, password, params)` | Move a keystore to new parameters with a new salt and nonce, for example after `header.params().is_weaker_than(&Preset::Mobile.params())` |
 | `armor(bytes)`, `dearmor(text)` | The text form, `irks:` and unpadded base64url, for stores that hold strings only |
-| `encrypt_with_salt_and_nonce(...)` | Deterministic encryption for tests and vectors; never for real keystores |
+
+The salt and nonce always come from the operating system's generator: no function of a normal build takes them, or a generator, from the caller. Deterministic encryption for vectors (`encrypt_with_salt_and_nonce`) and the weak test bounds exist only with the test-only feature `testing`, which the crate's own tests turn on through a dev-dependency on itself and which `tools/check-deps.sh` refuses on any normal or build dependency; an app must never enable it.
 
 A payload is seed material only: the entropy of a BIP39 phrase of 18, 21 or 24 words (`PayloadKind::Bip39Entropy`; 12- and 15-word phrases are refused, as they are for keys). The phrase itself is never stored; `Mnemonic::from_entropy` in `iceroot-sdk-core` restores it from the entropy. The kind `PayloadKind::MlDsa65Seed` (the 32-byte ML-DSA-65 key generation seed of IceRoot's post-quantum keys) is reserved: this release reads its header but neither writes nor decrypts it, and a later release enables it without changing the format.
 
-Passwords are Unicode text, normalized to NFKD, non-empty and at most 1,024 bytes of UTF-8. Everything secret (the normalized password, the derived key, Argon2's memory, the payload) is wiped after use, and no error or `Debug` output contains a secret.
+Passwords are Unicode text, normalized to NFKD, non-empty and at most 1,024 bytes of UTF-8. Everything secret is wiped after use: the normalized password (normalized by the crate over buffers of exact size, not with a library iterator whose buffer can move to the heap), the derived key, Argon2's memory and the Blake2b state that absorbs the password, XChaCha20's keystream buffer and the Poly1305 state (through the `zeroize` features of `blake2`, `cipher` and `poly1305`, which `src/crypto.rs` checks at build time where it can), and the payload, which lives on the heap so that moving it leaves no copy. No error or `Debug` output contains a secret. What the crate cannot wipe: the caller's own copy of the password, stack temporaries inside Argon2's compression and XChaCha20's key setup, and whatever the caller copies out of `secret_bytes()`.
 
 ## Errors
 
@@ -49,7 +50,7 @@ Every check made with the key derived from the password gives the one error `Wro
 | `InvalidPayload` | Secret material of the wrong length for its kind | `kind`, `length` |
 | `InvalidPassword` | An empty or over-long password | `reason` (`empty`, `too-long`), and `bytes`, `maximum` |
 | `OutOfMemory` | The key derivation's memory could not be allocated | `memoryKib` |
-| `RandomnessUnavailable` | The generator failed | none |
+| `RandomnessUnavailable` | The operating system's generator failed | none |
 
 ## Presets and bounds
 
@@ -69,6 +70,8 @@ Every keystore's parameters must lie within `Bounds::STANDARD`, when it is writt
 | Work (memory in KiB times iterations) | 38,912 | 2,097,152 (2 GiB filled in all) |
 
 The floor is OWASP's minimum for Argon2id (19 MiB, 2 iterations, 1 lane): a keystore weaker than that is refused, even with the right password. The ceilings keep a crafted keystore from demanding more than 512 MiB of memory, or more than about 2.7 times the desktop preset's work, before its password is checked. The floor belongs to format version 1 and never rises within it, so every keystore written by an earlier release still opens; presets may rise in later releases, and an app moves a keystore to its current preset with `reencrypt` after an unlock.
+
+`Params::is_weaker_than` decides that move: a keystore is weaker than a preset when it has less memory, or the same memory and fewer iterations. Memory comes first and a keystore never moves to less of it, so a keystore written with the desktop preset and opened in a browser keeps its 256 MiB rather than dropping to the web preset's 64 MiB.
 
 ### Measurements
 
@@ -97,7 +100,7 @@ All three are at or above RFC 9106's second recommended option (64 MiB, 3 iterat
 
 - **Never store the password,** or anything derived from it, and never the phrase or the entropy outside a keystore. Hold the decrypted payload only while it is needed, and drop it on lock.
 - **Keep the keystore where the platform's storage is best:** a file in the app's private data directory, or the platform's secure storage where it fits (Keychain on iOS and macOS, Keystore-backed storage on Android, the system keyring on Linux and Windows); `chrome.storage.local` in an extension; IndexedDB in a page. The keystore is safe to store unprotected, but platform protection adds a second barrier. Use the text form only where a store holds strings.
-- **Pick the preset of the platform** the keystore is created on, and re-encrypt with `reencrypt` after an unlock when `inspect(...).params().is_weaker_than(&preset.params())`.
+- **Pick the preset of the platform** the keystore is created on, and re-encrypt with `reencrypt` after an unlock when `inspect(...).params().is_weaker_than(&preset.params())` (never to less memory).
 - **Show one message for `WrongPasswordOrCorrupt`,** such as "wrong password", and keep a backup path: the recovery phrase restores the account when a keystore is lost or damaged.
 - **Set the password rules:** the format refuses only an empty password; the app decides the minimum length and strength.
 - **In WebAssembly,** run the keystore functions in a worker that can be ended, or accept that the module's memory stays at its peak (64 MiB and more) after an unlock. Tighten the memory ceiling with `decrypt_with_bounds` where the platform cannot spare 512 MiB.
@@ -119,4 +122,6 @@ npm install --prefix <dir> @noble/hashes@2.4.0 @noble/ciphers@2.4.0
 node tools/oracle/gen-keystore-vectors.js <dir>
 ```
 
-Most vectors use parameters far below the format's floor, so that they run in milliseconds. Their records name the bounds `test`, which is `Bounds::TEST`: the floor lowered to Argon2's own minimums (8 KiB, 1 iteration, 1 lane), the ceilings unchanged. It exists only with the crate's `test-params` feature, which the crate's own tests turn on through a dev-dependency on itself and which no published build enables. Records with the bounds `standard` use the real bounds, including a keystore at the floor that is fully derived and one that the floor refuses.
+The generator also rewrites `vectors/sdk/MANIFEST.sha256`. The vectors include memory that is not a multiple of four blocks per lane (where Argon2 fills fewer blocks than the memory it hashes) and the exact edges of the text form's length.
+
+Most vectors use parameters far below the format's floor, so that they run in milliseconds. Their records name the bounds `test`, which is `Bounds::TEST`: the floor lowered to Argon2's own minimums (8 KiB, 1 iteration, 1 lane), the ceilings unchanged. It exists only with the crate's test-only `testing` feature (see above). Records with the bounds `standard` use the real bounds, including a keystore at the floor that is fully derived and one that the floor refuses.

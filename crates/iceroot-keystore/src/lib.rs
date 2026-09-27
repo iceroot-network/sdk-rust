@@ -11,7 +11,7 @@
 //! where its platform keeps secrets best, and never stores the password.
 //!
 //! ```
-//! use iceroot_keystore::{Params, Payload, SystemRng};
+//! use iceroot_keystore::{Params, Payload};
 //!
 //! # fn main() -> Result<(), iceroot_keystore::Error> {
 //! // The 32 bytes of entropy of a 24-word recovery phrase.
@@ -20,7 +20,7 @@
 //! // An app passes its platform's preset, such as `Preset::Mobile`. This example uses the lowest
 //! // parameters the format accepts, to run quickly.
 //! let params = Params::new(19 * 1024, 2, 1);
-//! let keystore = iceroot_keystore::encrypt(&payload, "correct horse", params, &mut SystemRng)?;
+//! let keystore = iceroot_keystore::encrypt(&payload, "correct horse", params)?;
 //!
 //! let header = iceroot_keystore::inspect(&keystore)?;
 //! assert_eq!(header.payload_len(), 32);
@@ -39,7 +39,8 @@
 //!
 //! Rules for the whole crate: no unsafe code, no panics on untrusted input, no I/O, and no secret
 //! in any `Debug` output or error. The password, the derived key, Argon2's memory and the payload
-//! are wiped after use.
+//! are wiped after use. Salts and nonces come from the operating system's generator only
+//! (`crypto.getRandomValues` in WebAssembly); nothing in a normal build lets a caller choose them.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -60,7 +61,6 @@ pub mod format;
 mod params;
 mod payload;
 
-use rand_core::TryCryptoRng;
 use zeroize::Zeroizing;
 
 pub use crate::armor::{ARMOR_PREFIX, armor, dearmor};
@@ -69,31 +69,24 @@ pub use crate::error::{Error, Malformed, Param, PasswordProblem};
 pub use crate::format::{HEADER_LEN, Header, Kdf, NONCE_LEN, SALT_LEN, TAG_LEN};
 pub use crate::params::{Bounds, Params, Preset};
 pub use crate::payload::{MAX_PAYLOAD_LEN, Payload, PayloadKind};
-/// The operating system's randomness (`crypto.getRandomValues` in WebAssembly), for
-/// [`encrypt`]'s salt and nonce.
-pub use getrandom::SysRng as SystemRng;
-/// The random number generator traits [`encrypt`] takes.
-pub use rand_core;
 
 /// Encrypt `payload` under `password` with `params` (a [`Preset`] or explicit [`Params`]), a
-/// fresh salt and a fresh nonce from `rng`.
+/// fresh salt and a fresh nonce from the operating system's generator (`crypto.getRandomValues`
+/// in WebAssembly).
 ///
 /// The parameters must lie within [`Bounds::STANDARD`], else [`Error::ParamsOutOfRange`]. The
 /// password is Unicode text, normalized to NFKD; it must not be empty and may have at most
-/// [`MAX_PASSWORD_BYTES`] bytes of UTF-8 ([`Error::InvalidPassword`]). A failing `rng` gives
+/// [`MAX_PASSWORD_BYTES`] bytes of UTF-8 ([`Error::InvalidPassword`]). A failing generator gives
 /// [`Error::RandomnessUnavailable`].
-pub fn encrypt<R: TryCryptoRng + ?Sized>(
+pub fn encrypt(
     payload: &Payload,
     password: &str,
     params: impl Into<Params>,
-    rng: &mut R,
 ) -> Result<Vec<u8>, Error> {
     let mut salt = [0u8; SALT_LEN];
     let mut nonce = [0u8; NONCE_LEN];
-    rng.try_fill_bytes(&mut salt)
-        .map_err(|_| Error::RandomnessUnavailable)?;
-    rng.try_fill_bytes(&mut nonce)
-        .map_err(|_| Error::RandomnessUnavailable)?;
+    getrandom::fill(&mut salt).map_err(|_| Error::RandomnessUnavailable)?;
+    getrandom::fill(&mut nonce).map_err(|_| Error::RandomnessUnavailable)?;
     seal(
         payload,
         password,
@@ -104,8 +97,10 @@ pub fn encrypt<R: TryCryptoRng + ?Sized>(
     )
 }
 
-/// Encrypt with an explicit salt and nonce, checking the parameters against `bounds`: for tests
-/// and vectors only. A salt or nonce must never be reused; [`encrypt`] draws both fresh.
+/// Tests only (feature `testing`): encrypt with the caller's salt and nonce, checking the
+/// parameters against `bounds`, for vectors. A salt or nonce must never be reused; [`encrypt`],
+/// which draws both fresh, is the only way a normal build writes a keystore.
+#[cfg(feature = "testing")]
 pub fn encrypt_with_salt_and_nonce(
     payload: &Payload,
     password: &str,
@@ -139,6 +134,7 @@ fn seal(
     let header = Header::new(*params, salt, nonce, kind, length);
     let aad = header.to_bytes();
     let key = crypto::derive_key(&password, &salt, params)?;
+    drop(password);
 
     // The plaintext is written into the output and encrypted where it lies, so no other copy of
     // it is made.
@@ -184,16 +180,20 @@ pub fn decrypt_with_bounds(
     bounds.check(&params)?;
     let password = crypto::password_bytes(password)?;
     let key = crypto::derive_key(&password, header.salt(), &params)?;
+    drop(password);
 
-    let mut buffer = Zeroizing::new([0u8; MAX_PAYLOAD_LEN]);
-    let plaintext = buffer
-        .get_mut(..parsed.ciphertext.len())
-        .ok_or(Error::Malformed {
-            problem: Malformed::PayloadLength,
-        })?;
-    plaintext.copy_from_slice(parsed.ciphertext);
-    crypto::open(&key, header.nonce(), parsed.aad, plaintext, parsed.tag)?;
-    Payload::from_parts(kind, plaintext)
+    // The ciphertext is decrypted where the payload keeps it, so no other copy of the plaintext
+    // is made. The tag is checked before anything is decrypted; on a failure the payload, still
+    // holding the ciphertext, is wiped as it is dropped.
+    let mut payload = Payload::from_parts(kind, parsed.ciphertext)?;
+    crypto::open(
+        &key,
+        header.nonce(),
+        parsed.aad,
+        payload.secret_bytes_mut(),
+        parsed.tag,
+    )?;
+    Ok(payload)
 }
 
 /// The header of a keystore, read without the password. The layout is checked as [`decrypt`]
@@ -205,28 +205,65 @@ pub fn inspect(bytes: &[u8]) -> Result<Header, Error> {
 /// Decrypt a keystore with `old_password` and encrypt its payload again under `new_password`,
 /// with `params`, a fresh salt and a fresh nonce. The new password and parameters are checked
 /// before the old password, so a refusal costs no key derivation.
-pub fn change_password<R: TryCryptoRng + ?Sized>(
+pub fn change_password(
     bytes: &[u8],
     old_password: &str,
     new_password: &str,
     params: impl Into<Params>,
-    rng: &mut R,
 ) -> Result<Vec<u8>, Error> {
     let params = params.into();
     Bounds::STANDARD.check(&params)?;
     crypto::password_bytes(new_password)?;
     let payload = decrypt(bytes, old_password)?;
-    encrypt(&payload, new_password, params, rng)
+    encrypt(&payload, new_password, params)
 }
 
 /// Encrypt a keystore's payload again under the same password with new `params`, a fresh salt
 /// and a fresh nonce: for moving a keystore to a newer preset after an unlock (see
 /// [`Params::is_weaker_than`]).
-pub fn reencrypt<R: TryCryptoRng + ?Sized>(
+pub fn reencrypt(
     bytes: &[u8],
     password: &str,
     params: impl Into<Params>,
-    rng: &mut R,
 ) -> Result<Vec<u8>, Error> {
-    change_password(bytes, password, password, params, rng)
+    change_password(bytes, password, password, params)
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    use super::*;
+
+    /// All 60 bytes of the header are the associated data: with the right key and nonce, a
+    /// change to any one of them, including the ones that do not feed the key derivation, fails
+    /// the tag.
+    #[test]
+    fn every_header_byte_is_authenticated() {
+        let params = Params::new(8, 1, 1);
+        let salt = [3; SALT_LEN];
+        let nonce = [4; NONCE_LEN];
+        let payload = Payload::bip39_entropy(&[5; 24]).unwrap();
+        let keystore =
+            encrypt_with_salt_and_nonce(&payload, "pw", params, &salt, &nonce, &Bounds::TEST)
+                .unwrap();
+        let key = crypto::derive_key(b"pw", &salt, &params).unwrap();
+        let (aad, rest) = keystore.split_at(HEADER_LEN);
+        let (ciphertext, tag) = rest.split_at(24);
+        let mut buffer = ciphertext.to_vec();
+        crypto::open(&key, &nonce, aad, &mut buffer, tag).unwrap();
+        assert_eq!(buffer, [5; 24]);
+        for index in 0..HEADER_LEN {
+            let mut changed = aad.to_vec();
+            changed[index] ^= 0x01;
+            let mut buffer = ciphertext.to_vec();
+            assert_eq!(
+                crypto::open(&key, &nonce, &changed, &mut buffer, tag),
+                Err(Error::WrongPasswordOrCorrupt),
+                "header byte {index}"
+            );
+            assert_eq!(buffer, ciphertext, "nothing is decrypted without the tag");
+        }
+    }
 }

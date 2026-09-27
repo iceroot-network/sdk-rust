@@ -8,7 +8,7 @@ A keystore is a recovery seed encrypted under a password. It is written and read
 - **Encryption:** XChaCha20-Poly1305 (the extended-nonce construction of draft-irtf-cfrg-xchacha over the ChaCha20-Poly1305 of RFC 8439), with the derived key, the 24-byte nonce of the header, the 60 bytes of the header as associated data, and the payload as plaintext.
 - **Password bytes:** the UTF-8 encoding of the password's Unicode NFKD normalization, so that the same text typed on different systems gives the same key. A password must be non-empty and at most 1,024 bytes of UTF-8 before normalization.
 
-Every keystore has a fresh random salt and nonce, so every keystore has its own key.
+Every keystore has a fresh salt and nonce from a cryptographically secure generator (the operating system's, or `crypto.getRandomValues` in WebAssembly), so every keystore has its own key; a rewritten keystore (a new password, new parameters) gets a new salt and nonce too.
 
 ## Byte layout
 
@@ -53,7 +53,7 @@ A writer refuses parameters outside these bounds, and a reader refuses a keystor
 
 Argon2's own rule, at least 8 KiB of memory per lane, holds within these bounds. The floor (OWASP's minimum for Argon2id) refuses weak keystores; the ceilings stop a crafted keystore from demanding more than 512 MiB of memory, or 2 GiB of memory filled over all passes, before its password is checked. A reader may use a lower ceiling where its platform cannot spare the memory. The floor belongs to version 1 and never rises within it: a keystore written under version 1's bounds always opens.
 
-The presets, one per kind of platform, are in the crate's README with the measurements behind them: desktop 256 MiB × 3 iterations × 4 lanes, mobile 128 MiB × 3 × 4, web 64 MiB × 4 × 4. They may rise in later releases; a wallet re-encrypts a keystore whose memory or iterations are below its platform's current preset after the next unlock.
+The presets, one per kind of platform, are in the crate's README with the measurements behind them: desktop 256 MiB × 3 iterations × 4 lanes, mobile 128 MiB × 3 × 4, web 64 MiB × 4 × 4. They may rise in later releases; a wallet re-encrypts a keystore after the next unlock when its memory is below its platform's current preset, or its memory equals the preset's and its iterations are below it. A keystore never moves to less memory: one written with the desktop preset and opened in a browser keeps its 256 MiB.
 
 ## Reading a keystore
 
@@ -79,13 +79,20 @@ The checks before the twelfth depend only on the keystore's bytes, which anyone 
 
 ## Text form
 
-For stores that hold strings only: the prefix `irks:` followed by the keystore's bytes in base64url without padding (RFC 4648, section 5). A reader accepts only the exact lowercase prefix, only the base64url alphabet, no padding, whitespace or line breaks, and a last character whose unused bits are zero, so every keystore has exactly one text form. Text longer than 5 + 1,368 characters is refused before it is decoded. Failures are `Malformed` (`armor-prefix`, `armor-encoding`, `armor-length`); the decoded bytes are then read as above.
+For stores that hold strings only: the prefix `irks:` followed by the keystore's bytes in base64url without padding (RFC 4648, section 5). Every keystore has exactly one text form. A reader makes these checks in this order and reports the first that fails:
+
+1. The text starts with the exact lowercase prefix `irks:`. Else `Malformed` (`armor-prefix`).
+2. Every character after the prefix is one of the 64 characters of the base64url alphabet (`A` to `Z`, `a` to `z`, `0` to `9`, `-`, `_`): no padding, whitespace, line breaks or characters outside ASCII. Else `Malformed` (`armor-encoding`).
+3. There are at most 1,366 of them, the unpadded length of 1,024 bytes, far more than a keystore of version 1 needs (108 bytes at most). Else `Malformed` (`armor-length`). The check comes after the alphabet's, so the length is a count of one-byte characters in every implementation.
+4. The encoding is canonical: its length is not one more than a multiple of 4, and the unused bits of its last character are zero. Else `Malformed` (`armor-encoding`).
+
+The decoded bytes are then read as above.
 
 ## What a wallet must do
 
 - Never store the password or anything derived from it, and never store the phrase or its entropy outside a keystore.
 - Keep the keystore where the platform's storage is best: the app's private data directory or the platform's secure storage (Keychain, Keystore-backed storage, the system keyring), `chrome.storage.local` in an extension, IndexedDB in a page.
-- Create keystores with the preset of the platform, and re-encrypt after an unlock when the stored parameters are below it.
+- Create keystores with the preset of the platform, and re-encrypt after an unlock when the stored parameters are below it, as above (never to less memory).
 - Show one message for `WrongPasswordOrCorrupt`, and keep the recovery phrase as the way back when a keystore is lost or damaged.
 - Decide the password rules; the format refuses only an empty password.
 

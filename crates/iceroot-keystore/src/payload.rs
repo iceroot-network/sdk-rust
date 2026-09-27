@@ -69,11 +69,12 @@ impl PayloadKind {
 }
 
 /// Secret seed material with its kind. The bytes are wiped when the payload is dropped, and
-/// `Debug` never shows them.
+/// `Debug` never shows them. They live on the heap, so moving a payload moves a pointer and
+/// leaves no copy of the secret behind.
 pub struct Payload {
     kind: PayloadKind,
     len: usize,
-    bytes: [u8; MAX_PAYLOAD_LEN],
+    bytes: Box<[u8; MAX_PAYLOAD_LEN]>,
 }
 
 impl Payload {
@@ -94,7 +95,8 @@ impl Payload {
         Payload::new(PayloadKind::Bip39Entropy, entropy)
     }
 
-    /// Any kind, supported or not, for the decoder.
+    /// Any kind, supported or not, for the decoder, which copies the ciphertext in with this and
+    /// decrypts it where it lies ([`Payload::secret_bytes_mut`]).
     pub(crate) fn from_parts(kind: PayloadKind, bytes: &[u8]) -> Result<Payload, Error> {
         let length = bytes.len();
         if !kind.allows_length(length) {
@@ -103,7 +105,7 @@ impl Payload {
         let mut payload = Payload {
             kind,
             len: length,
-            bytes: [0; MAX_PAYLOAD_LEN],
+            bytes: Box::new([0; MAX_PAYLOAD_LEN]),
         };
         payload
             .bytes
@@ -140,11 +142,16 @@ impl Payload {
     pub fn secret_bytes(&self) -> &[u8] {
         self.bytes.get(..self.len).unwrap_or_default()
     }
+
+    /// The secret bytes, for decrypting in place.
+    pub(crate) fn secret_bytes_mut(&mut self) -> &mut [u8] {
+        self.bytes.get_mut(..self.len).unwrap_or_default()
+    }
 }
 
 impl Drop for Payload {
     fn drop(&mut self) {
-        self.bytes.zeroize();
+        self.bytes.as_mut_slice().zeroize();
     }
 }
 

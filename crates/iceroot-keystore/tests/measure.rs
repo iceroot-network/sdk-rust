@@ -17,7 +17,7 @@
     clippy::indexing_slicing
 )]
 
-use iceroot_keystore::{Params, Payload, Preset, SystemRng, decrypt, encrypt};
+use iceroot_keystore::{Params, Payload, Preset, decrypt, encrypt};
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm_bindgen_test::wasm_bindgen_test as test;
@@ -49,7 +49,7 @@ const RUNS: usize = 5;
 
 fn median_ms(params: Params) -> (f64, f64, f64) {
     let payload = Payload::bip39_entropy(&[0x33; 32]).unwrap();
-    let keystore = encrypt(&payload, "measure", params, &mut SystemRng).unwrap();
+    let keystore = encrypt(&payload, "measure", params).unwrap();
     let mut times = Vec::with_capacity(RUNS);
     for _ in 0..RUNS {
         let start = now_ms();

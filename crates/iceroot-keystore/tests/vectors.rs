@@ -11,8 +11,7 @@
 //! ```
 //!
 //! Records name their bounds: `standard` is [`Bounds::STANDARD`], `test` is [`Bounds::TEST`]
-//! (the floor lowered to Argon2's minimums, feature `test-params`), which keeps most vectors
-//! fast.
+//! (the floor lowered to Argon2's minimums, feature `testing`), which keeps most vectors fast.
 
 // Tests may panic on a broken vector: that is how they fail.
 #![allow(
@@ -241,8 +240,8 @@ fn s07_keystore() {
     let expected: BTreeMap<String, usize> = [
         ("keystore.checkParams ParamsOutOfRange", 3),
         ("keystore.checkParams ok", 9),
-        ("keystore.dearmor Malformed", 12),
-        ("keystore.dearmor ok", 3),
+        ("keystore.dearmor Malformed", 18),
+        ("keystore.dearmor ok", 4),
         ("keystore.decrypt InvalidPassword", 2),
         ("keystore.decrypt Malformed", 12),
         ("keystore.decrypt ParamsOutOfRange", 20),
@@ -250,13 +249,13 @@ fn s07_keystore() {
         ("keystore.decrypt UnsupportedPayload", 3),
         ("keystore.decrypt UnsupportedVersion", 3),
         ("keystore.decrypt WrongPasswordOrCorrupt", 17),
-        ("keystore.decrypt ok", 11),
+        ("keystore.decrypt ok", 13),
         ("keystore.encrypt InvalidPassword", 2),
         ("keystore.encrypt InvalidPayload", 3),
         ("keystore.encrypt ParamsOutOfRange", 2),
         ("keystore.encrypt UnsupportedPayload", 1),
-        ("keystore.encrypt ok", 8),
-        ("keystore.inspect Malformed", 3),
+        ("keystore.encrypt ok", 10),
+        ("keystore.inspect Malformed", 4),
         ("keystore.inspect UnsupportedKdf", 1),
         ("keystore.inspect UnsupportedPayload", 1),
         ("keystore.inspect UnsupportedVersion", 1),

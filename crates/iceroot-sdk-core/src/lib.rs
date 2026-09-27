@@ -15,8 +15,7 @@
 //! - [`transaction`]: operations, drafts, signing, serialized drafts and signed transactions.
 //! - [`message`] and [`signin`]: message signatures and the sign-in message.
 //! - [`node`]: what the node API client (`iceroot-sdk-api`) decodes, read into the core's inputs
-//!   and checked on the way: the chain, a draft's online facts, fee statistics, submissions and
-//!   errors.
+//!   and checked on the way: the chain, a draft's online facts, submissions and errors.
 //! - [`error`]: the one error type, with stable codes.
 //!
 //! The values both this crate and the node API client use (asset ids, vote entries, supply
@@ -65,7 +64,7 @@ pub use crate::amount::{Amount, AssetId};
 pub use crate::chain::{Chain, Token};
 pub use crate::economics::Economics;
 pub use crate::error::{Error, ErrorCode};
-pub use crate::fee::{FeeChoice, FeeStatistics};
+pub use crate::fee::FeeChoice;
 pub use crate::keys::{Account, AccountOptions};
 pub use crate::phrase::Mnemonic;
 pub use crate::profile::{Capability, Profile, Stage};

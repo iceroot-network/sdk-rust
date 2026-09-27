@@ -2,8 +2,8 @@
 //! the reference implementation (the client's fixtures in `crates/iceroot-sdk-api/tests/fixtures`).
 //!
 //! The chain is loaded from the node's crypto configuration, every transaction the devnet was sent
-//! is read back through the core with the node's own id, and a draft is built from the facts and
-//! fee statistics the node reported.
+//! is read back through the core with the node's own id, and a draft is built from the facts the
+//! node reported.
 
 // Tests may panic on a broken fixture: that is how they fail.
 #![allow(
@@ -18,7 +18,7 @@ use std::path::PathBuf;
 
 use iceroot_sdk::api::{self, Response, SolarCompat, SubmitStatus};
 use iceroot_sdk::error::ErrorCode;
-use iceroot_sdk::fee::{FeeChoice, FeeSource, FeeStatistics};
+use iceroot_sdk::fee::{FeeChoice, FeeSource};
 use iceroot_sdk::profile::DevnetOptions;
 use iceroot_sdk::transaction::{DraftRequest, Operation, Recipient};
 use iceroot_sdk::{
@@ -172,12 +172,6 @@ fn a_draft_from_the_facts_the_node_reports() {
     assert_eq!(u64::from(facts.height), status.height + 1);
     assert_eq!(facts.second_key, None);
 
-    let statistics = API
-        .fee_statistics(None)
-        .unwrap()
-        .decode(&answer("node-fees.json"))
-        .unwrap();
-    let statistics = FeeStatistics::from(&statistics);
     let recipient = Address::parse("dZ1W1GsDCSyhR148oMhuHy3PkhnnSGCqVn", chain.profile()).unwrap();
     let request = DraftRequest {
         operation: Operation::Transfer {
@@ -189,18 +183,14 @@ fn a_draft_from_the_facts_the_node_reports() {
         memo: Some("from the node's facts".to_owned()),
         fee: FeeChoice::Minimum,
     };
-    let draft = Draft::build(&chain, &request, &facts, Some(&statistics)).unwrap();
+    let draft = Draft::build(&chain, &request, &facts).unwrap();
     let fee = draft.fee();
-    // The exact floor of the milestone the node serves, whatever its statistics say.
+    // The exact floor of the milestone the node serves.
     let floor = chain
         .fee_floor(OperationKind::Transfer, draft.size(), draft.height())
         .unwrap();
     assert_eq!(fee.source, FeeSource::Floor);
     assert_eq!((fee.amount, fee.floor), (floor, Some(floor)));
-    assert_ne!(
-        fee.amount,
-        statistics.get(OperationKind::Transfer).unwrap().maximum
-    );
     assert_eq!(draft.nonce(), facts.nonce);
     assert_eq!(draft.sender().to_string(), TEAM);
 

@@ -164,7 +164,7 @@ impl Devnet {
             fee,
         };
         assert!(self.chain.rules(facts.height).fees.floor_available);
-        let draft = Draft::build(&self.chain, &request(FeeChoice::Minimum), &facts, None)
+        let draft = Draft::build(&self.chain, &request(FeeChoice::Minimum), &facts)
             .expect("a draft at the floor");
         let floor = self.node_floor(draft.kind(), draft.size());
         assert_eq!(draft.fee().source, FeeSource::Floor);
@@ -174,7 +174,7 @@ impl Devnet {
         }
         // The size does not depend on the fee, whose field has a fixed width.
         let exact = request(FeeChoice::Exact(Amount::from(floor - below)));
-        let below_floor = Draft::build(&self.chain, &exact, &facts, None).unwrap();
+        let below_floor = Draft::build(&self.chain, &exact, &facts).unwrap();
         assert_eq!(below_floor.size(), draft.size());
         below_floor
     }

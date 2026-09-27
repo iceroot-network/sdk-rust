@@ -21,7 +21,7 @@ use crate::address::Address;
 use crate::amount::Amount;
 use crate::chain::Chain;
 use crate::error::{AddressProblem, AmountProblem, Error, TransactionProblem, VoteProblem};
-use crate::fee::{self, FeeSource, FeeStatistics, ResolvedFee};
+use crate::fee::{self, FeeSource, ResolvedFee};
 use crate::keys::Account;
 use crate::profile::Profile;
 use crate::rules::Rules;
@@ -70,16 +70,17 @@ pub struct DraftSummary {
 }
 
 impl Draft {
-    /// Build the draft of `request` on `chain`, with the facts the node reported, and the node's
-    /// fee `statistics` when the fee is resolved from them.
+    /// Build the draft of `request` on `chain`, with the facts the node reported.
     ///
     /// Every rule is applied before anything is signed: recipients, amounts, the memo, the vote,
-    /// the name, the size and the fee. A refusal names the rule it breaks.
+    /// the name, the size and the fee. A refusal names the rule it breaks. The minimum fee is the
+    /// exact fee floor; where no floor is in force (the milestone has no enabled dynamic fee
+    /// table), it fails with [`Error::FeeUnavailable`] and the request needs an exact fee (see
+    /// [`crate::fee`]).
     pub fn build(
         chain: &Chain,
         request: &DraftRequest,
         facts: &OnlineFacts,
-        statistics: Option<&FeeStatistics>,
     ) -> Result<Draft, Error> {
         let kind = request.operation.kind();
         chain.profile().require(kind.capability())?;
@@ -105,7 +106,7 @@ impl Draft {
         let unsigned =
             serialise(&data, SerialiseOptions::UNSIGNED, params).map_err(encode_error)?;
         let size = signed_size(unsigned.len(), facts.second_key.is_some(), params)?;
-        let fee = fee::resolve(request.fee, kind, size, params, statistics)?;
+        let fee = fee::resolve(request.fee, kind, size, params)?;
         data.fee = fee.amount.to_u64().ok_or(Error::InvalidFee {
             reason: "above the largest fee",
         })?;
@@ -319,8 +320,8 @@ impl Draft {
     /// The fee is the transaction's own, and its floor is computed again at the draft's height.
     /// The fee's source is not taken on trust from the serialized form: it reads
     /// [`FeeSource::Floor`] only when the form says so and the fee equals the floor computed
-    /// here, and [`FeeSource::Explicit`] otherwise, since where any other fee came from cannot be
-    /// checked.
+    /// here, and [`FeeSource::Explicit`] otherwise, whatever other source the form names, since
+    /// where any other fee came from cannot be checked.
     ///
     /// The floor, the rules and the token's labels come from the network configuration the
     /// serialized form carries, which the draft was built under. The pinned network hash identifies

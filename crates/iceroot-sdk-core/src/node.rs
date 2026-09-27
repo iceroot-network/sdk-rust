@@ -8,8 +8,7 @@
 //!   [`Chain::check_node`] refuses a node whose configuration names another chain.
 //! - [`OnlineFacts::from_node`] reads a draft's nonce, height and second key from the sender's
 //!   account and the node's status, and refuses an account that is not the sender's.
-//! - [`FeeStatistics`] and [`OperationKind`] convert from the client's fee statistics and
-//!   transaction kinds.
+//! - [`OperationKind`] converts from and to the client's transaction kinds.
 //! - [`SignedTransaction::to_submit`] prepares a signed transaction for submission, and
 //!   [`submit_result`] turns a refusal into [`Error::TxRejected`].
 //! - Every error of the client becomes an [`Error`] with the same stable code.
@@ -25,10 +24,8 @@ use iceroot_sdk_api::{
 use serde_json::Value;
 
 use crate::address::Address;
-use crate::amount::Amount;
 use crate::chain::Chain;
 use crate::error::{Error, MismatchProblem};
-use crate::fee::{FeeFigures, FeeStatistics};
 use crate::profile::Profile;
 use crate::transaction::{OnlineFacts, OperationKind, SignedTransaction};
 
@@ -176,26 +173,6 @@ impl OperationKind {
     }
 }
 
-impl From<&iceroot_sdk_api::FeeStatistics> for FeeStatistics {
-    /// The figures of every kind the SDK builds; other kinds are left out.
-    fn from(statistics: &iceroot_sdk_api::FeeStatistics) -> FeeStatistics {
-        let mut figures = FeeStatistics::new();
-        for entry in &statistics.entries {
-            if let Some(kind) = OperationKind::from_tx_kind(entry.kind) {
-                figures.insert(
-                    kind,
-                    FeeFigures {
-                        minimum: Amount::from_base_units(entry.min),
-                        average: Amount::from_base_units(entry.avg),
-                        maximum: Amount::from_base_units(entry.max),
-                    },
-                );
-            }
-        }
-        figures
-    }
-}
-
 impl SignedTransaction {
     /// The transaction as the client submits it: its id, its JSON and its size.
     pub fn to_submit(&self) -> Result<SubmitTx, Error> {
@@ -252,7 +229,7 @@ impl From<ApiError> for Error {
 mod tests {
     use std::time::Duration;
 
-    use iceroot_sdk_api::{FeeStatistic, RejectReason};
+    use iceroot_sdk_api::RejectReason;
 
     use super::*;
     use crate::chain::tests::devnet_chain;
@@ -314,38 +291,17 @@ mod tests {
     }
 
     #[test]
-    fn fee_statistics_and_kinds() {
+    fn operation_kinds() {
         for kind in OperationKind::ALL {
             assert_eq!(OperationKind::from_tx_kind(kind.tx_kind()), Some(kind));
         }
-        let entry = |kind, min, avg, max| FeeStatistic {
-            kind,
-            avg,
-            min,
-            max,
-            sum: 0,
-            burned: 0,
-        };
-        let statistics = FeeStatistics::from(&iceroot_sdk_api::FeeStatistics {
-            days: Some(30),
-            entries: vec![
-                entry(TxKind::Transfer, 1, 2, 3),
-                entry(
-                    TxKind::Other {
-                        type_group: 1,
-                        type_id: 4,
-                    },
-                    9,
-                    9,
-                    9,
-                ),
-            ],
-        });
-        let transfer = statistics.get(OperationKind::Transfer).unwrap();
-        assert_eq!(transfer.minimum, Amount::from_base_units(1));
-        assert_eq!(transfer.average, Amount::from_base_units(2));
-        assert_eq!(transfer.maximum, Amount::from_base_units(3));
-        assert_eq!(statistics.get(OperationKind::Vote), None);
+        assert_eq!(
+            OperationKind::from_tx_kind(TxKind::Other {
+                type_group: 1,
+                type_id: 4,
+            }),
+            None
+        );
     }
 
     #[test]

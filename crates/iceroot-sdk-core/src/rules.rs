@@ -106,9 +106,9 @@ pub struct BurnRules {
 pub struct FeeRules {
     /// The dynamic fee table, when the milestone has one.
     pub dynamic: Option<DynamicFeeRules>,
-    /// Whether this SDK build computes the exact fee floor for the network's formats; it does for
-    /// today's formats. Where it does not, a draft's minimum fee comes from the node's fee
-    /// statistics.
+    /// Whether the exact fee floor is in force: the milestone has a dynamic fee table and it is
+    /// enabled. Only then does a draft's minimum fee (and a multiple of it) resolve; otherwise it
+    /// fails with [`crate::error::Error::FeeUnavailable`] and a draft needs an exact fee.
     pub floor_available: bool,
 }
 
@@ -175,7 +175,7 @@ impl Rules {
                         .map(|kind| (kind, table.addon(kind.wire_type().key())))
                         .collect(),
                 }),
-                floor_available: fee::FLOOR_AVAILABLE,
+                floor_available: fee::floor_in_force(params),
             },
             resignation: ResignationRules {
                 blocks_before_revoke: params.blocks_to_revoke_delegate_resignation(),
@@ -205,6 +205,7 @@ mod tests {
         assert_eq!(rules.burn.min_amount, Amount::from_base_units(2_000_000));
         assert_eq!(rules.resignation.blocks_before_revoke, Some(106));
         assert_eq!(rules.max_transaction_bytes, 2_097_152 / 150 * 2);
+        assert!(rules.fees.floor_available);
         let dynamic = rules.fees.dynamic.unwrap();
         assert!(dynamic.enabled);
         assert_eq!(dynamic.min_fee, 6173);

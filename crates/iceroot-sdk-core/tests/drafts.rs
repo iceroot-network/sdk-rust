@@ -18,7 +18,7 @@ use iceroot_sdk_core::amount::Amount;
 use iceroot_sdk_core::error::{
     AddressProblem, AmountProblem, MismatchProblem, TransactionProblem, VoteProblem,
 };
-use iceroot_sdk_core::fee::{FeeChoice, FeeFigures, FeeSource, FeeStatistics};
+use iceroot_sdk_core::fee::{FeeChoice, FeeSource};
 use iceroot_sdk_core::keys::{Account, AccountOptions};
 use iceroot_sdk_core::phrase::Mnemonic;
 use iceroot_sdk_core::profile::DevnetOptions;
@@ -49,26 +49,6 @@ fn phrase_account(index: u32) -> Account {
     .expect("an account")
 }
 
-fn statistics() -> FeeStatistics {
-    let mut statistics = FeeStatistics::new();
-    for kind in OperationKind::ALL {
-        let maximum = match kind {
-            OperationKind::RegisterValidator => 7_500_000_000u64,
-            OperationKind::Burn | OperationKind::ResignValidator => 0,
-            _ => 2_000_000,
-        };
-        statistics.insert(
-            kind,
-            FeeFigures {
-                minimum: Amount::from(1u64),
-                average: Amount::from(maximum / 2),
-                maximum: Amount::from(maximum),
-            },
-        );
-    }
-    statistics
-}
-
 fn facts(sender: &Account) -> OnlineFacts {
     OnlineFacts {
         sender: sender.public_key().clone(),
@@ -79,12 +59,7 @@ fn facts(sender: &Account) -> OnlineFacts {
 }
 
 fn build(sender: &Account, operation: Operation) -> Result<Draft, Error> {
-    Draft::build(
-        chain(),
-        &DraftRequest::new(operation),
-        &facts(sender),
-        Some(&statistics()),
-    )
+    Draft::build(chain(), &DraftRequest::new(operation), &facts(sender))
 }
 
 fn transfer(to: &Account, amount: u64) -> Operation {
@@ -123,14 +98,14 @@ fn a_transfer_from_build_to_bytes() {
         memo: Some("invoice 42".to_owned()),
         fee: FeeChoice::Minimum,
     };
-    let draft = Draft::build(chain(), &request, &facts(&sender), Some(&statistics())).unwrap();
+    let draft = Draft::build(chain(), &request, &facts(&sender)).unwrap();
     let summary = draft.summary();
     assert_eq!(summary.profile, "devnet");
     assert_eq!(summary.network_byte, 90);
     assert_eq!(summary.nethash, chain().nethash());
     assert_eq!(summary.sender, *sender.address());
     assert_eq!(summary.nonce, 1);
-    // The exact floor, not the node's statistics: (85 + ceil(size / 2)) × 6173.
+    // The exact floor: (85 + ceil(size / 2)) × 6173.
     let floor = (85 + u64::try_from(draft.size().div_ceil(2)).unwrap()) * 6173;
     assert_eq!(summary.fee.amount, Amount::from(floor));
     assert_eq!(summary.fee.source, FeeSource::Floor);
@@ -384,7 +359,6 @@ fn rules_before_signing() {
                 fee: FeeChoice::Minimum,
             },
             &facts(&sender),
-            Some(&statistics()),
         )
     };
     assert!(with_memo(&"é".repeat(127)).is_ok());
@@ -402,7 +376,7 @@ fn rules_before_signing() {
 fn fees() {
     let sender = phrase_account(0);
     let recipient = phrase_account(1);
-    let with_fee = |fee: FeeChoice, statistics: Option<&FeeStatistics>| {
+    let with_fee = |fee: FeeChoice| {
         Draft::build(
             chain(),
             &DraftRequest {
@@ -411,38 +385,32 @@ fn fees() {
                 fee,
             },
             &facts(&sender),
-            statistics,
         )
     };
-    // A 154-byte transfer: (85 + 77) × 6173, with or without the node's statistics.
+    // A 154-byte transfer: (85 + 77) × 6173.
     let floor = Amount::from(1_000_026u64);
-    for statistics in [None, Some(&statistics())] {
-        let minimum = with_fee(FeeChoice::Minimum, statistics).unwrap();
-        assert_eq!(minimum.size(), 154);
-        assert_eq!(
-            (
-                minimum.fee().amount,
-                minimum.fee().source,
-                minimum.fee().floor
-            ),
-            (floor, FeeSource::Floor, Some(floor))
-        );
-    }
-    let exact = with_fee(FeeChoice::Exact(Amount::from(1_000_025u64)), None).unwrap();
+    let minimum = with_fee(FeeChoice::Minimum).unwrap();
+    assert_eq!(minimum.size(), 154);
+    assert_eq!(
+        (
+            minimum.fee().amount,
+            minimum.fee().source,
+            minimum.fee().floor
+        ),
+        (floor, FeeSource::Floor, Some(floor))
+    );
+    let exact = with_fee(FeeChoice::Exact(Amount::from(1_000_025u64))).unwrap();
     assert_eq!(exact.fee().amount, Amount::from(1_000_025u64));
     assert_eq!(exact.fee().source, FeeSource::Explicit);
     assert_eq!(exact.fee().floor, Some(floor));
-    let scaled = with_fee(
-        FeeChoice::Multiplier {
-            basis_points: 12_500,
-        },
-        None,
-    )
+    let scaled = with_fee(FeeChoice::Multiplier {
+        basis_points: 12_500,
+    })
     .unwrap();
     assert_eq!(scaled.fee().amount, Amount::from(1_250_033u64));
     assert_eq!(scaled.fee().source, FeeSource::Explicit);
     assert!(matches!(
-        with_fee(FeeChoice::Exact(Amount::ZERO), None),
+        with_fee(FeeChoice::Exact(Amount::ZERO)),
         Err(Error::InvalidFee { .. })
     ));
     // A burn may carry no fee.
@@ -456,7 +424,6 @@ fn fees() {
             fee: FeeChoice::Exact(Amount::ZERO),
         },
         &facts(&sender),
-        None,
     )
     .unwrap();
     assert!(burn.sign(&sender, None).unwrap().is_verified());
@@ -473,7 +440,6 @@ fn fees() {
             name: "sdk_validator".to_owned(),
         }),
         &facts(&sender),
-        None,
     )
     .unwrap();
     let half = u64::try_from(registration.size().div_ceil(2)).unwrap();
@@ -497,7 +463,6 @@ fn a_serialized_fee_source_is_checked() {
                 fee,
             },
             &facts(&sender),
-            None,
         )
         .unwrap()
     };
@@ -535,7 +500,7 @@ fn a_serialized_fee_source_is_checked() {
     assert_eq!(shown.fee().source, FeeSource::Explicit);
     assert_eq!(shown.fee().floor, Some(floor));
 
-    // The floor in the form is never read; a source the SDK cannot check reads as explicit.
+    // The floor in the form is never read; any source other than the floor reads as explicit.
     let minimum = form(&with_fee(FeeChoice::Minimum));
     let lowered = minimum.replace(r#""floor":"1000026""#, r#""floor":"1""#);
     assert_ne!(lowered, minimum);
@@ -544,14 +509,106 @@ fn a_serialized_fee_source_is_checked() {
         (again.fee().source, again.fee().floor),
         (FeeSource::Floor, Some(floor))
     );
-    let statistics = minimum.replace(r#""source":"floor""#, r#""source":"node-statistics""#);
-    let again = Draft::deserialize(statistics.as_bytes(), profile).unwrap();
-    assert_eq!(again.fee().source, FeeSource::Explicit);
-    let unknown = minimum.replace(r#""source":"floor""#, r#""source":"cheapest""#);
+    for claim in ["node-statistics", "cheapest", "explicit", ""] {
+        let claimed = minimum.replace(r#""source":"floor""#, &format!(r#""source":"{claim}""#));
+        assert_ne!(claimed, minimum);
+        let again = Draft::deserialize(claimed.as_bytes(), profile).unwrap();
+        assert_eq!(
+            (again.fee().amount, again.fee().source, again.fee().floor),
+            (floor, FeeSource::Explicit, Some(floor)),
+            "{claim}"
+        );
+    }
+    // A form without a source is malformed.
+    let unsourced = minimum.replace(r#""source":"floor","#, "");
+    assert_ne!(unsourced, minimum);
     assert!(matches!(
-        Draft::deserialize(unknown.as_bytes(), profile),
+        Draft::deserialize(unsourced.as_bytes(), profile),
         Err(Error::InvalidDraft { .. })
     ));
+}
+
+/// The devnet chain with no dynamic fee table in any milestone.
+fn chain_without_fee_table() -> Chain {
+    let network = serde_json::to_string(&chain().network().to_json()).unwrap();
+    let milestones: Vec<serde_json::Value> = chain()
+        .milestones()
+        .all()
+        .iter()
+        .map(|params| {
+            let mut milestone = params.as_json().clone();
+            milestone.remove("dynamicFees");
+            serde_json::Value::Object(milestone)
+        })
+        .collect();
+    let milestones = serde_json::to_string(&milestones).unwrap();
+    Chain::from_parts(chain().profile(), &network, &milestones).unwrap()
+}
+
+#[test]
+fn no_minimum_fee_without_a_fee_table() {
+    let chain = chain_without_fee_table();
+    let rules = chain.rules(HEIGHT);
+    assert_eq!(rules.fees.dynamic, None);
+    assert!(!rules.fees.floor_available);
+    let sender = phrase_account(0);
+    let recipient = phrase_account(1);
+    let with_fee = |operation: Operation, fee: FeeChoice| {
+        Draft::build(
+            &chain,
+            &DraftRequest {
+                operation,
+                memo: None,
+                fee,
+            },
+            &facts(&sender),
+        )
+    };
+    let burn = || Operation::Burn {
+        amount: Amount::from(2_000_000u64),
+    };
+
+    // No floor is in force, so neither the minimum nor a multiple of it resolves: never a zero
+    // fee labelled as the floor, whatever the operation.
+    for operation in [transfer(&recipient, 1), burn(), vote(1)] {
+        let kind = operation.kind();
+        assert_eq!(chain.fee_floor(kind, 154, HEIGHT), None);
+        for fee in [
+            FeeChoice::Minimum,
+            FeeChoice::Multiplier {
+                basis_points: 15_000,
+            },
+        ] {
+            assert_eq!(
+                with_fee(operation.clone(), fee).unwrap_err(),
+                Error::FeeUnavailable { operation: kind }
+            );
+        }
+    }
+
+    // An exact fee works, and has no floor beside it.
+    let exact = with_fee(
+        transfer(&recipient, 1),
+        FeeChoice::Exact(Amount::from(1_000_000u64)),
+    )
+    .unwrap();
+    assert_eq!(
+        (exact.fee().amount, exact.fee().source, exact.fee().floor),
+        (Amount::from(1_000_000u64), FeeSource::Explicit, None)
+    );
+    assert!(exact.sign(&sender, None).unwrap().is_verified());
+
+    // A burn with no fee, serialized and claimed to be at the floor, stays explicit.
+    let free = with_fee(burn(), FeeChoice::Exact(Amount::ZERO)).unwrap();
+    assert_eq!(free.fee().source, FeeSource::Explicit);
+    let text = String::from_utf8(free.serialize()).unwrap();
+    let claimed = text.replace(r#""source":"explicit""#, r#""source":"floor""#);
+    assert_ne!(claimed, text);
+    let again = Draft::deserialize(claimed.as_bytes(), chain.profile()).unwrap();
+    assert_eq!(
+        (again.fee().amount, again.fee().source, again.fee().floor),
+        (Amount::ZERO, FeeSource::Explicit, None)
+    );
 }
 
 #[test]
@@ -576,7 +633,7 @@ fn keys_that_sign() {
         second_key: Some(second.public_key().clone()),
         ..facts(&sender)
     };
-    let draft = Draft::build(chain(), &request, &facts, Some(&statistics())).unwrap();
+    let draft = Draft::build(chain(), &request, &facts).unwrap();
     assert!(draft.summary().second_signature);
     assert!(matches!(
         draft.sign(&sender, None),

@@ -12,7 +12,7 @@
 //!   "configuration": { "network": { ... }, "milestones": [ ... ] },
 //!   "height": 123,
 //!   "transaction": "<hex of the unsigned or signed bytes>",
-//!   "fee": { "source": "floor" | "node-statistics" | "explicit", "floor": "<base units>" | null },
+//!   "fee": { "source": "floor" | "explicit", "floor": "<base units>" | null },
 //!   "secondPublicKey": "<hex>" | null
 //! }
 //! ```
@@ -24,7 +24,8 @@
 //!
 //! The reader takes the fee from the transaction itself and computes its floor again: `fee.floor`
 //! is written for other readers and checked only for its form, and `fee.source` is a claim that
-//! [`super::Draft::deserialize`] checks against the floor.
+//! [`super::Draft::deserialize`] checks against the floor. Any source other than `floor` is read
+//! as `explicit`.
 
 use heartwood_crypto::identities::PublicKey;
 use heartwood_crypto::utils::hex;
@@ -234,11 +235,12 @@ pub(crate) fn decode(
                 .get("fee")
                 .and_then(Value::as_object)
                 .ok_or_else(|| invalid("no fee"))?;
-            let source = fee
-                .get("source")
-                .and_then(Value::as_str)
-                .and_then(FeeSource::parse)
-                .ok_or_else(|| invalid("no fee source"))?;
+            // Only the floor is a claim the reader can check; any other source is explicit.
+            let source = match fee.get("source").and_then(Value::as_str) {
+                Some(text) if FeeSource::parse(text) == Some(FeeSource::Floor) => FeeSource::Floor,
+                Some(_) => FeeSource::Explicit,
+                None => return Err(invalid("no fee source")),
+            };
             let floor = match fee.get("floor") {
                 None | Some(Value::Null) => None,
                 Some(Value::String(text)) => Some(Amount::from_base_units(

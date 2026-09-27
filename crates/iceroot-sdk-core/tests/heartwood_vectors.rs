@@ -509,7 +509,7 @@ fn build(record: &Record) -> Outcome {
         height: record.height,
         second_key: second.as_ref().map(|second| second.public_key().clone()),
     };
-    let signed = Draft::build(chain(), &request, &facts, None)
+    let signed = Draft::build(chain(), &request, &facts)
         .and_then(|draft| draft.sign_with(&sender, second.as_ref(), AUX));
     match (&record.expected, signed) {
         (Ok(expected), Ok(tx)) => {
@@ -821,7 +821,20 @@ fn fee_minimum(record: &Record) -> Outcome {
         Err(error) => return Outcome::Failed(format!("the transaction: {error}")),
     };
     let Some(floor) = chain.fee_floor(tx.kind(), bytes.len(), record.height) else {
-        return Outcome::Failed("no fee floor".into());
+        // No enabled dynamic fee table: the reference's floor is zero, while the SDK reports no
+        // floor at all and refuses a minimum fee.
+        let zero = json!({ "key": fee_key(tx.kind()), "size": bytes.len(), "minimumFee": "0" });
+        return match &record.expected {
+            Ok(expected) => match compare(expected, &zero) {
+                Outcome::Matched => Outcome::Divergent(
+                    "no enabled fee table: the reference's floor is zero; the SDK has no floor, \
+                     since the node's pool then applies its own settings, and a draft needs an \
+                     exact fee",
+                ),
+                other => other,
+            },
+            Err(error) => Outcome::Failed(format!("the reference refused with {error}")),
+        };
     };
     let actual = json!({
         "key": fee_key(tx.kind()),
@@ -857,11 +870,14 @@ fn v19_fee_floor() {
         "fee.minimum" => fee_minimum(record),
         other => Outcome::Failed(format!("unknown operation {other}")),
     });
+    // Divergent: 35 milestones heartwood-crypto refuses at load, 4 floors below zero, and 36
+    // transactions under no enabled fee table (absent, null, disabled or without `enabled`, and
+    // heights where a changing table is off), where the SDK has no floor.
     assert_eq!(
         tally,
         Tally {
-            matched: 208,
-            divergent: 39,
+            matched: 172,
+            divergent: 75,
             skipped: 0
         }
     );
@@ -882,7 +898,7 @@ fn vote_asset(entries: Vec<VoteEntry>, height: u32) -> Vec<u8> {
         height,
         second_key: None,
     };
-    let draft = Draft::build(chain(), &request, &facts, None).expect("a vote draft");
+    let draft = Draft::build(chain(), &request, &facts).expect("a vote draft");
     draft.unsigned_bytes()[HEADER_SIZE + 1..].to_vec()
 }
 
@@ -1052,7 +1068,7 @@ fn v07_vote_rules() {
                 height: record.height,
                 second_key: None,
             };
-            let draft = Draft::build(chain(), &request, &facts, None).expect("a vote draft");
+            let draft = Draft::build(chain(), &request, &facts).expect("a vote draft");
             let Operation::Vote { entries } = draft.operation() else {
                 return Outcome::Failed("not a vote".into());
             };

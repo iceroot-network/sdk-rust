@@ -447,7 +447,7 @@ fn case(record: &Record, fee: Option<FeeChoice>) -> Case {
         assert_eq!(Some(second.public_key()), online.second_key.as_ref());
     }
     Case {
-        draft: Draft::build(chain(), &draft_request, &online, None),
+        draft: Draft::build(chain(), &draft_request, &online),
         sender,
         second,
         aux: Aux::fixed(hex::decode_array(text(&input["aux"])).expect("32 bytes")),

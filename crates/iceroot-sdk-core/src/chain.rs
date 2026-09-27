@@ -193,7 +193,7 @@ impl Chain {
 
     /// The exact fee floor at `height` of a transaction of `kind` that is `size` bytes long,
     /// signatures included: the node's own rule, from `heartwood-crypto` (see [`crate::fee`]).
-    /// `None` where the formats have no floor function.
+    /// `None` where no floor is in force: the milestone has no enabled dynamic fee table.
     pub fn fee_floor(&self, kind: OperationKind, size: usize, height: u32) -> Option<Amount> {
         fee::floor(kind, size, self.params(height))
     }

@@ -58,7 +58,7 @@
 //!     height: 2,
 //!     second_key: None,
 //! };
-//! let draft = Draft::build(&chain, &request, &facts, None)?;
+//! let draft = Draft::build(&chain, &request, &facts)?;
 //! assert_eq!(draft.summary().total_amount, Amount::from_base_units(150_000_000));
 //!
 //! let signed = draft.sign(&sender, None)?;

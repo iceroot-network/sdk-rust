@@ -86,7 +86,7 @@ impl Chain {
         let chain = Chain::from_parts(profile, &network.to_string(), &milestones.to_string())?;
         if let Some(genesis) = object.get("genesisBlock") {
             let payload_hash = genesis.get("payloadHash").and_then(Value::as_str);
-            if payload_hash != Some(chain.nethash()) {
+            if payload_hash.is_none_or(|hash| !hash.eq_ignore_ascii_case(chain.nethash())) {
                 return Err(Error::BadResponse {
                     reason: "the genesis block's payload hash is not the network hash".to_owned(),
                 });
@@ -317,6 +317,12 @@ pub(crate) mod tests {
             Chain::load(&unpinned, &bad_genesis),
             Err(Error::BadResponse { .. })
         ));
+        // Hex digits in either case name the same hash, as in Chain::from_node.
+        let upper_genesis = config.replace(
+            &format!(r#""payloadHash":"{NETHASH}""#),
+            &format!(r#""payloadHash":"{}""#, NETHASH.to_ascii_uppercase()),
+        );
+        assert!(Chain::load(&unpinned, &upper_genesis).is_ok());
     }
 
     #[test]

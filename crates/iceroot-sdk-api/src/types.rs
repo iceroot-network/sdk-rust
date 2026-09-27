@@ -183,7 +183,8 @@ pub struct NodeConfiguration {
     pub seats: u32,
     /// Block time in seconds in the milestone at the node's tip.
     pub block_time: u32,
-    /// The milestone in force at the node's tip, as JSON text exactly as the node sent it.
+    /// The milestone in force at the node's tip, as JSON text: the node's JSON written compactly,
+    /// with its keys in the node's order.
     pub milestone_json: String,
     /// The pool's limits.
     pub pool: PoolLimits,
@@ -192,7 +193,8 @@ pub struct NodeConfiguration {
 }
 
 /// The chain definition a node serves: network, milestones, genesis block and exceptions, each as
-/// JSON text exactly as the node sent it, ready for the SDK core's configuration loaders.
+/// JSON text (the node's JSON written compactly, with its keys in the node's order), ready for the
+/// SDK core's configuration loaders.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CryptoConfiguration {
     /// The network hash, read from the network definition.

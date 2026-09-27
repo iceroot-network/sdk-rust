@@ -2,8 +2,7 @@
 
 use std::time::Duration;
 
-use serde::de::DeserializeOwned;
-use serde_json::value::RawValue;
+use serde_json::Value;
 
 use crate::call::Context;
 use crate::error::ApiError;
@@ -16,15 +15,23 @@ use crate::types::{
     TxBlock, TxDetails, TxKind, TxRecord, TxStatus, ValidatorInfo, ValidatorStatus, VoteEntry,
 };
 
-use super::wire;
+use super::wire::{self, FromJson};
 
 // ------------------------------------------------------------------------------------------------
 // Status and body handling
 
+/// The body as JSON, parsed once; every resource is then read from the value.
+fn json(response: &Response) -> Result<Value, String> {
+    let text = std::str::from_utf8(response.body()).map_err(|e| format!("not UTF-8: {e}"))?;
+    serde_json::from_str(text).map_err(|e| e.to_string())
+}
+
 /// Turns a non-2xx answer into the matching error.
 fn error_for(response: &Response) -> ApiError {
     let status = response.status();
-    let body: Option<wire::ErrorBody> = serde_json::from_slice(response.body()).ok();
+    let body = json(response)
+        .ok()
+        .and_then(|value| wire::read::<wire::ErrorBody>(&value).ok());
     let (error, message) = body
         .map(|b| (b.error.unwrap_or_default(), b.message.unwrap_or_default()))
         .unwrap_or_default();
@@ -50,21 +57,22 @@ fn is_success(response: &Response) -> bool {
 }
 
 /// Parses the body of a successful answer.
-fn body<T: DeserializeOwned>(response: &Response) -> Result<T, ApiError> {
+fn body<T: FromJson>(response: &Response) -> Result<T, ApiError> {
     if !is_success(response) {
         return Err(error_for(response));
     }
-    serde_json::from_slice(response.body())
-        .map_err(|e| ApiError::bad(response.status(), e.to_string()))
+    json(response)
+        .and_then(|value| wire::read::<T>(&value))
+        .map_err(|e| ApiError::bad(response.status(), e))
 }
 
 /// Parses `{ "data": T }`.
-fn data<T: DeserializeOwned>(response: &Response) -> Result<T, ApiError> {
+fn data<T: FromJson>(response: &Response) -> Result<T, ApiError> {
     body::<wire::Envelope<T>>(response).map(|e| e.data)
 }
 
 /// Parses `{ "data": T }`, or `None` for a 404.
-fn optional_data<T: DeserializeOwned>(response: &Response) -> Result<Option<T>, ApiError> {
+fn optional_data<T: FromJson>(response: &Response) -> Result<Option<T>, ApiError> {
     if response.status() == 404 {
         return Ok(None);
     }
@@ -72,19 +80,20 @@ fn optional_data<T: DeserializeOwned>(response: &Response) -> Result<Option<T>, 
 }
 
 /// Parses a paginated listing and maps each item.
-fn page<W: DeserializeOwned, T>(
+fn page<W: FromJson, T>(
     response: &Response,
     context: &Context,
     mut map: impl FnMut(W) -> Result<T, String>,
 ) -> Result<Page<T>, ApiError> {
     let status = response.status();
-    let paged: wire::Paged<W> = body(response)?;
-    let items = paged
-        .data
-        .into_iter()
-        .map(&mut map)
-        .collect::<Result<Vec<T>, String>>()
-        .map_err(|e| ApiError::bad(status, e))?;
+    let paged: wire::Paged<Value> = body(response)?;
+    let mut items = Vec::with_capacity(paged.data.len());
+    for item in &paged.data {
+        let item = wire::read::<W>(item)
+            .and_then(&mut map)
+            .map_err(|e| ApiError::bad(status, e))?;
+        items.push(item);
+    }
     Ok(Page {
         items,
         page: context.page.max(1),
@@ -194,10 +203,6 @@ fn timestamp(t: wire::Timestamp) -> Timestamp {
     }
 }
 
-fn raw_text(raw: &RawValue) -> String {
-    raw.get().to_owned()
-}
-
 // ------------------------------------------------------------------------------------------------
 // Node
 
@@ -216,16 +221,17 @@ pub(crate) fn node_configuration(
     _: &Context,
 ) -> Result<NodeConfiguration, ApiError> {
     let c: wire::NodeConfiguration = data(response)?;
-    let facts: wire::MilestoneFacts = serde_json::from_str(c.constants.get())
-        .map_err(|e| ApiError::bad(response.status(), format!("constants: {e}")))?;
+    let facts = wire::read::<wire::MilestoneFacts>(&c.constants)
+        .map_err(|e| ApiError::bad(response.status(), e))?;
     let fees = c.pool.dynamic_fees;
-    let mut addon_bytes: Vec<(TxKind, u64)> = fees
-        .addon_bytes
-        .0
-        .into_iter()
-        .filter_map(|(key, bytes)| kind_of_key(&key).map(|kind| (kind, bytes)))
+    // In wire type order: the order of the handler table, which is sorted by wire type.
+    let addon_bytes: Vec<(TxKind, u64)> = TYPE_KEYS
+        .iter()
+        .filter_map(|&(key, group, id)| {
+            let (_, bytes) = fees.addon_bytes.0.iter().find(|(k, _)| k == key)?;
+            Some((kind_of(group, id), *bytes))
+        })
         .collect();
-    addon_bytes.sort_by_key(|(kind, _)| wire_type(*kind));
     Ok(NodeConfiguration {
         core_version: c.core.and_then(|v| v.version).unwrap_or_default(),
         network: NetworkIdentity {
@@ -241,7 +247,7 @@ pub(crate) fn node_configuration(
         explorer: c.explorer.filter(|e| !e.is_empty()),
         seats: facts.active_delegates,
         block_time: facts.block_time,
-        milestone_json: raw_text(&c.constants),
+        milestone_json: c.constants.to_string(),
         pool: PoolLimits {
             max_transactions_in_pool: c.pool.max_transactions_in_pool,
             max_transactions_per_sender: c.pool.max_transactions_per_sender,
@@ -275,15 +281,15 @@ pub(crate) fn crypto_configuration(
     _: &Context,
 ) -> Result<CryptoConfiguration, ApiError> {
     let c: wire::CryptoConfiguration = data(response)?;
-    let network: wire::NetworkFacts = serde_json::from_str(c.network.get())
-        .map_err(|e| ApiError::bad(response.status(), format!("network: {e}")))?;
+    let network = wire::read::<wire::NetworkFacts>(&c.network)
+        .map_err(|e| ApiError::bad(response.status(), e))?;
     Ok(CryptoConfiguration {
         nethash: network.nethash,
         network_byte: network.pub_key_hash,
-        network_json: raw_text(&c.network),
-        milestones_json: raw_text(&c.milestones),
-        genesis_block_json: raw_text(&c.genesis_block),
-        exceptions_json: c.exceptions.as_deref().map(raw_text),
+        network_json: c.network.to_string(),
+        milestones_json: c.milestones.to_string(),
+        genesis_block_json: c.genesis_block.to_string(),
+        exceptions_json: c.exceptions.as_ref().map(Value::to_string),
     })
 }
 
@@ -301,7 +307,7 @@ pub(crate) fn supply(response: &Response, _: &Context) -> Result<Supply, ApiErro
     })
 }
 
-/// The reference implementation's handler keys and their wire types.
+/// The reference implementation's handler keys and their wire types, in wire type order.
 const TYPE_KEYS: [(&str, u32, u16); 13] = [
     ("legacyTransfer", 1, 0),
     ("secondSignature", 1, 1),
@@ -317,14 +323,6 @@ const TYPE_KEYS: [(&str, u32, u16); 13] = [
     ("burn", 2, 0),
     ("vote", 2, 2),
 ];
-
-/// The kind of a reference implementation handler key (`transfer`, `delegateRegistration`, ...).
-fn kind_of_key(key: &str) -> Option<TxKind> {
-    TYPE_KEYS
-        .iter()
-        .find(|(k, _, _)| *k == key)
-        .map(|&(_, group, id)| kind_of(group, id))
-}
 
 pub(crate) fn kind_of(type_group: u32, type_id: u16) -> TxKind {
     match (type_group, type_id) {
@@ -434,12 +432,12 @@ pub(crate) fn account_page(
 // ------------------------------------------------------------------------------------------------
 // Transactions
 
-fn asset<T: DeserializeOwned>(t: &wire::Transaction, what: &str) -> Result<T, String> {
-    let raw = t
+fn asset<T: FromJson>(t: &wire::Transaction, what: &str) -> Result<T, String> {
+    let value = t
         .asset
-        .as_deref()
+        .as_ref()
         .ok_or_else(|| format!("transaction {} has no {what} asset", t.id))?;
-    serde_json::from_str(raw.get()).map_err(|e| format!("transaction {}: {what} asset: {e}", t.id))
+    wire::read::<T>(value).map_err(|e| format!("transaction {}: {what} asset: {e}", t.id))
 }
 
 fn details(t: &wire::Transaction) -> Result<TxDetails, String> {
@@ -482,7 +480,7 @@ fn details(t: &wire::Transaction) -> Result<TxDetails, String> {
         TxKind::RegisterSecondKey => {
             let a: wire::SecondKeyAsset = asset(t, "second key")?;
             TxDetails::RegisterSecondKey {
-                public_key: a.signature.public_key,
+                public_key: a.public_key,
             }
         }
         TxKind::RegisterValidator => {
@@ -512,7 +510,7 @@ fn details(t: &wire::Transaction) -> Result<TxDetails, String> {
         } => TxDetails::Other {
             type_group,
             type_id,
-            asset_json: t.asset.as_deref().map(raw_text),
+            asset_json: t.asset.as_ref().map(Value::to_string),
         },
     })
 }
@@ -709,17 +707,19 @@ pub(crate) fn submit_report(
 // Blocks
 
 fn block(b: wire::Block) -> Result<BlockInfo, String> {
-    let mut donations: Vec<Donation> = b
-        .forged
-        .donations
-        .0
-        .into_iter()
-        .map(|(address, amount)| Donation {
-            address,
-            amount: amount.0,
-        })
-        .collect();
-    donations.sort_by(|x, y| x.address.cmp(&y.address));
+    // Sorted by address as they are inserted: a block pays a handful of donations, and a sort
+    // routine would cost more module size than this.
+    let mut donations: Vec<Donation> = Vec::with_capacity(b.forged.donations.0.len());
+    for (address, amount) in b.forged.donations.0 {
+        let at = donations.partition_point(|d| d.address <= address);
+        donations.insert(
+            at,
+            Donation {
+                address,
+                amount: amount.0,
+            },
+        );
+    }
     let previous = b
         .previous
         .filter(|p| !p.is_empty() && !p.bytes().all(|c| c == b'0'));
@@ -968,5 +968,11 @@ mod tests {
         for (_, group, id) in TYPE_KEYS {
             assert_eq!(wire_type(kind_of(group, id)), (group, id));
         }
+        // Pool fees list their extra bytes in this order.
+        assert!(
+            TYPE_KEYS
+                .windows(2)
+                .all(|w| (w[0].1, w[0].2) < (w[1].1, w[1].2))
+        );
     }
 }

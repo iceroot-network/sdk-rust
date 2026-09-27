@@ -21,6 +21,10 @@
 //! description and milestones the draft was built under, so a context without network access can
 //! sign; it is loaded again and checked against the reader's profile, whose network hash must be
 //! pinned.
+//!
+//! The reader takes the fee from the transaction itself and computes its floor again: `fee.floor`
+//! is written for other readers and checked only for its form, and `fee.source` is a claim that
+//! [`super::Draft::deserialize`] checks against the floor.
 
 use heartwood_crypto::identities::PublicKey;
 use heartwood_crypto::utils::hex;

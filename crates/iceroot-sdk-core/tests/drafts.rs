@@ -484,6 +484,77 @@ fn fees() {
 }
 
 #[test]
+fn a_serialized_fee_source_is_checked() {
+    let sender = phrase_account(0);
+    let recipient = phrase_account(1);
+    let profile = chain().profile();
+    let with_fee = |fee: FeeChoice| {
+        Draft::build(
+            chain(),
+            &DraftRequest {
+                operation: transfer(&recipient, 1),
+                memo: None,
+                fee,
+            },
+            &facts(&sender),
+            None,
+        )
+        .unwrap()
+    };
+    let form = |draft: &Draft| String::from_utf8(draft.serialize()).unwrap();
+    let floor = Amount::from(1_000_026u64);
+
+    // The floor stays the floor, and an explicit fee stays explicit, even at the floor.
+    for (fee, source) in [
+        (FeeChoice::Minimum, FeeSource::Floor),
+        (FeeChoice::Exact(floor), FeeSource::Explicit),
+        (
+            FeeChoice::Exact(Amount::from(2_000_000u64)),
+            FeeSource::Explicit,
+        ),
+        (
+            FeeChoice::Multiplier {
+                basis_points: 15_000,
+            },
+            FeeSource::Explicit,
+        ),
+    ] {
+        let draft = with_fee(fee);
+        assert_eq!(draft.fee().source, source, "{fee:?}");
+        let again = Draft::deserialize(form(&draft).as_bytes(), profile).unwrap();
+        assert_eq!(again.summary(), draft.summary(), "{fee:?}");
+    }
+
+    // A fee above the floor that the form calls the floor reads as explicit, beside the floor.
+    let above = with_fee(FeeChoice::Exact(Amount::from(2_000_000u64)));
+    let text = form(&above);
+    assert!(text.contains(r#""source":"explicit""#), "{text}");
+    let claimed = text.replace(r#""source":"explicit""#, r#""source":"floor""#);
+    let shown = Draft::deserialize(claimed.as_bytes(), profile).unwrap();
+    assert_eq!(shown.fee().amount, Amount::from(2_000_000u64));
+    assert_eq!(shown.fee().source, FeeSource::Explicit);
+    assert_eq!(shown.fee().floor, Some(floor));
+
+    // The floor in the form is never read; a source the SDK cannot check reads as explicit.
+    let minimum = form(&with_fee(FeeChoice::Minimum));
+    let lowered = minimum.replace(r#""floor":"1000026""#, r#""floor":"1""#);
+    assert_ne!(lowered, minimum);
+    let again = Draft::deserialize(lowered.as_bytes(), profile).unwrap();
+    assert_eq!(
+        (again.fee().source, again.fee().floor),
+        (FeeSource::Floor, Some(floor))
+    );
+    let statistics = minimum.replace(r#""source":"floor""#, r#""source":"node-statistics""#);
+    let again = Draft::deserialize(statistics.as_bytes(), profile).unwrap();
+    assert_eq!(again.fee().source, FeeSource::Explicit);
+    let unknown = minimum.replace(r#""source":"floor""#, r#""source":"cheapest""#);
+    assert!(matches!(
+        Draft::deserialize(unknown.as_bytes(), profile),
+        Err(Error::InvalidDraft { .. })
+    ));
+}
+
+#[test]
 fn keys_that_sign() {
     let sender = phrase_account(0);
     let recipient = phrase_account(1);

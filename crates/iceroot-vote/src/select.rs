@@ -3,7 +3,7 @@
 use core::fmt;
 
 use crate::mode::Mode;
-use crate::reason::Reason;
+use crate::reason::{Count, Reason};
 use crate::rules::{TOTAL_BASIS_POINTS, VoteEntry, canonical_cmp, canonical_order};
 use crate::sample::{Stream, seed};
 use crate::score::{Candidate, Groups, Interner, MAX_PICKS_PER_OPERATOR, Spread, judged};
@@ -121,6 +121,13 @@ impl Selection {
     /// The sentence a wallet shows when the selection was topped up, else `None`.
     pub fn top_up_notice(&self) -> Option<String> {
         (self.topped_up > 0).then(|| {
+            let mode = self.mode;
+            if self.pool == 0 {
+                return format!(
+                    "No validator meets the {mode} criteria, so all {} picks come from Diversity",
+                    self.entries.len()
+                );
+            }
             let topped_up = usize::try_from(self.topped_up).unwrap_or(usize::MAX);
             let from_mode = self.entries.len().saturating_sub(topped_up);
             let capped = if u32::try_from(from_mode).is_ok_and(|n| n < self.pool) {
@@ -128,9 +135,13 @@ impl Selection {
             } else {
                 String::new()
             };
+            let meet = if self.pool == 1 { "meets" } else { "meet" };
+            let come = if from_mode == 1 { "comes" } else { "come" };
             format!(
-                "{} validators meet the {} criteria{capped}, so {from_mode} picks come from {} and {} from Diversity",
-                self.pool, self.mode, self.mode, self.topped_up
+                "{} {meet} the {mode} criteria{capped}, so {} {come} from {mode} and {} from Diversity",
+                Count(u128::from(self.pool), "validator", "validators"),
+                Count(u128::try_from(from_mode).unwrap_or(u128::MAX), "pick", "picks"),
+                self.topped_up
             )
         })
     }

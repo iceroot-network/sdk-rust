@@ -184,7 +184,7 @@ fn reliability_needs_seven_seated_days() {
     );
     assert_eq!(
         selection.top_up_notice().unwrap(),
-        "0 validators meet the Reliability criteria, so 0 picks come from Reliability and 20 from Diversity"
+        "No validator meets the Reliability criteria, so all 20 picks come from Diversity"
     );
 }
 

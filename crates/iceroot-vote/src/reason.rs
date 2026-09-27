@@ -242,6 +242,48 @@ impl fmt::Display for Grouped {
     }
 }
 
+/// A number and its noun, singular for one: `1 pick`, `2 picks`, `1,000 days`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Count(
+    pub(crate) u128,
+    pub(crate) &'static str,
+    pub(crate) &'static str,
+);
+
+impl fmt::Display for Count {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Count(n, one, many) = *self;
+        write!(f, "{} {}", Grouped(n), if n == 1 { one } else { many })
+    }
+}
+
+/// The chance of a draw, `weight / total`: a percentage with two decimals, or `under 0.01 %`
+/// for a chance that is not zero but rounds down to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Chance(u128, u128);
+
+impl fmt::Display for Chance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Chance(weight, total) = *self;
+        match basis_points_of(weight, total) {
+            0 if weight > 0 => f.write_str("under 0.01 %"),
+            basis_points => Percent(basis_points).fmt(f),
+        }
+    }
+}
+
+/// A value a validator declared, shown in quotes with control, invisible and direction
+/// characters escaped, so that it reads as the validator's statement and cannot rearrange the
+/// sentence around it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Declared<'a>(&'a str);
+
+impl fmt::Display for Declared<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
+
 /// `part / whole` in basis points, rounded down; zero when `whole` is zero.
 pub(crate) fn basis_points_of(part: u128, whole: u128) -> u128 {
     if whole == 0 {
@@ -271,12 +313,21 @@ impl fmt::Display for Reason {
                 total_weight,
             } => write!(
                 f,
-                "Drawn at step {step} from the {pool} pool of {candidates} candidates, with a {} chance",
-                Percent(basis_points_of(*weight, *total_weight)),
+                "Drawn at step {step} from the {pool} pool of {}, with a chance of {}",
+                Count(u128::from(*candidates), "candidate", "candidates"),
+                Chance(*weight, *total_weight),
+            ),
+            Reason::TopUp {
+                mode,
+                mode_picks: 0,
+            } => write!(
+                f,
+                "Added from Diversity because no validator meets the {mode} criteria"
             ),
             Reason::TopUp { mode, mode_picks } => write!(
                 f,
-                "Added from Diversity because the {mode} criteria give only {mode_picks} picks"
+                "Added from Diversity because the {mode} criteria give only {}",
+                Count(u128::from(*mode_picks), "pick", "picks")
             ),
             Reason::Status {
                 status,
@@ -320,7 +371,11 @@ impl fmt::Display for Reason {
                 write!(f, "Seated on {days} of the last 30 days")
             }
             Reason::RegisteredDays { days } => {
-                write!(f, "Registered {} days ago", Grouped(u128::from(*days)))
+                write!(
+                    f,
+                    "Registered {} ago",
+                    Count(u128::from(*days), "day", "days")
+                )
             }
             Reason::DeclarationsComplete => f.write_str("Declarations complete"),
             Reason::Group {
@@ -332,7 +387,9 @@ impl fmt::Display for Reason {
                 let what = match (dimension, value) {
                     (Dimension::RankBand, Some(band)) => format!("rank band {band}"),
                     (Dimension::RankBand, None) => "no rank".to_owned(),
-                    (_, Some(value)) => format!("{noun} {value}"),
+                    // The region comes from the library's table; the others are declared.
+                    (Dimension::Region, Some(region)) => format!("{noun} {region}"),
+                    (_, Some(value)) => format!("{noun} {}", Declared(value)),
                     (_, None) => format!("{noun} not declared"),
                 };
                 match earlier_picks {
@@ -347,8 +404,9 @@ impl fmt::Display for Reason {
                 of_best_bp,
             } => write!(
                 f,
-                "Measured payouts of {} per unit of vote weight over {intervals} intervals, {} of the best payer's; past payouts are not a promise",
+                "Measured payouts of {} per unit of vote weight over {}, {} of the best payer's; past payouts are not a promise",
                 Grouped(*per_unit_weight),
+                Count(u128::from(*intervals), "interval", "intervals"),
                 Percent(u128::from(*of_best_bp))
             ),
             Reason::OperatorPicks {
@@ -358,7 +416,8 @@ impl fmt::Display for Reason {
             } => match operator {
                 Some(operator) => write!(
                     f,
-                    "Pick {picks} of at most {maximum} from operator {operator}"
+                    "Pick {picks} of at most {maximum} from operator {}",
+                    Declared(operator)
                 ),
                 None => write!(
                     f,
@@ -366,7 +425,9 @@ impl fmt::Display for Reason {
                 ),
             },
             Reason::NearCutoff { rank, seats } => {
-                if rank <= seats {
+                if rank == seats {
+                    write!(f, "Rank {rank}, the last seat")
+                } else if rank < seats {
                     write!(
                         f,
                         "Rank {rank}, within {} of the last seat ({seats})",
@@ -425,9 +486,14 @@ impl fmt::Display for Shortfall {
                 None => write!(f, "Seated days unknown; at least {minimum} are needed"),
             },
             Shortfall::RegisteredTooRecently { days, minimum } => match days {
+                Some(0) => write!(
+                    f,
+                    "Registered less than a day ago; at least {minimum} days are needed"
+                ),
                 Some(days) => write!(
                     f,
-                    "Registered {days} days ago; at least {minimum} days are needed"
+                    "Registered {} ago; at least {minimum} days are needed",
+                    Count(u128::from(*days), "day", "days")
                 ),
                 None => write!(
                     f,
@@ -442,7 +508,11 @@ impl fmt::Display for Shortfall {
                 write!(f, "Rank {rank} is not near the last seat ({seats})")
             }
             Shortfall::OperatorCap { operator, maximum } => match operator {
-                Some(operator) => write!(f, "More than {maximum} picks from operator {operator}"),
+                Some(operator) => write!(
+                    f,
+                    "More than {maximum} picks from operator {}",
+                    Declared(operator)
+                ),
                 None => write!(
                     f,
                     "More than {maximum} picks from validators that declare no operator"
@@ -506,6 +576,138 @@ mod tests {
             }
             .to_string(),
             "Forged 94.00 % of its assigned slots (94 of 100); at least 95.00 % is needed"
+        );
+    }
+
+    #[test]
+    fn one_zero_and_tiny_values() {
+        let drawn = |candidates, weight, total_weight| {
+            Reason::Drawn {
+                pool: Mode::MaximumRewards,
+                step: 20,
+                candidates,
+                weight,
+                total_weight,
+            }
+            .to_string()
+        };
+        assert_eq!(
+            drawn(1, 7, 7),
+            "Drawn at step 20 from the Maximum Rewards pool of 1 candidate, with a chance of 100.00 %"
+        );
+        // A chance that rounds down to zero is not shown as zero.
+        assert_eq!(
+            drawn(40, 1, 3_000_000_000),
+            "Drawn at step 20 from the Maximum Rewards pool of 40 candidates, with a chance of under 0.01 %"
+        );
+        assert_eq!(
+            Reason::TopUp {
+                mode: Mode::Reliability,
+                mode_picks: 0
+            }
+            .to_string(),
+            "Added from Diversity because no validator meets the Reliability criteria"
+        );
+        assert_eq!(
+            Reason::TopUp {
+                mode: Mode::Reliability,
+                mode_picks: 1
+            }
+            .to_string(),
+            "Added from Diversity because the Reliability criteria give only 1 pick"
+        );
+        assert_eq!(
+            Reason::NearCutoff {
+                rank: 53,
+                seats: 53
+            }
+            .to_string(),
+            "Rank 53, the last seat"
+        );
+        assert_eq!(
+            Reason::MeasuredPayouts {
+                per_unit_weight: 4_800,
+                intervals: 1,
+                of_best_bp: 9_600
+            }
+            .to_string(),
+            "Measured payouts of 4,800 per unit of vote weight over 1 interval, 96.00 % of the best payer's; past payouts are not a promise"
+        );
+        assert_eq!(
+            Reason::RegisteredDays { days: 1_000 }.to_string(),
+            "Registered 1,000 days ago"
+        );
+        for (days, text) in [
+            (
+                Some(0),
+                "Registered less than a day ago; at least 7 days are needed",
+            ),
+            (Some(1), "Registered 1 day ago; at least 7 days are needed"),
+            (Some(6), "Registered 6 days ago; at least 7 days are needed"),
+            (
+                None,
+                "Registration date unknown; at least 7 days are needed",
+            ),
+        ] {
+            let shortfall = Shortfall::RegisteredTooRecently { days, minimum: 7 };
+            assert_eq!(shortfall.to_string(), text);
+        }
+    }
+
+    #[test]
+    fn declared_values_are_quoted_and_cannot_rearrange_a_sentence() {
+        let group = |dimension, value: &str| {
+            Reason::Group {
+                dimension,
+                value: Some(value.to_owned()),
+                earlier_picks: 1,
+            }
+            .to_string()
+        };
+        assert_eq!(
+            group(Dimension::Operator, "Polar Systems"),
+            "Shares operator \"Polar Systems\" with 1 earlier pick"
+        );
+        assert_eq!(
+            group(Dimension::Hosting, "Fjordhost"),
+            "Shares hosting provider \"Fjordhost\" with 1 earlier pick"
+        );
+        // The region and the rank band come from the library, not from the validator.
+        assert_eq!(
+            group(Dimension::Region, "Europe"),
+            "Shares region Europe with 1 earlier pick"
+        );
+        // Line breaks, direction overrides and invisible characters are shown escaped.
+        let text = group(
+            Dimension::Operator,
+            "Nodes\nForged 100.00 % \u{202e}evil\u{200b}",
+        );
+        assert_eq!(
+            text,
+            "Shares operator \"Nodes\\nForged 100.00 % \\u{202e}evil\\u{200b}\" with 1 earlier pick"
+        );
+        assert!(!text.contains('\n') && !text.contains('\u{202e}') && !text.contains('\u{200b}'));
+        assert_eq!(
+            Reason::OperatorPicks {
+                operator: Some("Frostline".to_owned()),
+                picks: 2,
+                maximum: 2
+            }
+            .to_string(),
+            "Pick 2 of at most 2 from operator \"Frostline\""
+        );
+        assert_eq!(
+            Shortfall::OperatorCap {
+                operator: Some("Frostline".to_owned()),
+                maximum: 2
+            }
+            .to_string(),
+            "More than 2 picks from operator \"Frostline\""
+        );
+        // Non-ASCII letters stay as they are.
+        assert_eq!(
+            group(Dimension::Operator, "Ñandú Nodes"),
+            "Shares operator \"Ñandú Nodes\" with 1 earlier pick"
         );
     }
 }

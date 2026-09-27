@@ -130,9 +130,11 @@ fn a_transfer_from_build_to_bytes() {
     assert_eq!(summary.nethash, chain().nethash());
     assert_eq!(summary.sender, *sender.address());
     assert_eq!(summary.nonce, 1);
-    assert_eq!(summary.fee.amount, Amount::from(2_000_000u64));
-    assert_eq!(summary.fee.source, FeeSource::NodeStatistics);
-    assert_eq!(summary.fee.floor, None);
+    // The exact floor, not the node's statistics: (85 + ceil(size / 2)) × 6173.
+    let floor = (85 + u64::try_from(draft.size().div_ceil(2)).unwrap()) * 6173;
+    assert_eq!(summary.fee.amount, Amount::from(floor));
+    assert_eq!(summary.fee.source, FeeSource::Floor);
+    assert_eq!(summary.fee.floor, Some(Amount::from(floor)));
     assert_eq!(summary.memo.as_deref(), Some("invoice 42"));
     assert_eq!(summary.total_amount, Amount::from(150_000_000u64));
     assert!(!summary.second_signature);
@@ -144,7 +146,7 @@ fn a_transfer_from_build_to_bytes() {
     let json = signed.json();
     assert_eq!(json["senderId"], sender.address().to_string());
     assert_eq!(json["memo"], "invoice 42");
-    assert_eq!(json["fee"], "2000000");
+    assert_eq!(json["fee"], floor.to_string());
     assert_eq!(json["asset"]["transfers"][0]["amount"], "150000000");
 
     // A node reads the same transaction back, from bytes and from JSON.
@@ -412,23 +414,33 @@ fn fees() {
             statistics,
         )
     };
-    assert_eq!(
-        with_fee(FeeChoice::Minimum, None).unwrap_err(),
-        Error::FeeUnavailable {
-            operation: OperationKind::Transfer
-        }
-    );
-    let exact = with_fee(FeeChoice::Exact(Amount::from(1_000_026u64)), None).unwrap();
-    assert_eq!(exact.fee().amount, Amount::from(1_000_026u64));
+    // A 154-byte transfer: (85 + 77) × 6173, with or without the node's statistics.
+    let floor = Amount::from(1_000_026u64);
+    for statistics in [None, Some(&statistics())] {
+        let minimum = with_fee(FeeChoice::Minimum, statistics).unwrap();
+        assert_eq!(minimum.size(), 154);
+        assert_eq!(
+            (
+                minimum.fee().amount,
+                minimum.fee().source,
+                minimum.fee().floor
+            ),
+            (floor, FeeSource::Floor, Some(floor))
+        );
+    }
+    let exact = with_fee(FeeChoice::Exact(Amount::from(1_000_025u64)), None).unwrap();
+    assert_eq!(exact.fee().amount, Amount::from(1_000_025u64));
     assert_eq!(exact.fee().source, FeeSource::Explicit);
+    assert_eq!(exact.fee().floor, Some(floor));
     let scaled = with_fee(
         FeeChoice::Multiplier {
             basis_points: 12_500,
         },
-        Some(&statistics()),
+        None,
     )
     .unwrap();
-    assert_eq!(scaled.fee().amount, Amount::from(2_500_000u64));
+    assert_eq!(scaled.fee().amount, Amount::from(1_250_033u64));
+    assert_eq!(scaled.fee().source, FeeSource::Explicit);
     assert!(matches!(
         with_fee(FeeChoice::Exact(Amount::ZERO), None),
         Err(Error::InvalidFee { .. })
@@ -448,10 +460,26 @@ fn fees() {
     )
     .unwrap();
     assert!(burn.sign(&sender, None).unwrap().is_verified());
-    assert!(!chain().rules(HEIGHT).fees.floor_available);
+    assert_eq!(burn.fee().floor, Some(Amount::ZERO));
+    assert!(chain().rules(HEIGHT).fees.floor_available);
     assert_eq!(
         chain().fee_floor(OperationKind::Transfer, 154, HEIGHT),
-        None
+        Some(floor)
+    );
+    // The registration surcharge is part of the floor.
+    let registration = Draft::build(
+        chain(),
+        &DraftRequest::new(Operation::RegisterValidator {
+            name: "sdk_validator".to_owned(),
+        }),
+        &facts(&sender),
+        None,
+    )
+    .unwrap();
+    let half = u64::try_from(registration.size().div_ceil(2)).unwrap();
+    assert_eq!(
+        registration.fee().amount,
+        Amount::from((1_214_968 + half) * 6173)
     );
 }
 

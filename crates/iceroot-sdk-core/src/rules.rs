@@ -106,8 +106,9 @@ pub struct BurnRules {
 pub struct FeeRules {
     /// The dynamic fee table, when the milestone has one.
     pub dynamic: Option<DynamicFeeRules>,
-    /// Whether this SDK build computes the exact fee floor. Until it does, a draft's fee comes
-    /// from the node's fee statistics or from the caller.
+    /// Whether this SDK build computes the exact fee floor for the network's formats; it does for
+    /// today's formats. Where it does not, a draft's minimum fee comes from the node's fee
+    /// statistics.
     pub floor_available: bool,
 }
 

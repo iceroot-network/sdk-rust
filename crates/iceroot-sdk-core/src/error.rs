@@ -265,8 +265,9 @@ pub enum Error {
         /// The rule it breaks.
         reason: &'static str,
     },
-    /// No fee can be resolved: the exact fee floor is not available and the node reported no fee
-    /// statistics for the operation. An explicit fee still works.
+    /// No fee can be resolved for the operation: its exact fee floor is above the largest fee a
+    /// transaction can carry, or the network's formats have no floor function and the node
+    /// reported no fee statistics for it. An explicit fee still works.
     #[error("no fee can be resolved for {operation}; pass an explicit fee")]
     FeeUnavailable {
         /// The operation.

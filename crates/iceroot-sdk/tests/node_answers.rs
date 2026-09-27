@@ -191,8 +191,13 @@ fn a_draft_from_the_facts_the_node_reports() {
     };
     let draft = Draft::build(&chain, &request, &facts, Some(&statistics)).unwrap();
     let fee = draft.fee();
-    assert_eq!(fee.source, FeeSource::NodeStatistics);
-    assert_eq!(
+    // The exact floor of the milestone the node serves, whatever its statistics say.
+    let floor = chain
+        .fee_floor(OperationKind::Transfer, draft.size(), draft.height())
+        .unwrap();
+    assert_eq!(fee.source, FeeSource::Floor);
+    assert_eq!((fee.amount, fee.floor), (floor, Some(floor)));
+    assert_ne!(
         fee.amount,
         statistics.get(OperationKind::Transfer).unwrap().maximum
     );

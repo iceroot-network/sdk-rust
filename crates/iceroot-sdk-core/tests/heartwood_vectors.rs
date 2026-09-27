@@ -702,7 +702,7 @@ fn v11_external() {
 }
 
 // ------------------------------------------------------------------------------------------------
-// V05, V06, V07, V10 and V12.
+// V05, V06, V07, V10, V12 and V19.
 
 #[test]
 fn v05_blocks() {
@@ -759,18 +759,7 @@ fn v06_arithmetic() {
                     &json!({ "donations": shares }),
                 )
             }
-            "fee.minimum" => {
-                let bytes = hex::decode(text(&input["hex"])).expect("hex");
-                let tx = SignedTransaction::decode(chain(), &bytes, record.height)
-                    .expect("a transaction");
-                match chain().fee_floor(tx.kind(), bytes.len(), record.height) {
-                    None => Outcome::Skipped("the exact fee floor is not computed by this build"),
-                    Some(floor) => {
-                        let expected = record.expected.as_ref().expect("an output");
-                        compare(&expected["minimumFee"], &json!(floor.to_string()))
-                    }
-                }
-            }
+            "fee.minimum" => fee_minimum(record),
             "block.make" => Outcome::Skipped("blocks: the SDK builds no blocks"),
             other => Outcome::Failed(format!("unknown operation {other}")),
         }
@@ -778,9 +767,100 @@ fn v06_arithmetic() {
     assert_eq!(
         tally,
         Tally {
-            matched: 92,
+            matched: 108,
             divergent: 0,
-            skipped: 18
+            skipped: 2
+        }
+    );
+}
+
+/// The reference's type key of an operation, as the fee table names it.
+fn fee_key(kind: OperationKind) -> &'static str {
+    match kind {
+        OperationKind::Transfer => "transfer",
+        OperationKind::Vote => "vote",
+        OperationKind::Burn => "burn",
+        OperationKind::RegisterSecondKey => "secondSignature",
+        OperationKind::RegisterValidator => "delegateRegistration",
+        OperationKind::ResignValidator => "delegateResignation",
+    }
+}
+
+/// `fee.minimum`: the transaction in `hex`, decoded under the record's chain, and the exact fee
+/// floor [`Chain::fee_floor`] gives for its kind and full size.
+fn fee_minimum(record: &Record) -> Outcome {
+    let chain = match record.input.get("milestones") {
+        None => chain().clone(),
+        Some(milestones) => {
+            let network = serde_json::to_string(&chain().network().to_json()).expect("JSON");
+            match Chain::from_parts(chain().profile(), &network, text(milestones)) {
+                Ok(chain) => chain,
+                Err(Error::BadResponse { reason })
+                    if reason.contains("dynamicFees")
+                        || reason.contains("blocksToRevokeDelegateResignation") =>
+                {
+                    return match &record.expected {
+                        // The reference fails too, when it checks the fee.
+                        Err(_) => Outcome::Matched,
+                        Ok(_) => Outcome::Divergent(
+                            "a fee table or revoke delay with a value of the wrong type: the \
+                             reference loads it and coerces the value when it checks a fee; \
+                             heartwood-crypto refuses the milestones at load",
+                        ),
+                    };
+                }
+                Err(other) => return Outcome::Failed(format!("the milestones: {other}")),
+            }
+        }
+    };
+    let bytes = hex::decode(text(&record.input["hex"])).expect("hex");
+    let tx = match SignedTransaction::decode(&chain, &bytes, record.height) {
+        Ok(tx) => tx,
+        Err(error) => return Outcome::Failed(format!("the transaction: {error}")),
+    };
+    let Some(floor) = chain.fee_floor(tx.kind(), bytes.len(), record.height) else {
+        return Outcome::Failed("no fee floor".into());
+    };
+    let actual = json!({
+        "key": fee_key(tx.kind()),
+        "size": bytes.len(),
+        "minimumFee": floor.to_string(),
+    });
+    match &record.expected {
+        Ok(expected)
+            if expected["minimumFee"]
+                .as_str()
+                .is_some_and(|fee| fee.starts_with('-')) =>
+        {
+            let mut zero = expected.clone();
+            zero["minimumFee"] = json!("0");
+            match compare(&zero, &actual) {
+                Outcome::Matched => Outcome::Divergent(
+                    "a floor below zero (negative add-on bytes): every fee meets it, and the SDK \
+                     reports it as zero, the least fee",
+                ),
+                other => other,
+            }
+        }
+        Ok(expected) => compare(expected, &actual),
+        Err(error) => Outcome::Failed(format!("the reference refused with {error}")),
+    }
+}
+
+#[test]
+fn v19_fee_floor() {
+    let file = load("V19-fee-floor");
+    check_devnet(&file);
+    let tally = run_class(&file, |record| match record.op.as_str() {
+        "fee.minimum" => fee_minimum(record),
+        other => Outcome::Failed(format!("unknown operation {other}")),
+    });
+    assert_eq!(
+        tally,
+        Tally {
+            matched: 208,
+            divergent: 39,
+            skipped: 0
         }
     );
 }
@@ -1169,6 +1249,7 @@ fn every_class_is_run() {
             "V10-genesis",
             "V11-external",
             "V12-milestone-config",
+            "V19-fee-floor",
         ],
         "a vector class was added or removed: give it a runner"
     );

@@ -192,9 +192,10 @@ impl Chain {
     }
 
     /// The exact fee floor at `height` of a transaction of `kind` that is `size` bytes long,
-    /// signatures included; `None` while this build does not compute it (see [`crate::fee`]).
+    /// signatures included: the node's own rule, from `heartwood-crypto` (see [`crate::fee`]).
+    /// `None` where the formats have no floor function.
     pub fn fee_floor(&self, kind: OperationKind, size: usize, height: u32) -> Option<Amount> {
-        fee::floor(kind, size, self.params(height)).map(Amount::from)
+        fee::floor(kind, size, self.params(height))
     }
 
     /// The merged milestone in force at `height`, as `heartwood-crypto` holds it.

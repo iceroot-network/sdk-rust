@@ -66,7 +66,11 @@ pub struct SignInRequest<'a> {
     pub expires_at: i64,
 }
 
-/// What a reader expects of a sign-in message. Unset fields are not compared.
+/// What a reader expects of a sign-in message. Unset fields are not compared, as in the format's
+/// published checks, so a wallet sets every field: the origin of the page that asks (as the
+/// browser reports it, never one the page claims) and the selected identity's public key and
+/// address. Otherwise a message made for another website or another identity passes. The
+/// TypeScript SDK requires all three.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SignInExpected<'a> {
     /// The origin of the website that asks.

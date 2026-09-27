@@ -4,7 +4,8 @@
 //!
 //! - the core ([`iceroot_sdk_core`], at the root of this crate): network profiles and
 //!   capabilities, recovery phrases and keys, addresses, amounts, transaction drafts and signing,
-//!   message signing and the sign-in message;
+//!   message signing and the sign-in message, and ownership proofs of Solar addresses
+//!   ([`ownership`]);
 //! - the node API client ([`api`], the crate `iceroot_sdk_api`): a sans-IO client that builds each
 //!   request and decodes each answer into IceRoot-shaped values, with an optional async HTTP
 //!   transport (feature `http`, native targets only);
@@ -95,6 +96,37 @@
 //! # }
 //! ```
 
+//!
+//! # Ownership proofs
+//!
+//! The holder of a Solar address proves control of it with a signed message that names the
+//! IceRoot account its holding should be bound to. The functions need no network profile.
+//!
+//! ```
+//! use iceroot_sdk::ownership::{self, IceRootAccount, OwnershipProof, ProofRequest, SolarKey};
+//!
+//! # fn main() -> Result<(), iceroot_sdk::Error> {
+//! let now_ms = 1_788_264_000_000; // The caller's clock: 2026-09-01T12:00:00Z.
+//! let key = SolarKey::from_passphrase("this is a top secret passphrase")?;
+//! let account =
+//!     IceRootAccount::parse("ice1q8y55x5z8dr5uepshat727uvt328lfkklzwvvmt4p42qlcrggxtsk8zw2r")?;
+//! let message = ownership::build(&ProofRequest {
+//!     address: key.address(),
+//!     account: &account,
+//!     nonce: &ownership::random_nonce()?,
+//!     issued_at_ms: now_ms,
+//! })?;
+//! // The holder reads the whole message before it is signed.
+//! let proof = ownership::sign(&key, &message, now_ms)?;
+//!
+//! // Whoever receives the proof as JSON checks it.
+//! let received = OwnershipProof::from_json(&proof.to_json())?;
+//! let fields = ownership::verify(&received, now_ms)?;
+//! assert_eq!(fields.address, "SNAgA2XCRZDKfm5Vu9h4KR1bZw5xn9EiC3");
+//! assert_eq!(fields.account, account);
+//! # Ok(())
+//! # }
+//! ```
 //!
 //! # Errors
 //!

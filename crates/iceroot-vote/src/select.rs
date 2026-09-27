@@ -3,14 +3,17 @@
 use core::fmt;
 
 use crate::mode::Mode;
-use crate::reason::{Count, Reason};
-use crate::rules::{TOTAL_BASIS_POINTS, VoteEntry, canonical_cmp, canonical_order};
+use crate::reason::{Count, Grouped, Reason};
+use crate::rules::{
+    EMPTY_VOTE_BYTES, TOTAL_BASIS_POINTS, VoteEntry, VoteRules, canonical_cmp, canonical_order,
+    entry_bytes,
+};
 use crate::sample::{Stream, seed};
-use crate::score::{Candidate, Groups, Interner, MAX_PICKS_PER_OPERATOR, Spread, judged};
+use crate::score::{Bands, Candidate, Groups, Interner, MAX_PICKS_PER_OPERATOR, Spread, judged};
 use crate::snapshot::{SnapshotError, SnapshotSource, ValidatorRecord, VoteSnapshot, Voter};
 
 /// The version of the selection rules. A selection records it; the same version, snapshot,
-/// account, mode and draw number always give the same selection.
+/// account, mode, number of picks, vote rules and draw number always give the same selection.
 pub const LIBRARY_VERSION: &str = "iceroot-vote/1";
 /// The fewest picks of a selection, so that no pick exceeds 500 basis points.
 pub const MIN_PICKS: u8 = 20;
@@ -26,20 +29,24 @@ pub struct SelectRequest<'a> {
     pub mode: Mode,
     /// The voting account's address; part of the seed.
     pub account: &'a str,
-    /// The number of picks, from [`MIN_PICKS`] to [`MAX_PICKS`].
+    /// The number of picks, from [`MIN_PICKS`] to [`MAX_PICKS`]; the selection has fewer when
+    /// that many do not fit the vote rules' limits (see [`select`]).
     pub count: u8,
     /// The draw number: 0 first, one more for each "draw again".
     pub draw: u32,
+    /// The network's vote rules, whose limits on entries and bytes the selection keeps within.
+    pub rules: VoteRules,
 }
 
 impl<'a> SelectRequest<'a> {
-    /// A first draw of [`DEFAULT_PICKS`] picks.
+    /// A first draw of [`DEFAULT_PICKS`] picks under [`VoteRules::ICEROOT`].
     pub const fn new(mode: Mode, account: &'a str) -> SelectRequest<'a> {
         SelectRequest {
             mode,
             account,
             count: DEFAULT_PICKS,
             draw: 0,
+            rules: VoteRules::ICEROOT,
         }
     }
 }
@@ -88,6 +95,11 @@ pub struct Selection {
     pub snapshot_source: SnapshotSource,
     /// The draw number.
     pub draw: u32,
+    /// The number of picks requested; more than the entries when that many did not fit the vote
+    /// rules' limits.
+    pub requested: u8,
+    /// The vote rules the selection keeps within.
+    pub rules: VoteRules,
     /// The seed (see [`seed`](crate::seed)).
     pub seed: [u8; 32],
     /// Validators that met the mode's criteria.
@@ -116,6 +128,26 @@ impl Selection {
     /// The seed in lowercase hexadecimal.
     pub fn seed_hex(&self) -> String {
         self.seed.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    /// The sentence a wallet shows when fewer picks than requested fit the vote rules' limits,
+    /// else `None`.
+    pub fn size_notice(&self) -> Option<String> {
+        let picks = self.entries.len();
+        (picks < usize::from(self.requested)).then(|| {
+            if picks >= usize::from(self.rules.max_entries) {
+                format!(
+                    "A vote names at most {} validators, so the selection has {picks} picks, not the {} requested",
+                    self.rules.max_entries, self.requested
+                )
+            } else {
+                format!(
+                    "Only {picks} of the {} requested picks fit in a vote of at most {} bytes",
+                    self.requested,
+                    Grouped(u128::from(self.rules.max_bytes))
+                )
+            }
+        })
     }
 
     /// The sentence a wallet shows when the selection was topped up, else `None`.
@@ -150,10 +182,15 @@ impl Selection {
 /// Why no selection could be made.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SelectError {
-    /// The requested number of picks is outside [`MIN_PICKS`] to [`MAX_PICKS`].
+    /// The requested number of picks is outside [`MIN_PICKS`] to [`MAX_PICKS`], or below the vote
+    /// rules' fewest entries.
     Count {
         /// The requested number.
         count: u8,
+        /// The fewest picks: [`MIN_PICKS`], or the rules' fewest entries when that is more.
+        minimum: u8,
+        /// The most picks: [`MAX_PICKS`].
+        maximum: u8,
     },
     /// The account belongs to a validator, and validator accounts cannot vote.
     ValidatorAccount,
@@ -166,14 +203,29 @@ pub enum SelectError {
         /// Validators available.
         available: u32,
     },
+    /// Fewer picks than the minimum fit within the vote rules' limits on entries and bytes.
+    DoesNotFit {
+        /// The picks that fit, in draw order.
+        fits: u32,
+        /// The fewest picks: [`MIN_PICKS`], or the rules' fewest entries when that is more.
+        minimum: u8,
+        /// The rules' most entries.
+        max_entries: u8,
+        /// The rules' most bytes.
+        max_bytes: u16,
+    },
 }
 
 impl fmt::Display for SelectError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SelectError::Count { count } => write!(
+            SelectError::Count {
+                count,
+                minimum,
+                maximum,
+            } => write!(
                 f,
-                "a selection has {MIN_PICKS} to {MAX_PICKS} picks, not {count}"
+                "a selection has {minimum} to {maximum} picks, not {count}"
             ),
             SelectError::ValidatorAccount => f.write_str("a validator's account cannot vote"),
             SelectError::Snapshot(error) => error.fmt(f),
@@ -184,6 +236,25 @@ impl fmt::Display for SelectError {
                 f,
                 "only {available} validators can be picked, and {requested} were requested"
             ),
+            SelectError::DoesNotFit {
+                fits,
+                minimum,
+                max_entries,
+                max_bytes,
+            } => {
+                if *fits >= u32::from(*max_entries) {
+                    write!(
+                        f,
+                        "a vote names at most {max_entries} validators, and a selection needs at least {minimum}"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "only {fits} picks fit in a vote of at most {} bytes, and a selection needs at least {minimum}",
+                        Grouped(u128::from(*max_bytes))
+                    )
+                }
+            }
         }
     }
 }
@@ -242,26 +313,61 @@ impl OperatorPicks {
 /// The seed (see [`seed`](crate::seed)) starts a SHA-256 counter stream. Picks are drawn one at a
 /// time without replacement from the mode's pool (see [`evaluate`](crate::evaluate)), candidates
 /// in name order: a number `r` below the total weight is taken from the stream by rejection, and
-/// the pick is the first candidate whose running sum of weights exceeds `r`. Diversity recomputes
-/// every weight before each draw; Maximum Rewards drops an operator's validators once it has two
-/// picks. When the mode's pool runs out before `count` picks, the rest is drawn the same way
-/// from Diversity's pool, with its spread counting every pick so far, and each such pick says so.
-/// A Maximum Rewards top-up still gives no declared operator more than two picks in all.
+/// the pick is the first candidate whose running sum of weights exceeds `r`. Maximum Rewards
+/// drops an operator's validators once it has two picks. When the mode's pool runs out before
+/// `count` picks, the rest is drawn the same way from Diversity's pool, with its spread counting
+/// every pick so far, and each such pick says so. A Maximum Rewards top-up still gives no declared
+/// operator more than two picks in all.
+///
+/// Diversity recomputes every weight before each draw, spreading picks over rank bands first and
+/// declarations second:
+///
+/// ```text
+/// weight = ⌊ ⌊2^64 / (1 + r)⌋ × (1 + (o + h + g) / 3) ⌋
+/// ```
+///
+/// - **Rank bands.** `r` counts the picks so far in the candidate's rank band. Diversity's pool,
+///   in rank order (validators without a rank last, then by name), is split into
+///   `⌈n / 10⌉` bands whose sizes differ by at most one: the validator at position `i`, from 0,
+///   is in band `⌊i × bands / n⌋`. A pick from outside that pool (a Maximum Rewards pick, before a
+///   top-up) counts in the band of the position it would take. Ranks are chain data, so this part
+///   cannot be declared falsely, and it has no bound.
+/// - **Declarations.** `o`, `h` and `g` are the candidate's bonuses for its declared operator,
+///   hosting provider and region (from its declared country). In each of these dimensions the
+///   common value is the declared value that the most picks so far share, `m` of them; a
+///   candidate whose value `s` picks so far share has a bonus of `(m - s) / m`, from 0 for a
+///   common value to 1 for a value no pick shares yet. An undeclared value counts as common, and
+///   before any pick declares a value every value is common. The sum is an exact fraction and
+///   the product is rounded down once, so a candidate weighs from `⌊2^64 / (1 + r)⌋`, when its
+///   values are all common or undeclared, to twice that, when no pick shares any of them yet.
+///   Declarations are statements, not verified facts: a validator that invents unique values
+///   gains at most that factor of two, and one that declares nothing loses at most the same.
 ///
 /// Shares are 10,000 basis points split evenly in whole basis points, one extra to each of the
 /// first picks drawn while the remainder lasts, and the entries come in the protocol's canonical
 /// order. With 20 to 53 picks every share is at most 500 basis points.
 ///
-/// Refused when `count` is outside 20 to 53, when the snapshot is invalid, when the account is a
-/// validator's (one that has not resigned for good), and when fewer than `count` validators can
-/// be picked at all.
+/// **Vote rules.** A vote may take at most `rules.max_entries` entries and `rules.max_bytes`
+/// bytes (see [`vote_bytes`](crate::vote_bytes)): 1,024 bytes on the Solar-compatible stage,
+/// 1,280 from IceRoot's genesis. The selection keeps the longest start of the draw that fits
+/// both, so fewer than `count` picks when the names are long; it is then the same selection as
+/// one requested with that smaller count, and [`Selection::size_notice`] says so. The draw itself
+/// does not depend on the rules, so names of any length have the same chance.
+///
+/// Refused when `count` is outside 20 to 53 or below the rules' fewest entries, when the snapshot
+/// is invalid, when the account is a validator's (one that has not resigned for good), when fewer
+/// than `count` validators can be picked at all, and when fewer than 20 picks (or the rules'
+/// fewest entries) fit the rules' limits.
 pub fn select(
     snapshot: &VoteSnapshot,
     request: &SelectRequest<'_>,
 ) -> Result<Selection, SelectError> {
-    if !(MIN_PICKS..=MAX_PICKS).contains(&request.count) {
+    let minimum = MIN_PICKS.max(request.rules.min_entries);
+    if !(minimum..=MAX_PICKS).contains(&request.count) {
         return Err(SelectError::Count {
             count: request.count,
+            minimum,
+            maximum: MAX_PICKS,
         });
     }
     snapshot.validate()?;
@@ -274,8 +380,18 @@ pub fn select(
     let mut spread = Spread::default();
     let mut picks: Vec<Pick> = Vec::with_capacity(count);
 
-    let mut interner = Interner::default();
-    let mut pool = entrants(snapshot, request.mode, &mut interner);
+    // Diversity's pool sets the rank bands, and tops up the other modes.
+    let diverse = eligible(snapshot, Mode::Diversity);
+    let bands = Bands::new(diverse.iter().map(|(_, record)| *record));
+    let mut interner = Interner::new(&bands);
+    let (mut pool, fill) = if request.mode == Mode::Diversity {
+        (entrants(diverse, &mut interner), Vec::new())
+    } else {
+        (
+            entrants(eligible(snapshot, request.mode), &mut interner),
+            diverse,
+        )
+    };
     let pool_size = u32::try_from(pool.len()).unwrap_or(u32::MAX);
     let mut operators = OperatorPicks::default();
     match request.mode {
@@ -301,10 +417,11 @@ pub fn select(
 
     let mode_picks = picks.len();
     if picks.len() < count && request.mode != Mode::Diversity {
-        let mut fill: Vec<Entrant<'_>> = entrants(snapshot, Mode::Diversity, &mut interner)
+        let unpicked = fill
             .into_iter()
-            .filter(|entrant| !picks.iter().any(|p| p.validator == entrant.record.name))
+            .filter(|(_, record)| !picks.iter().any(|p| p.validator == record.name))
             .collect();
+        let mut fill = entrants(unpicked, &mut interner);
         let top_up = Reason::TopUp {
             mode: request.mode,
             mode_picks: u32::try_from(mode_picks).unwrap_or(u32::MAX),
@@ -328,6 +445,19 @@ pub fn select(
         });
     }
 
+    // The longest start of the draw that fits the rules' limits.
+    let fits = fitting(&picks, &request.rules);
+    if fits < usize::from(minimum) {
+        return Err(SelectError::DoesNotFit {
+            fits: u32::try_from(fits).unwrap_or(u32::MAX),
+            minimum,
+            max_entries: request.rules.max_entries,
+            max_bytes: request.rules.max_bytes,
+        });
+    }
+    picks.truncate(fits);
+    let mode_picks = mode_picks.min(fits);
+
     // Even shares in draw order, one extra basis point to each of the first picks while the
     // remainder lasts (as `split` does), then the canonical order.
     let n = u16::try_from(picks.len()).unwrap_or(u16::from(MAX_PICKS));
@@ -349,6 +479,8 @@ pub fn select(
         snapshot_height: snapshot.height,
         snapshot_source: snapshot.source,
         draw: request.draw,
+        requested: request.count,
+        rules: request.rules,
         seed,
         pool: pool_size,
         topped_up: u32::try_from(picks.len() - mode_picks).unwrap_or(u32::MAX),
@@ -356,15 +488,33 @@ pub fn select(
     })
 }
 
-/// The eligible validators of a mode, in name order.
-fn entrants<'a>(
-    snapshot: &'a VoteSnapshot,
-    mode: Mode,
-    interner: &mut Interner,
-) -> Vec<Entrant<'a>> {
+/// How many picks, in draw order, fit within the rules' limits on entries and bytes.
+fn fitting(picks: &[Pick], rules: &VoteRules) -> usize {
+    let mut bytes = EMPTY_VOTE_BYTES;
+    for (index, pick) in picks.iter().enumerate() {
+        bytes = bytes.saturating_add(entry_bytes(&pick.validator));
+        if index >= usize::from(rules.max_entries) || bytes > usize::from(rules.max_bytes) {
+            return index;
+        }
+    }
+    picks.len()
+}
+
+/// The validators that meet a mode's criteria, with their records, in name order.
+fn eligible(snapshot: &VoteSnapshot, mode: Mode) -> Vec<(Candidate, &ValidatorRecord)> {
     judged(snapshot, mode)
         .into_iter()
         .filter(|(candidate, _)| candidate.eligible)
+        .collect()
+}
+
+/// Eligible validators as entrants of a draw, with their Diversity groups.
+fn entrants<'a>(
+    eligible: Vec<(Candidate, &'a ValidatorRecord)>,
+    interner: &mut Interner<'_>,
+) -> Vec<Entrant<'a>> {
+    eligible
+        .into_iter()
         .map(|(candidate, record)| Entrant {
             groups: interner.groups(record),
             candidate,
@@ -437,7 +587,11 @@ fn draw_diverse(
         if let Some(operators) = cap.as_deref() {
             pool.retain(|entrant| !(entrant.groups.operator_declared() && operators.full(entrant)));
         }
-        let weights: Vec<u128> = pool.iter().map(|e| spread.weight(&e.groups)).collect();
+        let most = spread.most();
+        let weights: Vec<u128> = pool
+            .iter()
+            .map(|e| spread.weight(&e.groups, most))
+            .collect();
         let Some(drawn) = draw(stream, &weights) else {
             return;
         };

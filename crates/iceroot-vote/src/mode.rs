@@ -8,8 +8,8 @@ use core::fmt;
 /// [`validate_vote`](crate::validate_vote) only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Mode {
-    /// The recommended default: spread the vote across declared operators, hosting providers,
-    /// regions and rank bands, among validators in good health.
+    /// The recommended default: spread the vote across rank bands first and declared operators,
+    /// hosting providers and regions second, among validators in good health.
     Diversity,
     /// Favour validators with a strong record over the 30-day window: slots forged against slots
     /// assigned, with no jailing or equivocation, after at least 7 days of seated history.

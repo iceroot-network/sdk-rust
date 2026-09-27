@@ -12,11 +12,19 @@ mod common;
 use std::collections::BTreeMap;
 
 use iceroot_vote::{
-    Mode, PickSource, Problem, Reason, SelectError, SelectRequest, SnapshotSource, ValidatorStatus,
-    VoteRules, VoteSnapshot, Voter, evaluate, select, validate_vote,
+    Dimension, Mode, PickSource, Problem, Reason, SelectError, SelectRequest, SnapshotSource,
+    ValidatorStatus, VoteRules, VoteSnapshot, Voter, evaluate, select, validate_vote,
 };
 
 use common::{devnet, devnet_relay};
+
+/// A first draw of 20 under the devnet's rules, the Solar-compatible stage.
+fn request(mode: Mode, account: &str) -> SelectRequest<'_> {
+    SelectRequest {
+        rules: VoteRules::SOLAR_COMPATIBLE,
+        ..SelectRequest::new(mode, account)
+    }
+}
 
 fn pool_size(snapshot: &VoteSnapshot, mode: Mode) -> usize {
     evaluate(snapshot, mode)
@@ -93,7 +101,7 @@ fn diversity_works_on_rank_bands() {
     let mut largest_band_total = 0;
     for i in 0..200 {
         let account = format!("dev-holder-{i}");
-        let selection = select(&s, &SelectRequest::new(Mode::Diversity, &account)).unwrap();
+        let selection = select(&s, &request(Mode::Diversity, &account)).unwrap();
         assert_eq!(selection.snapshot_source, SnapshotSource::RelayApproximate);
         assert_eq!(selection.topped_up, 0);
         assert!(
@@ -104,10 +112,21 @@ fn diversity_works_on_rank_bands() {
             )
             .is_empty()
         );
-        let mut bands: BTreeMap<u32, usize> = BTreeMap::new();
+        let mut bands: BTreeMap<String, usize> = BTreeMap::new();
         for pick in &selection.entries {
-            let rank = s.record(&pick.validator).unwrap().rank.unwrap();
-            *bands.entry((rank - 1) / 10).or_insert(0) += 1;
+            let band = pick
+                .reasons
+                .iter()
+                .find_map(|r| match r {
+                    Reason::Group {
+                        dimension: Dimension::RankBand,
+                        value,
+                        ..
+                    } => value.clone(),
+                    _ => None,
+                })
+                .unwrap();
+            *bands.entry(band).or_insert(0) += 1;
             // Undeclared operator, hosting and region: one group each, shared by every pick.
             let undeclared = pick
                 .reasons
@@ -121,15 +140,15 @@ fn diversity_works_on_rank_bands() {
             });
             assert!(production.unwrap_or(true));
         }
-        // Six bands (1 to 10, ..., 51 to 60) and 20 picks.
+        // Six bands of 9 or 8 validators, and 20 picks.
         assert!(bands.len() >= 5, "{bands:?}");
         largest_band_total += bands.values().max().unwrap();
     }
-    // A uniform draw of 20 from these bands (10, 10, 10, 9, 10 and 4 eligible validators) puts
-    // about 5.5 picks in the largest band on average; the rank-band spread keeps it lower.
-    assert!(largest_band_total < 200 * 51 / 10, "{largest_band_total}");
+    // A uniform draw of 20 from six bands of 9 or 8 validators puts about 5.3 picks in the
+    // largest band on average; the rank-band spread keeps it lower.
+    assert!(largest_band_total < 200 * 48 / 10, "{largest_band_total}");
     // The text says the figures are lifetime counts.
-    let selection = select(&s, &SelectRequest::new(Mode::Diversity, "dev-holder")).unwrap();
+    let selection = select(&s, &request(Mode::Diversity, "dev-holder")).unwrap();
     let text: Vec<String> = selection.entries[0]
         .reasons
         .iter()
@@ -149,7 +168,7 @@ fn reliability_needs_seven_seated_days() {
     // that resigned; the newer validator has 5 days.
     let s = devnet();
     assert_eq!(pool_size(&s, Mode::Reliability), 50);
-    let selection = select(&s, &SelectRequest::new(Mode::Reliability, "dev-holder")).unwrap();
+    let selection = select(&s, &request(Mode::Reliability, "dev-holder")).unwrap();
     assert_eq!(selection.topped_up, 0);
     assert!(
         selection
@@ -168,7 +187,7 @@ fn reliability_needs_seven_seated_days() {
     let fresh = fresh();
     assert_eq!(pool_size(&fresh, Mode::Reliability), 0);
     assert!(pool_size(&fresh, Mode::Diversity) >= 20);
-    let selection = select(&fresh, &SelectRequest::new(Mode::Reliability, "dev-holder")).unwrap();
+    let selection = select(&fresh, &request(Mode::Reliability, "dev-holder")).unwrap();
     assert_eq!(selection.pool, 0);
     assert_eq!(selection.topped_up, 20);
     assert!(
@@ -194,9 +213,14 @@ fn rewards_and_newcomers_top_up_on_the_devnet() {
     for mode in [Mode::MaximumRewards, Mode::SupportNewcomers] {
         assert_eq!(pool_size(&s, mode), 0, "{mode}");
         for count in [20u8, 40, 53] {
-            let mut request = SelectRequest::new(mode, "dev-holder");
-            request.count = count;
-            let selection = select(&s, &request).unwrap();
+            let selection = select(
+                &s,
+                &SelectRequest {
+                    count,
+                    ..request(mode, "dev-holder")
+                },
+            )
+            .unwrap();
             assert_eq!(selection.topped_up, u32::from(count));
             assert!(selection.top_up_notice().is_some());
             assert!(
@@ -208,9 +232,11 @@ fn rewards_and_newcomers_top_up_on_the_devnet() {
                 .is_empty()
             );
         }
-        let mut request = SelectRequest::new(mode, "dev-holder");
-        request.count = 53;
-        let selection = select(&s, &request).unwrap();
+        let all = SelectRequest {
+            count: 53,
+            ..request(mode, "dev-holder")
+        };
+        let selection = select(&s, &all).unwrap();
         assert_eq!(selection.entries.len(), 53);
         assert_eq!(
             selection
@@ -226,7 +252,7 @@ fn rewards_and_newcomers_top_up_on_the_devnet() {
 #[test]
 fn devnet_names_and_accounts() {
     let s = devnet();
-    let selection = select(&s, &SelectRequest::new(Mode::Diversity, "dev-holder")).unwrap();
+    let selection = select(&s, &request(Mode::Diversity, "dev-holder")).unwrap();
     // Solar-compatible names like genesis_1 are not IceRoot names: the IceRoot rules refuse
     // them, the devnet's rules accept them.
     let problems = validate_vote(&selection.vote(), &VoteRules::ICEROOT, Voter::Ordinary);
@@ -245,24 +271,12 @@ fn devnet_names_and_accounts() {
     );
     // A validator's account is refused; a permanently resigned one may vote.
     assert_eq!(
-        select(
-            &s,
-            &SelectRequest::new(Mode::Diversity, "dev-address-genesis_5")
-        ),
+        select(&s, &request(Mode::Diversity, "dev-address-genesis_5")),
         Err(SelectError::ValidatorAccount)
     );
     assert_eq!(
-        select(
-            &s,
-            &SelectRequest::new(Mode::Diversity, "dev-address-genesis_17")
-        ),
+        select(&s, &request(Mode::Diversity, "dev-address-genesis_17")),
         Err(SelectError::ValidatorAccount)
     );
-    assert!(
-        select(
-            &s,
-            &SelectRequest::new(Mode::Diversity, "dev-address-genesis_42")
-        )
-        .is_ok()
-    );
+    assert!(select(&s, &request(Mode::Diversity, "dev-address-genesis_42")).is_ok());
 }

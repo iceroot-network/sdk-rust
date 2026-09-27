@@ -14,7 +14,8 @@ pub enum Dimension {
     Hosting,
     /// The region of the declared country.
     Region,
-    /// The rank band: ranks 1 to 10, 11 to 20 and so on.
+    /// The rank band: Diversity's pool in rank order, split into bands of equal size, give or
+    /// take one validator (see [`RANK_BAND_SIZE`](crate::RANK_BAND_SIZE)).
     RankBand,
 }
 
@@ -105,9 +106,10 @@ pub enum Reason {
     Group {
         /// The grouping.
         dimension: Dimension,
-        /// The declared operator, hosting provider or region, or the rank band (for example
-        /// `41 to 50`); `None` for the one group of validators that declared nothing, or that
-        /// have no rank.
+        /// The declared operator, hosting provider or region, or the rank band by its first and
+        /// last rank (for example `37 to 45`, or `73 and below` for a band that includes
+        /// validators without a rank); `None` for the one group of validators that declared
+        /// nothing, or for a band of validators without a rank.
         value: Option<String>,
         /// Earlier picks in the same group.
         earlier_picks: u32,
@@ -118,8 +120,8 @@ pub enum Reason {
         per_unit_weight: u128,
         /// Payout intervals measured.
         intervals: u32,
-        /// The value as a share of the best payer's, in basis points.
-        of_best_bp: u16,
+        /// The value as a share of the best payer's, in parts per million, rounded down.
+        of_best_ppm: u32,
     },
     /// Picks from the same declared operator, against the cap.
     OperatorPicks {
@@ -272,6 +274,20 @@ impl fmt::Display for Chance {
     }
 }
 
+/// A share in parts per million, shown as a percentage with two decimals, or `under 0.01 %` for
+/// a share that is not zero but rounds down to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PartsPerMillion(u32);
+
+impl fmt::Display for PartsPerMillion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 / 100 {
+            0 if self.0 > 0 => f.write_str("under 0.01 %"),
+            basis_points => Percent(u128::from(basis_points)).fmt(f),
+        }
+    }
+}
+
 /// A value a validator declared, shown in quotes with control, invisible and direction
 /// characters escaped, so that it reads as the validator's statement and cannot rearrange the
 /// sentence around it.
@@ -286,13 +302,39 @@ impl fmt::Display for Declared<'_> {
 
 /// `part / whole` in basis points, rounded down; zero when `whole` is zero.
 pub(crate) fn basis_points_of(part: u128, whole: u128) -> u128 {
-    if whole == 0 {
+    mul_div(part, 10_000, whole)
+}
+
+/// `⌊a × b / c⌋`, exact for every input: the product is formed in 256 bits. Zero when `c` is
+/// zero; `u128::MAX` when the quotient does not fit.
+pub(crate) fn mul_div(a: u128, b: u64, c: u128) -> u128 {
+    if c == 0 {
         return 0;
     }
-    match part.checked_mul(10_000) {
-        Some(scaled) => scaled / whole,
-        None => part / (whole / 10_000).max(1),
+    let b = u128::from(b);
+    if let Some(product) = a.checked_mul(b) {
+        return product / c;
     }
+    // a × b = high × 2^128 + low, from a = a1 × 2^64 + a0.
+    let (a1, a0) = (a >> 64, a & u128::from(u64::MAX));
+    let (middle, low) = (a1 * b, a0 * b);
+    let (low, carry) = low.overflowing_add(middle << 64);
+    let high = (middle >> 64) + u128::from(carry);
+    if high >= c {
+        return u128::MAX;
+    }
+    // Long division, one bit at a time; the remainder stays below c.
+    let (mut remainder, mut quotient) = (high, 0u128);
+    for bit in (0..128).rev() {
+        let overflow = remainder >> 127 == 1;
+        remainder = (remainder << 1) | ((low >> bit) & 1);
+        quotient <<= 1;
+        if overflow || remainder >= c {
+            remainder = remainder.wrapping_sub(c);
+            quotient |= 1;
+        }
+    }
+    quotient
 }
 
 fn ordinal_rank(rank: Option<u32>) -> String {
@@ -401,13 +443,13 @@ impl fmt::Display for Reason {
             Reason::MeasuredPayouts {
                 per_unit_weight,
                 intervals,
-                of_best_bp,
+                of_best_ppm,
             } => write!(
                 f,
                 "Measured payouts of {} per unit of vote weight over {}, {} of the best payer's; past payouts are not a promise",
                 Grouped(*per_unit_weight),
                 Count(u128::from(*intervals), "interval", "intervals"),
-                Percent(u128::from(*of_best_bp))
+                PartsPerMillion(*of_best_ppm)
             ),
             Reason::OperatorPicks {
                 operator,
@@ -541,6 +583,37 @@ mod tests {
     }
 
     #[test]
+    fn exact_ratios() {
+        // Small values against plain arithmetic.
+        for (a, b, c) in [
+            (1u128, 3u64, 7u128),
+            (999, 1_000_000, 1_000),
+            (0, 5, 9),
+            (7, 0, 3),
+        ] {
+            assert_eq!(mul_div(a, b, c), a * u128::from(b) / c);
+        }
+        assert_eq!(mul_div(5, 5, 0), 0);
+        // Products beyond 128 bits.
+        assert_eq!(mul_div(u128::MAX, 1_000_000, u128::MAX), 1_000_000);
+        assert_eq!(mul_div(u128::MAX - 1, 1_000_000, u128::MAX), 999_999);
+        // (2^128 - 1) / 2 rounds down to 2^127 - 1, just under a half.
+        assert_eq!(mul_div(u128::MAX / 2, 1_000_000, u128::MAX), 499_999);
+        assert_eq!(mul_div(1 << 127, 1_000_000, 1 << 127), 1_000_000);
+        assert_eq!(mul_div(1 << 127, 4, 1 << 126), 8);
+        assert_eq!(
+            mul_div(u128::MAX, u64::MAX, u128::from(u64::MAX)),
+            u128::MAX
+        );
+        assert_eq!(mul_div(u128::MAX, 2, 1), u128::MAX);
+        // The ratio of two values an order of magnitude apart, at every size.
+        for shift in 0..124 {
+            let whole = 10u128 << shift;
+            assert_eq!(mul_div(1 << shift, 1_000_000, whole), 100_000, "{shift}");
+        }
+    }
+
+    #[test]
     fn sentences() {
         let reason = Reason::Group {
             dimension: Dimension::RankBand,
@@ -628,10 +701,20 @@ mod tests {
             Reason::MeasuredPayouts {
                 per_unit_weight: 4_800,
                 intervals: 1,
-                of_best_bp: 9_600
+                of_best_ppm: 960_000
             }
             .to_string(),
             "Measured payouts of 4,800 per unit of vote weight over 1 interval, 96.00 % of the best payer's; past payouts are not a promise"
+        );
+        // A payer far below the best is not shown as paying nothing.
+        assert_eq!(
+            Reason::MeasuredPayouts {
+                per_unit_weight: 5,
+                intervals: 30,
+                of_best_ppm: 50
+            }
+            .to_string(),
+            "Measured payouts of 5 per unit of vote weight over 30 intervals, under 0.01 % of the best payer's; past payouts are not a promise"
         );
         assert_eq!(
             Reason::RegisteredDays { days: 1_000 }.to_string(),

@@ -1,6 +1,11 @@
-//! Reproducibility vectors: a fixture, an account, a mode, a count and a draw number give exactly
-//! the recorded selection. The vectors pin the selection rules of `LIBRARY_VERSION`; any change to
-//! the draw, the weights or the criteria must come with a new version.
+//! Reproducibility vectors: a fixture, an account, a mode, a count, a draw number and the vote
+//! rules give exactly the recorded selection. The vectors pin the selection rules of
+//! `LIBRARY_VERSION`; once a version is released, any change to the draw, the weights or the
+//! criteria must come with a new version.
+//!
+//! An input's `rules` is `iceroot` or `solar-compatible` (the two stages' vote rules), and an
+//! optional `maxBytes` replaces the size limit, so that some vectors keep only the start of the
+//! draw that fits.
 //!
 //! To regenerate after a deliberate change, run with `ICEROOT_VOTE_WRITE_VECTORS=1`.
 
@@ -13,7 +18,7 @@
 
 mod common;
 
-use iceroot_vote::{LIBRARY_VERSION, Mode, SelectRequest, select};
+use iceroot_vote::{LIBRARY_VERSION, Mode, SelectRequest, VoteRules, select};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -24,6 +29,14 @@ const FIXTURES: [(&str, &str); 2] = [
     ("synthetic-80", "synthetic-80.json"),
     ("devnet-relay", "devnet-relay.json"),
 ];
+
+/// The vote rules of the stage a fixture describes.
+fn stage(fixture: &str) -> &'static str {
+    match fixture {
+        "devnet-relay" => "solar-compatible",
+        _ => "iceroot",
+    }
+}
 
 /// The inputs the vector file covers.
 fn inputs() -> Vec<Value> {
@@ -38,6 +51,7 @@ fn inputs() -> Vec<Value> {
                         "mode": mode.id(),
                         "count": 20,
                         "draw": draw,
+                        "rules": stage(fixture),
                     }));
                 }
             }
@@ -51,6 +65,7 @@ fn inputs() -> Vec<Value> {
                 "mode": mode.id(),
                 "count": count,
                 "draw": 7,
+                "rules": "iceroot",
             }));
         }
     }
@@ -60,8 +75,39 @@ fn inputs() -> Vec<Value> {
         "mode": "diversity",
         "count": 20,
         "draw": u32::MAX,
+        "rules": "iceroot",
     }));
+    // A tighter size limit keeps only the start of each draw.
+    for (fixture, max_bytes) in [("synthetic-80", 400), ("devnet-relay", 560)] {
+        for mode in Mode::ALL {
+            inputs.push(json!({
+                "fixture": fixture,
+                "account": "holder-b",
+                "mode": mode.id(),
+                "count": 53,
+                "draw": 3,
+                "rules": stage(fixture),
+                "maxBytes": max_bytes,
+            }));
+        }
+    }
     inputs
+}
+
+/// The vote rules of an input.
+fn rules(input: &Value) -> VoteRules {
+    let rules = match input["rules"].as_str().unwrap() {
+        "iceroot" => VoteRules::ICEROOT,
+        "solar-compatible" => VoteRules::SOLAR_COMPATIBLE,
+        other => panic!("unknown rules {other}"),
+    };
+    match input.get("maxBytes") {
+        Some(max_bytes) => VoteRules {
+            max_bytes: u16::try_from(max_bytes.as_u64().unwrap()).unwrap(),
+            ..rules
+        },
+        None => rules,
+    }
 }
 
 fn run(input: &Value) -> Value {
@@ -71,6 +117,7 @@ fn run(input: &Value) -> Value {
         account: input["account"].as_str().unwrap(),
         count: u8::try_from(input["count"].as_u64().unwrap()).unwrap(),
         draw: u32::try_from(input["draw"].as_u64().unwrap()).unwrap(),
+        rules: rules(input),
     };
     selection_output(&select(&snapshot, &request).unwrap())
 }
@@ -141,7 +188,7 @@ fn the_first_vector_by_hand() {
     let first: Value = serde_json::from_str(text.lines().nth(1).unwrap()).unwrap();
     assert_eq!(
         first["input"],
-        json!({"fixture": "synthetic-80", "account": "holder-a", "mode": "diversity", "count": 20, "draw": 0})
+        json!({"fixture": "synthetic-80", "account": "holder-a", "mode": "diversity", "count": 20, "draw": 0, "rules": "iceroot"})
     );
     let seed = iceroot_vote::seed("holder-a", Mode::Diversity, 5_000_000, 0);
     let hex: String = seed.iter().map(|b| format!("{b:02x}")).collect();

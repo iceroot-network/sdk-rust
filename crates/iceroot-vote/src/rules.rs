@@ -260,9 +260,17 @@ pub fn validate_vote(entries: &[VoteEntry], rules: &VoteRules, voter: Voter) -> 
 
 /// The size of a vote's contents: `1 + Σ (3 + name bytes)`.
 pub fn vote_bytes(entries: &[VoteEntry]) -> usize {
-    entries.iter().fold(1, |size, entry| {
-        size.saturating_add(3).saturating_add(entry.validator.len())
+    entries.iter().fold(EMPTY_VOTE_BYTES, |size, entry| {
+        size.saturating_add(entry_bytes(&entry.validator))
     })
+}
+
+/// The size of an empty vote's contents: the count byte.
+pub(crate) const EMPTY_VOTE_BYTES: usize = 1;
+
+/// The size of one entry: a length byte, the name and two bytes of basis points.
+pub(crate) fn entry_bytes(validator: &str) -> usize {
+    validator.len().saturating_add(3)
 }
 
 /// The protocol's canonical order of two entries: larger share first, then names in ascending

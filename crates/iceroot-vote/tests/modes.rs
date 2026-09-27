@@ -12,8 +12,8 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 
 use iceroot_vote::{
-    Candidate, Mode, PickSource, Reason, SelectError, SelectRequest, Selection, Shortfall,
-    ValidatorStatus, VoteRules, VoteSnapshot, Voter, evaluate, select, validate_vote,
+    Candidate, Dimension, Mode, PickSource, Reason, SelectError, SelectRequest, Selection,
+    Shortfall, ValidatorStatus, VoteRules, VoteSnapshot, Voter, evaluate, select, validate_vote,
 };
 
 use common::{load_json, synthetic};
@@ -103,6 +103,51 @@ fn pools_and_weights_match_the_criteria() {
     assert_eq!(pool(&snapshot, Mode::SupportNewcomers).len(), 26);
 }
 
+/// Each validator's rank band as the independently computed file gives it.
+fn expected_bands() -> BTreeMap<String, String> {
+    load_json("synthetic-80.expected.json")["rankBands"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(name, band)| (name.clone(), band.as_str().unwrap().to_owned()))
+        .collect()
+}
+
+#[test]
+fn rank_bands_are_sized_in_proportion_to_the_pool() {
+    // 71 validators in Diversity's pool: eight bands of 9 or 8, not seven of 10 and one of 1.
+    let s = synthetic();
+    let expected = expected_bands();
+    assert_eq!(expected.len(), 71);
+    let mut sizes: BTreeMap<&str, usize> = BTreeMap::new();
+    for band in expected.values() {
+        *sizes.entry(band).or_insert(0) += 1;
+    }
+    assert_eq!(sizes.len(), 8);
+    assert!(sizes.values().all(|&n| n == 8 || n == 9), "{sizes:?}");
+    // Every pick names the band the file gives.
+    let mut seen = BTreeMap::new();
+    for selection in many(&s, Mode::Diversity, 53, 40) {
+        for pick in &selection.entries {
+            let band = pick
+                .reasons
+                .iter()
+                .find_map(|r| match r {
+                    Reason::Group {
+                        dimension: Dimension::RankBand,
+                        value,
+                        ..
+                    } => value.clone(),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(expected[&pick.validator], band, "{}", pick.validator);
+            seen.insert(pick.validator.clone(), band);
+        }
+    }
+    assert_eq!(seen.len(), 71);
+}
+
 #[test]
 fn diversity_criteria() {
     let s = synthetic();
@@ -160,12 +205,13 @@ fn diversity_criteria() {
 #[test]
 fn diversity_spreads_the_vote() {
     let s = synthetic();
-    let selections = many(&s, Mode::Diversity, 20, 400);
+    let bands = expected_bands();
+    let selections = many(&s, Mode::Diversity, 20, 2_000);
     let eligible: Vec<String> = pool(&s, Mode::Diversity).into_iter().collect();
     // A uniform draw from the same pool, as a baseline.
     let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
     let mut uniform = Vec::new();
-    for _ in 0..400 {
+    for _ in 0..2_000 {
         let mut left = eligible.clone();
         let mut picks = Vec::new();
         for _ in 0..20 {
@@ -192,10 +238,7 @@ fn diversity_spreads_the_vote() {
                 .and_then(|c| iceroot_vote::Region::of_country(&c))
                 .map(|r| r.name().to_owned())
                 .unwrap_or_default(),
-            _ => record
-                .rank
-                .map(|r| ((r - 1) / 10).to_string())
-                .unwrap_or_default(),
+            _ => bands[name].clone(),
         }
     };
     // The largest group in a selection, averaged over selections, per dimension.
@@ -221,13 +264,16 @@ fn diversity_spreads_the_vote() {
                 largest(&names, dimension)
             })
             .sum();
+        // Rank bands spread the picks first; declarations, whose bonus is bounded (each
+        // dimension adds at most a third to a weight), spread them less but still.
+        let (numerator, denominator) = if dimension == 3 { (9, 10) } else { (49, 50) };
         assert!(
-            diverse * 10 < baseline * 9,
+            diverse * denominator < baseline * numerator,
             "dimension {dimension}: diverse {diverse}, uniform {baseline}"
         );
     }
-    // Frostline has five eligible validators; Diversity takes more than two of them far less
-    // often than a uniform draw does.
+    // Frostline has five eligible validators; Diversity takes more than two of them at least a
+    // quarter less often than a uniform draw does.
     let heavy = |picks: &[Vec<&str>]| {
         picks
             .iter()
@@ -244,7 +290,7 @@ fn diversity_spreads_the_vote() {
         .collect();
     let (diverse_heavy, uniform_heavy) = (heavy(&diverse_names), heavy(&uniform_names));
     assert!(
-        diverse_heavy * 2 < uniform_heavy,
+        diverse_heavy * 4 < uniform_heavy * 3,
         "diverse {diverse_heavy}, uniform {uniform_heavy}"
     );
     // Every pick explains its groups and its draw.
@@ -339,18 +385,19 @@ fn maximum_rewards_criteria_weights_and_cap() {
         .map(|c| c.validator.as_str())
         .collect();
     assert_eq!(unmeasured.len(), 5, "{unmeasured:?}");
-    // The best payer weighs 10,000 squared; half the best payout, a quarter of that.
-    assert_eq!(judged["chestnut"].weight, 100_000_000);
+    // The best payer weighs a million squared (parts per million); 60 % of the best payout,
+    // 36 % of that.
+    assert_eq!(judged["chestnut"].weight, 1_000_000_000_000);
     let best_reason = judged["chestnut"]
         .reasons
         .iter()
         .find_map(|r| match r {
-            Reason::MeasuredPayouts { of_best_bp, .. } => Some(*of_best_bp),
+            Reason::MeasuredPayouts { of_best_ppm, .. } => Some(*of_best_ppm),
             _ => None,
         })
         .unwrap();
-    assert_eq!(best_reason, 10_000);
-    assert_eq!(judged["dogwood"].weight, 6_000 * 6_000);
+    assert_eq!(best_reason, 1_000_000);
+    assert_eq!(judged["dogwood"].weight, 600_000 * 600_000);
     // At most two picks per declared operator, in every selection; the undeclared group too.
     let selections = many(&s, m, 20, 600);
     for selection in &selections {
@@ -653,7 +700,14 @@ fn refusals() {
     for count in [0u8, 19, 54, 255] {
         let mut request = SelectRequest::new(Mode::Diversity, "addr-holder");
         request.count = count;
-        assert_eq!(select(&s, &request), Err(SelectError::Count { count }));
+        assert_eq!(
+            select(&s, &request),
+            Err(SelectError::Count {
+                count,
+                minimum: 20,
+                maximum: 53
+            })
+        );
     }
     // A validator's account cannot vote, even resigned for now; resigned for good it can.
     for address in ["addr-chestnut", "addr-hazel", "addr-lemon"] {

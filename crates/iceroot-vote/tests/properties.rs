@@ -1,4 +1,4 @@
-//! Every selection is a valid vote, over 10,000 random snapshots.
+//! Every selection is a valid vote, over 10,000 random snapshots and vote rules.
 
 #![allow(
     clippy::unwrap_used,
@@ -10,10 +10,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use iceroot_vote::{
-    Declarations, MAX_PICKS_PER_OPERATOR, Mode, NameRule, Payouts, Penalties, PickSource,
-    Production, SelectError, SelectRequest, Selection, SnapshotSource, ValidatorRecord,
-    ValidatorStatus, VoteRules, VoteSnapshot, Voter, canonical_order, check, evaluate, seed,
-    select, validate_vote,
+    Declarations, Dimension, MAX_PICKS_PER_OPERATOR, MIN_PICKS, Mode, NameRule, Payouts, Penalties,
+    PickSource, Production, Reason, SelectError, SelectRequest, Selection, SnapshotSource,
+    ValidatorRecord, ValidatorStatus, VoteRules, VoteSnapshot, Voter, canonical_order, check,
+    evaluate, seed, select, validate_vote, vote_bytes,
 };
 use proptest::prelude::*;
 
@@ -139,7 +139,7 @@ fn snapshot() -> impl Strategy<Value = VoteSnapshot> {
         1u32..=60,
         1u32..=30,
         prop::bool::ANY,
-        prop::collection::btree_set("[a-z][a-z0-9_.]{0,11}", 30..150),
+        prop::collection::btree_set("[a-z][a-z0-9_.]{0,19}", 30..150),
     )
         .prop_flat_map(|(height, seats, block_time, relay, names)| {
             let n = names.len();
@@ -174,6 +174,39 @@ const RULES: VoteRules = VoteRules {
     ..VoteRules::ICEROOT
 };
 
+/// Vote rules for a selection: IceRoot's limits, the Solar-compatible stage's, or IceRoot's with
+/// a tighter size limit, under which long names leave fewer picks or none.
+fn rules() -> impl Strategy<Value = VoteRules> {
+    prop_oneof![
+        2 => Just(RULES),
+        2 => Just(VoteRules::SOLAR_COMPATIBLE),
+        1 => (200u16..=1_280).prop_map(|max_bytes| VoteRules { max_bytes, ..RULES }),
+    ]
+}
+
+/// The whole draw of a request, with no limit on entries or bytes.
+fn unlimited(snapshot: &VoteSnapshot, request: &SelectRequest<'_>) -> Selection {
+    let rules = VoteRules {
+        max_entries: u8::MAX,
+        max_bytes: u16::MAX,
+        ..request.rules
+    };
+    select(snapshot, &SelectRequest { rules, ..*request }).unwrap()
+}
+
+/// A selection's names in draw order.
+fn draw_order(selection: &Selection) -> Vec<iceroot_vote::VoteEntry> {
+    let mut picks: Vec<_> = selection.entries.iter().collect();
+    picks.sort_by_key(|p| p.step);
+    picks
+        .into_iter()
+        .map(|p| iceroot_vote::VoteEntry {
+            validator: p.validator.clone(),
+            basis_points: p.basis_points,
+        })
+        .collect()
+}
+
 fn eligible(snapshot: &VoteSnapshot, mode: Mode) -> BTreeSet<String> {
     evaluate(snapshot, mode)
         .unwrap()
@@ -195,8 +228,11 @@ fn operator_key(snapshot: &VoteSnapshot, name: &str) -> Option<String> {
 }
 
 fn assert_valid(snapshot: &VoteSnapshot, request: &SelectRequest<'_>, selection: &Selection) {
-    let count = usize::from(request.count);
-    assert_eq!(selection.entries.len(), count);
+    let count = selection.entries.len();
+    assert!(count <= usize::from(request.count));
+    assert!(count >= usize::from(MIN_PICKS));
+    assert_eq!(selection.requested, request.count);
+    assert_eq!(selection.rules, request.rules);
     assert_eq!(selection.mode, request.mode);
     assert_eq!(selection.account, request.account);
     assert_eq!(selection.draw, request.draw);
@@ -207,10 +243,43 @@ fn assert_valid(snapshot: &VoteSnapshot, request: &SelectRequest<'_>, selection:
         seed(request.account, request.mode, snapshot.height, request.draw)
     );
 
+    // The longest start of the whole draw that fits the rules, and the same selection as one
+    // requested with that many picks.
+    let whole = draw_order(&unlimited(snapshot, request));
+    let kept = draw_order(selection);
+    let names = |entries: &[iceroot_vote::VoteEntry]| -> Vec<String> {
+        entries.iter().map(|e| e.validator.clone()).collect()
+    };
+    assert_eq!(names(&kept), names(&whole[..count]));
+    if count < usize::from(request.count) {
+        assert!(selection.size_notice().is_some());
+        let longer = &whole[..=count];
+        assert!(
+            longer.len() > usize::from(request.rules.max_entries)
+                || vote_bytes(longer) > usize::from(request.rules.max_bytes)
+        );
+        let fewer = SelectRequest {
+            count: u8::try_from(count).unwrap(),
+            ..*request
+        };
+        let same = Selection {
+            requested: request.count,
+            ..select(snapshot, &fewer).unwrap()
+        };
+        assert_eq!(&same, selection);
+    } else {
+        assert!(selection.size_notice().is_none());
+    }
+
     // A valid vote: 20 to 53 entries, at most 500 basis points each, exactly 10,000, names the
     // rules accept, no duplicates, within the size limit, from an ordinary account.
     let vote = selection.vote();
     assert_eq!(validate_vote(&vote, &RULES, Voter::Ordinary), vec![]);
+    assert_eq!(
+        validate_vote(&vote, &request.rules, Voter::Ordinary),
+        vec![]
+    );
+    assert!(vote_bytes(&vote) <= usize::from(request.rules.max_bytes));
     assert_eq!(snapshot.voter(request.account), Voter::Ordinary);
     let total: u32 = vote.iter().map(|e| u32::from(e.basis_points)).sum();
     assert_eq!(total, 10_000);
@@ -230,15 +299,17 @@ fn assert_valid(snapshot: &VoteSnapshot, request: &SelectRequest<'_>, selection:
         .is_lt()
     }));
     // Even shares, the extra basis points to the first picks drawn.
-    let share = 10_000 / u16::from(request.count);
-    let extra = 10_000 % u32::from(request.count);
+    let n = u16::try_from(count).unwrap();
+    let share = 10_000 / n;
+    let extra = u32::from(10_000 % n);
     let mut steps: Vec<u32> = selection.entries.iter().map(|p| p.step).collect();
     steps.sort_unstable();
-    assert_eq!(steps, (1..=u32::from(request.count)).collect::<Vec<_>>());
+    assert_eq!(steps, (1..=u32::from(n)).collect::<Vec<_>>());
     for pick in &selection.entries {
         let expected = if pick.step <= extra { share + 1 } else { share };
         assert_eq!(pick.basis_points, expected);
         assert!(!pick.reasons.is_empty());
+        assert_diversity_bound(&pick.reasons);
     }
 
     // Mode picks meet the mode's criteria, top-up picks Diversity's.
@@ -314,6 +385,35 @@ fn assert_valid(snapshot: &VoteSnapshot, request: &SelectRequest<'_>, selection:
     assert!(findings.iter().all(|f| f.still_meets));
 }
 
+/// A Diversity pick weighs from `⌊2^64 / (1 + r)⌋`, with `r` the earlier picks in its rank band,
+/// to twice that, whatever it declares.
+fn assert_diversity_bound(reasons: &[Reason]) {
+    let Some(Reason::Drawn {
+        pool: Mode::Diversity,
+        weight,
+        ..
+    }) = reasons.last()
+    else {
+        return;
+    };
+    let band = reasons
+        .iter()
+        .find_map(|r| match r {
+            Reason::Group {
+                dimension: Dimension::RankBand,
+                earlier_picks,
+                ..
+            } => Some(*earlier_picks),
+            _ => None,
+        })
+        .unwrap();
+    let base = (1u128 << 64) / (1 + u128::from(band));
+    assert!(
+        (base..=2 * base).contains(weight),
+        "{weight} against {base}"
+    );
+}
+
 proptest! {
     #![proptest_config(ProptestConfig {
         cases: 10_000,
@@ -328,6 +428,7 @@ proptest! {
         draw in any::<u32>(),
         voter_index in prop::option::weighted(0.05, any::<prop::sample::Index>()),
         holder in any::<u32>(),
+        rules in rules(),
     ) {
         let account = match voter_index {
             Some(index) => snapshot.records[index.index(snapshot.records.len())].address.clone(),
@@ -341,7 +442,7 @@ proptest! {
             }
         }
         for (mode, count) in Mode::ALL.into_iter().zip(counts) {
-            let request = SelectRequest { mode, account: &account, count, draw };
+            let request = SelectRequest { mode, account: &account, count, draw, rules };
             match select(&snapshot, &request) {
                 Ok(selection) => assert_valid(&snapshot, &request, &selection),
                 Err(SelectError::ValidatorAccount) => {
@@ -360,6 +461,19 @@ proptest! {
                     } else {
                         prop_assert_eq!(available, u32::try_from(union.len()).unwrap());
                     }
+                }
+                Err(SelectError::DoesNotFit { fits, minimum, max_entries, max_bytes }) => {
+                    // Even the fewest picks of the whole draw do not fit.
+                    prop_assert_eq!(minimum, MIN_PICKS);
+                    prop_assert_eq!((max_entries, max_bytes), (rules.max_entries, rules.max_bytes));
+                    prop_assert!(fits < u32::from(minimum));
+                    let whole = draw_order(&unlimited(&snapshot, &request));
+                    let fewest = &whole[..usize::from(minimum)];
+                    prop_assert!(vote_bytes(fewest) > usize::from(max_bytes));
+                    let fitting = &whole[..usize::try_from(fits).unwrap()];
+                    prop_assert!(vote_bytes(fitting) <= usize::from(max_bytes));
+                    let one_more = &whole[..=usize::try_from(fits).unwrap()];
+                    prop_assert!(vote_bytes(one_more) > usize::from(max_bytes));
                 }
                 Err(other) => prop_assert!(false, "unexpected {other:?}"),
             }

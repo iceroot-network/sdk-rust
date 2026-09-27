@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use iceroot_vote::{
     DIVERSITY_RANKS_BELOW_CUTOFF, Declarations, Dimension, MAX_PICKS_PER_OPERATOR, MIN_PICKS, Mode,
     NEAR_CUTOFF_SEATS, NEWCOMER_RANKS_BELOW_CUTOFF, NameRule, Payouts, Penalties, PickSource,
-    Production, Reason, SelectError, SelectRequest, Selection, Shortfall, SnapshotSource,
+    Problem, Production, Reason, SelectError, SelectRequest, Selection, Shortfall, SnapshotSource,
     ValidatorRecord, ValidatorStatus, VoteRules, VoteSnapshot, Voter, canonical_order, check,
     evaluate, seed, select, validate_vote, vote_bytes,
 };
@@ -199,21 +199,38 @@ const RULES: VoteRules = VoteRules {
 };
 
 /// Vote rules for a selection: IceRoot's limits, the Solar-compatible stage's, or IceRoot's with
-/// a tighter size limit, under which long names leave fewer picks or none.
+/// a tighter size limit, under which long names leave fewer picks or none. Sometimes rules the
+/// selection may break: IceRoot's own names, which most generated names are not, or a largest
+/// share that the requested number of picks may exceed.
 fn rules() -> impl Strategy<Value = VoteRules> {
     prop_oneof![
-        2 => Just(RULES),
-        2 => Just(VoteRules::SOLAR_COMPATIBLE),
-        1 => (200u16..=1_280).prop_map(|max_bytes| VoteRules { max_bytes, ..RULES }),
+        4 => Just(RULES),
+        4 => Just(VoteRules::SOLAR_COMPATIBLE),
+        2 => (200u16..=1_280).prop_map(|max_bytes| VoteRules { max_bytes, ..RULES }),
+        1 => Just(VoteRules::ICEROOT),
+        1 => (150u16..=600).prop_map(|max_entry_basis_points| VoteRules {
+            max_entry_basis_points,
+            ..RULES
+        }),
     ]
 }
 
-/// The whole draw of a request, with no limit on entries or bytes.
+/// The rules with any name and any share accepted, and the same limits on entries and bytes.
+fn relaxed(rules: VoteRules) -> VoteRules {
+    VoteRules {
+        names: NameRule::SolarCompatible,
+        max_entry_basis_points: 10_000,
+        ..rules
+    }
+}
+
+/// The whole draw of a request, with no limit on entries or bytes and any name and share
+/// accepted.
 fn unlimited(snapshot: &VoteSnapshot, request: &SelectRequest<'_>) -> Selection {
     let rules = VoteRules {
         max_entries: u8::MAX,
         max_bytes: u16::MAX,
-        ..request.rules
+        ..relaxed(request.rules)
     };
     select(snapshot, &SelectRequest { rules, ..*request }).unwrap()
 }
@@ -416,6 +433,18 @@ fn assert_valid(snapshot: &VoteSnapshot, request: &SelectRequest<'_>, selection:
         }
     }
 
+    // The name rule and the largest share only check the result: under relaxed rules the same
+    // selection comes out.
+    let rules = relaxed(request.rules);
+    let same = select(snapshot, &SelectRequest { rules, ..*request }).unwrap();
+    assert_eq!(
+        &Selection {
+            rules: request.rules,
+            ..same
+        },
+        selection
+    );
+
     // Reproducible, and still meeting every criterion on the same data.
     assert_eq!(select(snapshot, request).as_ref(), Ok(selection));
     let findings = check(selection, snapshot).unwrap();
@@ -544,6 +573,26 @@ proptest! {
                     prop_assert!(vote_bytes(fitting) <= usize::from(max_bytes));
                     let one_more = &whole[..=usize::try_from(fits).unwrap()];
                     prop_assert!(vote_bytes(one_more) > usize::from(max_bytes));
+                }
+                Err(SelectError::BreaksRules { problems }) => {
+                    // Exactly what the rules find wrong with the selection the relaxed rules
+                    // give: names they refuse and shares above their largest, nothing else.
+                    let relaxed = select(
+                        &snapshot,
+                        &SelectRequest { rules: relaxed(rules), ..request },
+                    );
+                    let Ok(relaxed) = relaxed else {
+                        return Err(TestCaseError::fail(format!("relaxed: {relaxed:?}")));
+                    };
+                    prop_assert!(!problems.is_empty());
+                    prop_assert_eq!(
+                        &problems,
+                        &validate_vote(&relaxed.vote(), &rules, Voter::Ordinary)
+                    );
+                    let names_or_shares = problems.iter().all(|p| {
+                        matches!(p, Problem::InvalidName { .. } | Problem::ShareTooLarge { .. })
+                    });
+                    prop_assert!(names_or_shares);
                 }
                 Err(other) => prop_assert!(false, "unexpected {other:?}"),
             }

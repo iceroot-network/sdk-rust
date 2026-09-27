@@ -1,5 +1,5 @@
 //! Selections keep within the network's vote rules: at most 1,024 bytes on the Solar-compatible
-//! stage and 1,280 bytes from IceRoot's genesis.
+//! stage and 1,280 bytes from IceRoot's genesis, and only names and shares the rules accept.
 
 #![allow(
     clippy::unwrap_used,
@@ -9,8 +9,9 @@
 )]
 
 use iceroot_vote::{
-    Mode, Production, SelectError, SelectRequest, Selection, SnapshotSource, ValidatorRecord,
-    ValidatorStatus, VoteRules, VoteSnapshot, Voter, select, validate_vote, vote_bytes,
+    Mode, Problem, Production, SelectError, SelectRequest, Selection, SnapshotSource,
+    ValidatorRecord, ValidatorStatus, VoteRules, VoteSnapshot, Voter, select, validate_vote,
+    vote_bytes,
 };
 
 /// A 20-letter name for index `i`, the longest a validator name can be: 23 bytes in a vote.
@@ -209,4 +210,87 @@ fn the_rules_entry_limits_bound_the_picks() {
         refused.to_string(),
         "a selection has 25 to 53 picks, not 20"
     );
+}
+
+#[test]
+fn a_selection_that_breaks_the_name_rule_or_the_largest_share_is_refused() {
+    // The draw does not depend on the name rule or the largest share, so select checks its result
+    // against them: a selection is always a vote its rules accept.
+    let s = snapshot(|_| 5);
+    // A largest share of 4 %: 20 picks of 5 % are refused, 25 of 4 % are not.
+    let four_percent = VoteRules {
+        max_entry_basis_points: 400,
+        ..VoteRules::ICEROOT
+    };
+    let refused = select(&s, &request(20, four_percent)).unwrap_err();
+    let SelectError::BreaksRules { problems } = &refused else {
+        panic!("{refused:?}");
+    };
+    assert_eq!(problems.len(), 20);
+    assert!(problems.iter().all(|p| matches!(
+        p,
+        Problem::ShareTooLarge {
+            basis_points: 500,
+            maximum: 400,
+            ..
+        }
+    )));
+    assert!(
+        refused
+            .to_string()
+            .starts_with("the selection breaks the vote rules: ")
+    );
+    assert!(
+        refused
+            .to_string()
+            .contains("has 5.00 %; one validator can have at most 4.00 %; ")
+    );
+    let accepted = select(&s, &request(25, four_percent)).unwrap();
+    assert!(accepted.entries.iter().all(|p| p.basis_points == 400));
+    // The same picks as under IceRoot's rules: the check changes nothing about the draw.
+    let iceroot = select(&s, &request(25, VoteRules::ICEROOT)).unwrap();
+    assert_eq!(
+        Selection {
+            rules: VoteRules::ICEROOT,
+            ..accepted
+        },
+        iceroot
+    );
+    // A tighter size limit can leave shares above the largest: 40 of 53 picks fit in 321 bytes
+    // (5 letters each), 250 basis points each against a largest of 200.
+    let tight = VoteRules {
+        max_entry_basis_points: 200,
+        max_bytes: 321,
+        ..VoteRules::ICEROOT
+    };
+    let refused = select(&s, &request(53, tight)).unwrap_err();
+    assert!(matches!(
+        &refused,
+        SelectError::BreaksRules { problems } if problems.len() == 40
+    ));
+}
+
+#[test]
+fn names_the_rules_refuse_are_never_signed() {
+    // A snapshot with names IceRoot's rules refuse: digits and underscores, as on the
+    // Solar-compatible devnet.
+    let mut s = snapshot(|_| 20);
+    for record in &mut s.records {
+        record.name = format!("node_{}", &record.name[..2]);
+        record.address = format!("addr-{}", record.name);
+    }
+    let refused = select(&s, &request(20, VoteRules::ICEROOT)).unwrap_err();
+    let SelectError::BreaksRules { problems } = &refused else {
+        panic!("{refused:?}");
+    };
+    assert_eq!(problems.len(), 20);
+    assert!(
+        problems
+            .iter()
+            .all(|p| matches!(p, Problem::InvalidName { .. }))
+    );
+    assert!(refused.to_string().contains(" is not a validator name"));
+    // The Solar-compatible stage accepts them.
+    let solar = select(&s, &request(20, VoteRules::SOLAR_COMPATIBLE)).unwrap();
+    assert!(validate_vote(&solar.vote(), &VoteRules::SOLAR_COMPATIBLE, Voter::Ordinary).is_empty());
 }

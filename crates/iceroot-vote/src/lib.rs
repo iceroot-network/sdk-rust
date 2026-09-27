@@ -23,10 +23,11 @@
 //! follows vote weight, so validators registered in bulk without votes cannot crowd a draw. A mode
 //! whose pool is too small for the requested number of picks tops up from Diversity and says so,
 //! and a selection keeps within the network's [`VoteRules`] (at most 1,280 bytes from IceRoot's
-//! genesis, 1,024 on the Solar-compatible stage), with fewer picks when long names need it. Every
-//! pick carries its [`Reason`]s for the review screen. The library never recasts a vote: [`check`]
-//! only reports the picks that no longer meet their criteria, and any new selection is the holder's
-//! to review and sign.
+//! genesis, 1,024 on the Solar-compatible stage), with fewer picks when long names need it, and is
+//! refused rather than returned when a name or a share breaks them. Every pick carries its
+//! [`Reason`]s for the review screen. The library never recasts a vote: [`check`] only reports the
+//! picks that no longer meet their criteria, and any new selection is the holder's to review and
+//! sign.
 //!
 //! Everything is a pure function of a [`VoteSnapshot`]: no I/O, no clock, no floating point.
 //! [`VoteSnapshot::from_relay`] builds a snapshot from a node's relay data, which has only

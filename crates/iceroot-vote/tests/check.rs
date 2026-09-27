@@ -11,13 +11,26 @@ mod common;
 
 use iceroot_vote::{
     Declarations, Finding, Mode, Penalties, PickSource, Production, SelectRequest, Selection,
-    Shortfall, ValidatorStatus, VoteSnapshot, check, select,
+    Shortfall, SnapshotSource, ValidatorStatus, VoteRules, VoteSnapshot, check, select,
 };
 
 use common::{devnet, synthetic};
 
+/// A first draw of 20 under the snapshot's own rules: the devnet-shaped snapshot, from relay
+/// data, is on the Solar-compatible stage, whose names IceRoot's rules refuse.
 fn selection(snapshot: &VoteSnapshot, mode: Mode, account: &str) -> Selection {
-    select(snapshot, &SelectRequest::new(mode, account)).unwrap()
+    let rules = match snapshot.source {
+        SnapshotSource::RelayApproximate => VoteRules::SOLAR_COMPATIBLE,
+        SnapshotSource::Indexer => VoteRules::ICEROOT,
+    };
+    select(
+        snapshot,
+        &SelectRequest {
+            rules,
+            ..SelectRequest::new(mode, account)
+        },
+    )
+    .unwrap()
 }
 
 fn failing(findings: &[Finding]) -> Vec<(&str, &[Shortfall])> {

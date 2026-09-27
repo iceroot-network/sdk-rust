@@ -5,8 +5,8 @@ use core::fmt;
 use crate::mode::Mode;
 use crate::reason::{Count, Grouped, Reason};
 use crate::rules::{
-    EMPTY_VOTE_BYTES, TOTAL_BASIS_POINTS, VoteEntry, VoteRules, canonical_cmp, canonical_order,
-    entry_bytes,
+    EMPTY_VOTE_BYTES, Problem, TOTAL_BASIS_POINTS, VoteEntry, VoteRules, canonical_cmp,
+    canonical_order, entry_bytes, validate_vote,
 };
 use crate::sample::{Stream, seed};
 use crate::score::{Bands, Candidate, Groups, Interner, MAX_PICKS_PER_OPERATOR, Spread, judged};
@@ -34,7 +34,8 @@ pub struct SelectRequest<'a> {
     pub count: u8,
     /// The draw number: 0 first, one more for each "draw again".
     pub draw: u32,
-    /// The network's vote rules, whose limits on entries and bytes the selection keeps within.
+    /// The network's vote rules: the selection keeps within their limits on entries and bytes,
+    /// and must pass their name rule and largest share.
     pub rules: VoteRules,
 }
 
@@ -215,6 +216,14 @@ pub enum SelectError {
         /// The rules' most bytes.
         max_bytes: u16,
     },
+    /// The selection is not a vote the rules accept: a name the rules' name rule refuses, or a
+    /// share above the rules' largest share. The draw does not depend on these rules, so this
+    /// means the rules do not fit the snapshot's network (IceRoot's lowercase names against a
+    /// Solar-compatible snapshot, for example) or allow smaller shares than the picks give.
+    BreaksRules {
+        /// What [`validate_vote`](crate::validate_vote) finds wrong with the selection's vote.
+        problems: Vec<Problem>,
+    },
 }
 
 impl fmt::Display for SelectError {
@@ -255,6 +264,16 @@ impl fmt::Display for SelectError {
                         Grouped(u128::from(*max_bytes))
                     )
                 }
+            }
+            SelectError::BreaksRules { problems } => {
+                f.write_str("the selection breaks the vote rules: ")?;
+                for (index, problem) in problems.iter().enumerate() {
+                    if index > 0 {
+                        f.write_str("; ")?;
+                    }
+                    problem.fmt(f)?;
+                }
+                Ok(())
             }
         }
     }
@@ -363,10 +382,18 @@ impl OperatorPicks {
 /// one requested with that smaller count, and [`Selection::size_notice`] says so. The draw itself
 /// does not depend on the rules, so names of any length have the same chance.
 ///
+/// **Checked.** The selection is checked against its rules with
+/// [`validate_vote`](crate::validate_vote) before it is returned, so every name must pass the
+/// rules' name rule and every share must be within the rules' largest share. Neither affects the
+/// draw: a selection that fails is refused with [`SelectError::BreaksRules`], which means the
+/// rules do not fit the snapshot (IceRoot's lowercase names against a Solar-compatible devnet, for
+/// example) or allow smaller shares than the picks give.
+///
 /// Refused when `count` is outside 20 to 53 or below the rules' fewest entries, when the snapshot
 /// is invalid, when the account is a validator's (one that has not resigned for good), when fewer
-/// than `count` validators can be picked at all, and when fewer than 20 picks (or the rules'
-/// fewest entries) fit the rules' limits.
+/// than `count` validators can be picked at all, when fewer than 20 picks (or the rules' fewest
+/// entries) fit the rules' limits, and when the selection breaks the rules' name rule or largest
+/// share.
 pub fn select(
     snapshot: &VoteSnapshot,
     request: &SelectRequest<'_>,
@@ -486,6 +513,20 @@ pub fn select(
             (b.basis_points, &b.validator),
         )
     });
+
+    // A vote the rules accept: the entries and bytes fit already, so this checks the names and
+    // the largest share. The account was checked above, whatever the rules say about validators.
+    let vote: Vec<VoteEntry> = picks
+        .iter()
+        .map(|pick| VoteEntry {
+            validator: pick.validator.clone(),
+            basis_points: pick.basis_points,
+        })
+        .collect();
+    let problems = validate_vote(&vote, &request.rules, Voter::Ordinary);
+    if !problems.is_empty() {
+        return Err(SelectError::BreaksRules { problems });
+    }
     Ok(Selection {
         library_version: LIBRARY_VERSION.to_owned(),
         mode: request.mode,

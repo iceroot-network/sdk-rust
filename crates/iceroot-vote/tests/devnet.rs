@@ -269,6 +269,14 @@ fn devnet_names_and_accounts() {
         )
         .is_empty()
     );
+    // So a selection asked for under IceRoot's rules on the devnet is refused, never signed.
+    let refused = select(&s, &SelectRequest::new(Mode::Diversity, "dev-holder")).unwrap_err();
+    assert!(matches!(
+        &refused,
+        SelectError::BreaksRules { problems }
+            if !problems.is_empty()
+                && problems.iter().all(|p| matches!(p, Problem::InvalidName { .. }))
+    ));
     // A validator's account is refused; a permanently resigned one may vote.
     assert_eq!(
         select(&s, &request(Mode::Diversity, "dev-address-genesis_5")),

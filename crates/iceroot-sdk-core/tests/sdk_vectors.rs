@@ -74,6 +74,11 @@ fn s01_phrases() {
                     if again.as_bytes() != seed.as_bytes() {
                         return Outcome::Failed("the Mnemonic's seed differs".into());
                     }
+                    // The entropy a keystore stores, from the phrase made and the phrase read.
+                    let parsed = Mnemonic::parse(&mnemonic).expect("a phrase");
+                    if phrase.entropy() != entropy || parsed.entropy() != entropy {
+                        return Outcome::Failed("the Mnemonic's entropy differs".into());
+                    }
                 }
                 compare(
                     output(record),
@@ -106,7 +111,13 @@ fn s01_phrases() {
                 let parsed = Mnemonic::parse(mnemonic);
                 let check = Mnemonic::check(mnemonic);
                 let consistent = match (valid, words >= 18, &parsed) {
-                    (true, true, Ok(phrase)) => phrase.word_count() == words && check.is_ok(),
+                    (true, true, Ok(phrase)) => {
+                        phrase.word_count() == words
+                            && check.is_ok()
+                            && entropy
+                                .as_ref()
+                                .is_ok_and(|e| e.as_slice() == phrase.entropy())
+                    }
                     (true, false, Err(Error::PhraseTooShort { words: short, .. })) => {
                         *short == words && check.problem == Some(PhraseProblem::TooShort { words })
                     }

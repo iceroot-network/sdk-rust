@@ -28,6 +28,7 @@ pub const NEW_PHRASE_WORDS: usize = 24;
 /// A checked BIP39 English recovery phrase of 18, 21 or 24 words.
 pub struct Mnemonic {
     canonical: Zeroizing<String>,
+    entropy: Zeroizing<Vec<u8>>,
     words: usize,
 }
 
@@ -50,7 +51,11 @@ impl Mnemonic {
                 minimum: MIN_WORDS,
             });
         }
-        Ok(Mnemonic { canonical, words })
+        Ok(Mnemonic {
+            canonical,
+            entropy: Zeroizing::new(entropy.to_vec()),
+            words,
+        })
     }
 
     /// The phrase in `text`, with its checksum checked.
@@ -66,6 +71,7 @@ impl Mnemonic {
             }),
             Ok(decoded) => Ok(Mnemonic {
                 canonical: decoded.canonical,
+                entropy: decoded.entropy,
                 words: decoded.words,
             }),
             Err(problem) => Err(Error::InvalidPhrase { problem }),
@@ -103,6 +109,14 @@ impl Mnemonic {
     /// The number of words: 18, 21 or 24.
     pub fn word_count(&self) -> usize {
         self.words
+    }
+
+    /// The entropy the phrase encodes: 24, 28 or 32 bytes for 18, 21 or 24 words. It is what the
+    /// SDK's keystore encrypts (the payload kind `bip39-entropy` of `iceroot-keystore`), so that
+    /// no keystore holds the phrase's text; [`Mnemonic::from_entropy`] gives the phrase back. It
+    /// is as secret as the phrase, and wiped with it.
+    pub fn entropy(&self) -> &[u8] {
+        &self.entropy
     }
 
     /// The BIP39 seed of the phrase with the BIP39 passphrase `passphrase` (empty for none).
@@ -176,6 +190,30 @@ mod tests {
             Mnemonic::from_entropy(&[7; 20]),
             Err(Error::PhraseTooShort { words: 15, .. })
         ));
+    }
+
+    #[test]
+    fn entropy_round_trip() {
+        // "abandon" is word 0 and "art" carries the checksum of 32 zero bytes.
+        let parsed = Mnemonic::parse(&WORDS_24.to_uppercase()).unwrap();
+        assert_eq!(parsed.entropy(), [0u8; 32]);
+        for bytes in [24usize, 28, 32] {
+            let entropy: Vec<u8> = (0..bytes).map(|i| (i * 37 + 11) as u8).collect();
+            let mnemonic = Mnemonic::from_entropy(&entropy).unwrap();
+            assert_eq!(mnemonic.entropy(), entropy);
+            let parsed = Mnemonic::parse(mnemonic.phrase()).unwrap();
+            assert_eq!(parsed.entropy(), entropy);
+            let again = Mnemonic::from_entropy(parsed.entropy()).unwrap();
+            assert_eq!(again.phrase(), mnemonic.phrase());
+        }
+        let generated = Mnemonic::generate().unwrap();
+        assert_eq!(generated.entropy().len(), 32);
+        assert_eq!(
+            Mnemonic::from_entropy(generated.entropy())
+                .unwrap()
+                .phrase(),
+            generated.phrase()
+        );
     }
 
     #[test]

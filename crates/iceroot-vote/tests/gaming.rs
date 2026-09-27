@@ -18,8 +18,8 @@ use std::collections::BTreeMap;
 
 use iceroot_vote::{
     DIVERSITY_RANKS_BELOW_CUTOFF, Declarations, Dimension, Mode, NEWCOMER_RANKS_BELOW_CUTOFF,
-    Payouts, Penalties, Production, Reason, SelectRequest, Selection, Shortfall, SnapshotSource,
-    ValidatorRecord, ValidatorStatus, VoteSnapshot, evaluate, select,
+    Payouts, Penalties, PickSource, Production, Reason, SelectError, SelectRequest, Selection,
+    Shortfall, SnapshotSource, ValidatorRecord, ValidatorStatus, VoteSnapshot, evaluate, select,
 };
 
 /// Selections per scenario.
@@ -439,72 +439,113 @@ fn eligible_below_the_seats(s: &VoteSnapshot, mode: Mode) -> usize {
 #[test]
 fn a_standby_flood_gains_nothing_from_its_size() {
     // Validators registered in bulk at the registration fee and without votes rank below every
-    // validator that has votes. With open pools, 100 of them declaring nothing took 13 of 20
-    // Diversity picks. Diversity now draws from the seats and the next 10 ranks, Support
+    // validator that has votes. With open pools, 100 of them took 12 of 20 Diversity picks, and
+    // 13.6 when each invented an operator, a hosting provider and a region, the most a
+    // declaration can gain. Diversity now draws from the seats and the next 10 ranks, Support
     // Newcomers from the last 10 seats and the 20 ranks below the cutoff, so 20, 53 and 100 of
-    // them give exactly the same selections. Here each invents an operator, a hosting provider
-    // and a region, the most a declaration can gain.
-    let mut first: Option<(Vec<Selection>, Vec<Selection>)> = None;
-    for flood in [20usize, 53, 100] {
-        let mut records = seated();
-        records.extend(
-            below_the_seats(flood, |k| format!("Solo {k}"))
-                .into_iter()
-                .map(|record| ValidatorRecord {
-                    vote_weight: 0,
-                    voters: 0,
-                    ..record
-                }),
-        );
-        let s = snapshot(records);
-        assert_eq!(eligible_below_the_seats(&s, Mode::Diversity), 10);
-        assert_eq!(eligible_below_the_seats(&s, Mode::SupportNewcomers), 20);
-        // The last of them is outside a pool whose ranks it passes, and the review screen says
-        // why.
-        let last = name(52 + flood);
-        let rank = u32::try_from(53 + flood).unwrap();
-        for (mode, ranks_below) in [
-            (Mode::Diversity, DIVERSITY_RANKS_BELOW_CUTOFF),
-            (Mode::SupportNewcomers, NEWCOMER_RANKS_BELOW_CUTOFF),
-        ] {
-            let judged = evaluate(&s, mode).unwrap();
-            let candidate = judged.iter().find(|c| c.validator == last).unwrap();
-            let outside = if rank > 53 + ranks_below {
-                vec![Shortfall::FarBelowCutoff {
+    // them give exactly the same selections, whether they declare nothing or invent values.
+    for invent in [false, true] {
+        let mut first: Option<(Vec<Selection>, Vec<Selection>)> = None;
+        for flood in [20usize, 53, 100] {
+            let mut records = seated();
+            records.extend(
+                below_the_seats(flood, |k| format!("Solo {k}"))
+                    .into_iter()
+                    .map(|record| ValidatorRecord {
+                        vote_weight: 0,
+                        voters: 0,
+                        declarations: record.declarations.filter(|_| invent),
+                        ..record
+                    }),
+            );
+            let s = snapshot(records);
+            assert_eq!(eligible_below_the_seats(&s, Mode::Diversity), 10);
+            // Support Newcomers needs complete declarations.
+            let newcomers_below = if invent { 20 } else { 0 };
+            assert_eq!(
+                eligible_below_the_seats(&s, Mode::SupportNewcomers),
+                newcomers_below
+            );
+            // The last of them is outside a pool whose ranks it passes, and the review screen
+            // says why.
+            let last = name(52 + flood);
+            let rank = u32::try_from(53 + flood).unwrap();
+            for (mode, ranks_below) in [
+                (Mode::Diversity, DIVERSITY_RANKS_BELOW_CUTOFF),
+                (Mode::SupportNewcomers, NEWCOMER_RANKS_BELOW_CUTOFF),
+            ] {
+                let judged = evaluate(&s, mode).unwrap();
+                let candidate = judged.iter().find(|c| c.validator == last).unwrap();
+                let far = Shortfall::FarBelowCutoff {
                     rank,
                     seats: 53,
                     ranks_below,
-                }]
-            } else {
-                Vec::new()
-            };
-            assert_eq!(candidate.shortfalls, outside, "{flood} {mode}");
-        }
-
-        let diverse = selections(&s, Mode::Diversity);
-        let (diverse_mean, diverse_deepest) = below_the_seats_picked(&s, &diverse);
-        let newcomers = selections(&s, Mode::SupportNewcomers);
-        let (newcomer_mean, newcomer_deepest) = below_the_seats_picked(&s, &newcomers);
-        println!(
-            "{flood} standby validators: {diverse_mean:.2} of 20 Diversity picks (deepest rank {diverse_deepest}), {newcomer_mean:.2} of 20 Support Newcomers picks (deepest rank {newcomer_deepest})"
-        );
-        // Ten of 63 validators in Diversity's pool, with at most twice the weight for their
-        // invented values: under a fifth of the picks.
-        assert!(diverse_deepest <= 63);
-        assert!(diverse_mean < 4.0, "{diverse_mean:.2}");
-        // Under names of their own the operator cap cannot hold them back: they fill 20 of the 30
-        // ranks Support Newcomers draws from and take about 13 of 20 picks, never more as they
-        // grow, and nothing ranked below 73.
-        assert!(newcomer_deepest <= 73);
-        assert!(newcomer_mean < 13.5, "{newcomer_mean:.2}");
-        match &first {
-            None => first = Some((diverse, newcomers)),
-            Some((d, n)) => {
-                assert!(&diverse == d, "{flood}: Diversity selections differ");
-                assert!(
-                    &newcomers == n,
-                    "{flood}: Support Newcomers selections differ"
+                };
+                let outside = rank > 53 + ranks_below;
+                assert_eq!(
+                    candidate.shortfalls.contains(&far),
+                    outside,
+                    "{flood} {mode}"
                 );
+                if invent || mode == Mode::Diversity {
+                    // Nothing else holds it back.
+                    assert_eq!(
+                        candidate.shortfalls.len(),
+                        usize::from(outside),
+                        "{flood} {mode}"
+                    );
+                }
+            }
+
+            let diverse = selections(&s, Mode::Diversity);
+            let (diverse_mean, diverse_deepest) = below_the_seats_picked(&s, &diverse);
+            let newcomers = selections(&s, Mode::SupportNewcomers);
+            let (newcomer_mean, newcomer_deepest) = below_the_seats_picked(&s, &newcomers);
+            let label = if invent {
+                "inventing declarations"
+            } else {
+                "declaring nothing"
+            };
+            println!(
+                "{flood} standby validators {label}: {diverse_mean:.2} of 20 Diversity picks (deepest rank {diverse_deepest}), {newcomer_mean:.2} of 20 Support Newcomers picks (deepest rank {newcomer_deepest})"
+            );
+            // Ten of 63 validators in Diversity's pool: about 3.2 of 20 picks in a uniform draw.
+            // Declaring nothing, they never gain a bonus and take fewer (2.69); inventing values
+            // gains at most twice the weight, still under a fifth of the picks (3.65).
+            assert!(diverse_deepest <= 63);
+            let diverse_bound = if invent { 4.0 } else { 3.0 };
+            assert!(diverse_mean < diverse_bound, "{label}: {diverse_mean:.2}");
+            if invent {
+                // Under names of their own the operator cap cannot hold them back: they fill 20
+                // of the 30 ranks Support Newcomers draws from and take 12.68 of 20 picks, never
+                // more as they grow, and nothing ranked below 73.
+                assert!(newcomer_deepest <= 73);
+                assert!(newcomer_mean < 13.5, "{newcomer_mean:.2}");
+            } else {
+                // Outside Support Newcomers' own pool, they come only as top-ups from Diversity
+                // (1.56 of 20 picks), and nothing ranked below 63.
+                assert!(newcomer_deepest <= 63);
+                assert!(newcomer_mean < 2.0, "{newcomer_mean:.2}");
+                for selection in &newcomers {
+                    for pick in &selection.entries {
+                        if s.record(&pick.validator).unwrap().rank.unwrap() > 53 {
+                            assert_eq!(pick.source, PickSource::TopUp, "{}", pick.validator);
+                        }
+                    }
+                }
+            }
+            match &first {
+                None => first = Some((diverse, newcomers)),
+                Some((d, n)) => {
+                    assert!(
+                        &diverse == d,
+                        "{flood} {label}: Diversity selections differ"
+                    );
+                    assert!(
+                        &newcomers == n,
+                        "{flood} {label}: Support Newcomers selections differ"
+                    );
+                }
             }
         }
     }
@@ -561,6 +602,52 @@ fn a_party_below_the_cutoff_is_held_to_its_ranks_and_its_operator_cap() {
             // Different names dodge the cap, which only a verified declaration could close: the
             // party fills 20 of the 30 ranks the mode draws from and takes about 13 of 20 picks.
             assert!(newcomer_mean < 13.5, "{newcomer_mean:.2}");
+        }
+    }
+}
+
+#[test]
+fn bounded_top_ups_can_run_short_in_a_capped_mode() {
+    // Diversity's pool, which tops the other modes up, is bounded too. With 53 seated validators
+    // run three to an operator and 30 more ranked below them, each with an operator of its own,
+    // Maximum Rewards has 36 picks of its own under the cap, and its top-ups only the 10
+    // validators ranked 54 to 63: 46 picks at most. An open pool reached down to rank 83.
+    let records: Vec<ValidatorRecord> = (0..83)
+        .map(|i| {
+            let mut record = validator(i, u32::try_from(i + 1).unwrap());
+            let operator = if i < 53 {
+                format!("Trio {}", i / 3)
+            } else {
+                format!("Solo {i}")
+            };
+            record.declarations = declared(&operator, "Hostco", "DE");
+            if i < 53 {
+                record.payouts = Some(Payouts {
+                    per_unit_weight: 1_000 + u128::try_from(i).unwrap(),
+                    intervals: 30,
+                });
+            }
+            record
+        })
+        .collect();
+    let s = snapshot(records);
+    for count in [20u8, 46, 47, 53] {
+        let request = SelectRequest {
+            count,
+            ..SelectRequest::new(Mode::MaximumRewards, "holder-trios")
+        };
+        match count {
+            20 | 46 => {
+                let selection = select(&s, &request).unwrap();
+                assert_eq!(selection.topped_up, u32::from(count.saturating_sub(36)));
+            }
+            _ => assert_eq!(
+                select(&s, &request),
+                Err(SelectError::NotEnoughValidators {
+                    requested: count,
+                    available: 46
+                })
+            ),
         }
     }
 }

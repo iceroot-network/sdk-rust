@@ -80,7 +80,7 @@ CC_wasm32_unknown_unknown=clang AR_wasm32_unknown_unknown=llvm-ar \
 
 `.github/workflows/ci.yml` runs on pull requests to `dev` and `prod` and on pushes to `prod`: formatting, clippy (native with every feature, and wasm32), the tests with both vector sets, the documentation, the wasm32 build, the dependency guard and the `NOTICE` check. A second job builds and tests against Heartwood Core's `dev` branch, so a change there is seen before the next `heartwood-crypto` tag; it does not block a merge.
 
-The workflows read `heartwood-core` with a read-only deploy key of that repository, stored in this repository as the secret `HEARTWOOD_DEPLOY_KEY`; `tools/ci/heartwood-access.sh` installs it for the host alias. Pull requests from forks get no secrets, so their runs stop at that step.
+The workflows read `heartwood-core` with a read-only deploy key of that repository, stored in this repository as the secret `HEARTWOOD_DEPLOY_KEY`; `tools/ci/heartwood-access.sh` installs it for the host alias. Pull requests from forks get no secrets, so their runs stop at that step. While `heartwood-core` is private, only pull request runs save the dependency cache: it holds Cargo's copy of `heartwood-core`, and a pull request from a fork can restore the caches of this repository's branches.
 
 ### Releasing
 

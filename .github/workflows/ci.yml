@@ -66,7 +66,13 @@ jobs:
         env:
           HEARTWOOD_DEPLOY_KEY: ${{ secrets.HEARTWOOD_DEPLOY_KEY }}
         run: tools/ci/heartwood-access.sh
+      # The cache holds Cargo's git database, which is heartwood-core's history while that
+      # repository is private. A pull request from a fork can restore the caches of this
+      # repository's branches, so only pull request runs save one: theirs is kept under the pull
+      # request's own ref, which no other pull request can read.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          save-if: ${{ github.event_name == 'pull_request' }}
       - name: Formatting
         run: cargo fmt --all -- --check
       - name: Lints, native, with every feature

@@ -14,6 +14,8 @@
 //! - [`fee`]: fee choices and their resolution.
 //! - [`transaction`]: operations, drafts, signing, serialized drafts and signed transactions.
 //! - [`message`] and [`signin`]: message signatures and the sign-in message.
+//! - [`ownership`]: ownership proofs of Solar addresses, which name the IceRoot account a
+//!   holding should be bound to.
 //! - [`node`]: what the node API client (`iceroot-sdk-api`) decodes, read into the core's inputs
 //!   and checked on the way: the chain, a draft's online facts, submissions and errors.
 //! - [`error`]: the one error type, with stable codes.
@@ -50,6 +52,7 @@ pub mod fee;
 pub mod keys;
 pub mod message;
 pub mod node;
+pub mod ownership;
 pub mod phrase;
 pub mod profile;
 pub mod rules;

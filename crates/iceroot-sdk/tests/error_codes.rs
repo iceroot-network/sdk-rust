@@ -13,7 +13,7 @@ use iceroot_sdk::vote::{self, SelectError, SnapshotError, SplitError};
 use iceroot_sdk::{Error, ErrorCode};
 
 /// The codes of the core, as `ErrorCode::as_str` gives them.
-const CORE: [ErrorCode; 33] = [
+const CORE: [ErrorCode; 34] = [
     ErrorCode::InvalidPhrase,
     ErrorCode::PhraseTooShort,
     ErrorCode::InvalidPath,
@@ -30,6 +30,7 @@ const CORE: [ErrorCode; 33] = [
     ErrorCode::InvalidDraft,
     ErrorCode::InvalidTransaction,
     ErrorCode::InvalidSignIn,
+    ErrorCode::InvalidProof,
     ErrorCode::InvalidRequest,
     ErrorCode::InvalidProfile,
     ErrorCode::NodeUnavailable,

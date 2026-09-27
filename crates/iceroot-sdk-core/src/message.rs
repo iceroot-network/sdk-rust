@@ -13,6 +13,7 @@
 use heartwood_crypto::crypto::hash::sha256;
 use heartwood_crypto::crypto::sig::{self, SchemeId, Signature, SigningDomain};
 use heartwood_crypto::errors::SigError;
+use heartwood_crypto::identities::KeyPair;
 use heartwood_crypto::utils::hex;
 use heartwood_crypto::{Aux, PublicKey};
 
@@ -106,11 +107,21 @@ pub(crate) fn sign_digest(
     digest: &[u8; 32],
     aux: Aux,
 ) -> Result<Signature, Error> {
+    sign_digest_with_keys(account.keys(), digest, aux)
+}
+
+/// [`sign_digest`] with a key pair that belongs to no account: the Solar key of an ownership
+/// proof ([`crate::ownership`]).
+pub(crate) fn sign_digest_with_keys(
+    keys: &KeyPair,
+    digest: &[u8; 32],
+    aux: Aux,
+) -> Result<Signature, Error> {
     sig::sign(
         SchemeId::Secp256k1Bip340,
         MESSAGE_DOMAIN,
         digest,
-        account.keys().secret_key(),
+        keys.secret_key(),
         aux,
     )
     .map_err(|error| match error {

@@ -130,6 +130,15 @@ pub(crate) fn format_rfc3339_seconds(seconds: i64) -> Option<String> {
     ))
 }
 
+/// The RFC 3339 text of `ms` milliseconds since 1970-01-01T00:00:00Z, in UTC with milliseconds:
+/// `YYYY-MM-DDTHH:MM:SS.sssZ`, as JavaScript's `Date.prototype.toISOString` writes it. `None`
+/// outside the years 0 to 9999.
+pub(crate) fn format_rfc3339_millis(ms: i64) -> Option<String> {
+    let text = format_rfc3339_seconds(ms.div_euclid(1000))?;
+    let stem = text.strip_suffix('Z')?;
+    Some(format!("{stem}.{:03}Z", ms.rem_euclid(1000)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,6 +196,20 @@ mod tests {
             Some("1969-12-31T23:59:59Z")
         );
         assert_eq!(format_rfc3339_seconds(i64::MAX / 2), None);
+        assert_eq!(
+            format_rfc3339_millis(1_790_426_096_007).as_deref(),
+            Some("2026-09-26T12:34:56.007Z")
+        );
+        assert_eq!(
+            format_rfc3339_millis(-1).as_deref(),
+            Some("1969-12-31T23:59:59.999Z")
+        );
+        assert_eq!(
+            format_rfc3339_millis(-62_167_219_200_000).as_deref(),
+            Some("0000-01-01T00:00:00.000Z")
+        );
+        assert_eq!(format_rfc3339_millis(-62_167_219_200_001), None);
+        assert_eq!(format_rfc3339_millis(i64::MAX), None);
         for seconds in (0..4_000_000_000_i64).step_by(7_777_777) {
             let text = format_rfc3339_seconds(seconds).unwrap();
             assert_eq!(parse_rfc3339_ms(&text), Some(seconds * 1000), "{text}");

@@ -50,6 +50,8 @@ pub enum ErrorCode {
     InvalidTransaction,
     /// A sign-in message fails a check.
     InvalidSignIn,
+    /// An ownership proof or its message fails a check.
+    InvalidProof,
     /// A request to a node could not be built from its arguments.
     InvalidRequest,
     /// A network profile is incomplete or malformed.
@@ -106,6 +108,7 @@ impl ErrorCode {
             ErrorCode::InvalidDraft => "InvalidDraft",
             ErrorCode::InvalidTransaction => "InvalidTransaction",
             ErrorCode::InvalidSignIn => "InvalidSignIn",
+            ErrorCode::InvalidProof => "InvalidProof",
             ErrorCode::InvalidRequest => "InvalidRequest",
             ErrorCode::InvalidProfile => "InvalidProfile",
             ErrorCode::NodeUnavailable => "NodeUnavailable",
@@ -144,6 +147,7 @@ impl ErrorCode {
             | ErrorCode::InvalidDraft
             | ErrorCode::InvalidTransaction
             | ErrorCode::InvalidSignIn
+            | ErrorCode::InvalidProof
             | ErrorCode::InvalidRequest
             | ErrorCode::InvalidProfile => ErrorGroup::Input,
             ErrorCode::NodeUnavailable
@@ -296,6 +300,12 @@ pub enum Error {
         /// The check it fails.
         problem: SignInProblem,
     },
+    /// An ownership proof or its message fails a check.
+    #[error("invalid ownership proof: {problem}")]
+    InvalidProof {
+        /// The check it fails.
+        problem: ProofProblem,
+    },
     /// A request to a node could not be built from its arguments, such as a relay URL without
     /// a scheme or a page out of range.
     #[error("invalid request: {reason}")]
@@ -420,6 +430,7 @@ impl Error {
             Error::InvalidDraft { .. } => ErrorCode::InvalidDraft,
             Error::InvalidTransaction { .. } => ErrorCode::InvalidTransaction,
             Error::InvalidSignIn { .. } => ErrorCode::InvalidSignIn,
+            Error::InvalidProof { .. } => ErrorCode::InvalidProof,
             Error::InvalidRequest { .. } => ErrorCode::InvalidRequest,
             Error::InvalidProfile { .. } => ErrorCode::InvalidProfile,
             Error::NodeUnavailable { .. } => ErrorCode::NodeUnavailable,
@@ -477,6 +488,7 @@ impl Error {
                 json!({ "reason": problem.as_str(), "message": problem.to_string() })
             }
             Error::InvalidSignIn { problem } => json!({ "reason": problem.as_str() }),
+            Error::InvalidProof { problem } => json!({ "reason": problem.as_str() }),
             Error::RateLimited {
                 retry_after_seconds,
             } => json!({ "retryAfterSeconds": retry_after_seconds }),
@@ -1079,6 +1091,77 @@ impl fmt::Display for SignInProblem {
     }
 }
 
+/// The check an ownership proof or its message fails (see [`crate::ownership`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ProofProblem {
+    /// Not a proof message of the supported version: its length, its characters (printable ASCII
+    /// lines only), its number of lines or its fixed text.
+    Format,
+    /// A field line does not start with its label.
+    Field,
+    /// The source network is not Solar mainnet.
+    SourceNetwork,
+    /// The source address is not a Solar mainnet address.
+    Address,
+    /// The IceRoot account is not a valid account in lowercase: a typing error, another prefix
+    /// or another length.
+    Account,
+    /// The nonce is not 64 lowercase hex digits.
+    Nonce,
+    /// The issue time is malformed, or more than five minutes ahead of the reader's clock.
+    IssuedAt,
+    /// The source address is not the one expected: the signing key's, or the proof's own.
+    Mismatch,
+    /// The public key is not a valid compressed key in lowercase hex.
+    Key,
+    /// The signature is malformed or does not verify.
+    Signature,
+    /// The signed proof's JSON is not a proof of the supported version: its type, version,
+    /// network, algorithm or fields.
+    Json,
+}
+
+impl ProofProblem {
+    /// A stable string for the problem: `format`, `field`, `source-network`, `address`,
+    /// `account`, `nonce`, `issued-at`, `mismatch`, `key`, `signature` or `json`.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ProofProblem::Format => "format",
+            ProofProblem::Field => "field",
+            ProofProblem::SourceNetwork => "source-network",
+            ProofProblem::Address => "address",
+            ProofProblem::Account => "account",
+            ProofProblem::Nonce => "nonce",
+            ProofProblem::IssuedAt => "issued-at",
+            ProofProblem::Mismatch => "mismatch",
+            ProofProblem::Key => "key",
+            ProofProblem::Signature => "signature",
+            ProofProblem::Json => "json",
+        }
+    }
+}
+
+impl fmt::Display for ProofProblem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            ProofProblem::Format => "not an ownership proof message of a supported version",
+            ProofProblem::Field => "a field is missing its label",
+            ProofProblem::SourceNetwork => "the source network is not Solar mainnet",
+            ProofProblem::Address => "the source address is not a Solar mainnet address",
+            ProofProblem::Account => {
+                "the IceRoot account has a typing error or is not in lowercase"
+            }
+            ProofProblem::Nonce => "the nonce is not 64 lowercase hex digits",
+            ProofProblem::IssuedAt => "the issue time is malformed or ahead of the clock",
+            ProofProblem::Mismatch => "the source address is not the one expected",
+            ProofProblem::Key => "the public key is malformed",
+            ProofProblem::Signature => "the signature is malformed or does not verify",
+            ProofProblem::Json => "not a signed ownership proof of a supported version",
+        })
+    }
+}
+
 /// The normalized reason of a node's refusal of a submitted transaction. The node API client
 /// and the core share this type.
 pub use iceroot_sdk_api::RejectReason;
@@ -1118,6 +1201,12 @@ mod tests {
             error.details(),
             json!({ "reason": "wrong-network", "expected": 90, "actual": 63 })
         );
+        let error = Error::InvalidProof {
+            problem: ProofProblem::IssuedAt,
+        };
+        assert_eq!(error.code().as_str(), "InvalidProof");
+        assert_eq!(error.code().group(), ErrorGroup::Input);
+        assert_eq!(error.details(), json!({ "reason": "issued-at" }));
         assert_eq!(
             Error::TxRejected {
                 reason: RejectReason::LowFee,

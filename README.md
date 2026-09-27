@@ -42,22 +42,23 @@ iceroot-sdk = { git = "https://github.com/iceroot-network/sdk-rust", tag = "v0.1
 
 The node API client is `iceroot_sdk::api`. The example in the documentation of `iceroot-sdk` builds and signs a transfer (`cargo doc --open -p iceroot-sdk`).
 
-Building from source needs read access to the `heartwood-core` repository, which is fetched over SSH through the host alias `github-iceroot` (see `Cargo.toml`). Point the alias at GitHub with a key that can read the repository:
+Building from source needs read access to the `heartwood-core` repository while it is private. `Cargo.toml` fetches it over SSH from `ssh://git@github.com/iceroot-network/heartwood-core.git`, so any SSH key GitHub accepts for that repository works: the default key, or the one `~/.ssh/config` names for `github.com`. `.cargo/config.toml` makes Cargo fetch with the `git` command line, so the machine's SSH and git configuration apply; an application that depends on the SDK needs the same in its own `.cargo/config.toml`:
 
-```text
-# ~/.ssh/config
-Host github-iceroot
-    HostName github.com
-    User git
-    IdentityFile ~/.ssh/<a key with read access to heartwood-core>
+```toml
+[net]
+git-fetch-with-cli = true
 ```
 
-`.cargo/config.toml` makes Cargo fetch with the `git` command line, so this configuration applies. An application that depends on the SDK needs the same in its own `.cargo/config.toml`, and its builds (CI, Docker) need the alias too. Where an SSH host alias is not practical, a git URL rewrite does the same for the build's environment:
+Where the key with access sits behind an SSH host alias instead (a separate key per organisation, for example), rewrite the address for the command that fetches, with git configuration from the environment, which Cargo passes on to git:
 
 ```sh
-git config --global url."git@github.com:iceroot-network/heartwood-core.git".insteadOf \
-  "ssh://git@github-iceroot/iceroot-network/heartwood-core.git"
+GIT_CONFIG_COUNT=1 \
+GIT_CONFIG_KEY_0='url.ssh://git@<alias>/iceroot-network/.insteadOf' \
+GIT_CONFIG_VALUE_0='ssh://git@github.com/iceroot-network/' \
+  cargo fetch --locked
 ```
+
+Once Cargo holds the commit `Cargo.lock` pins, builds need no access at all (`cargo build --offline`). On a CI machine or in a container, the same rewrite can go in the global git configuration instead (`git config --global url.<alias URL>.insteadOf <github.com URL>`), as `tools/ci/heartwood-access.sh` does with a deploy key. A rewrite in a repository's own git configuration has no effect, because Cargo fetches in a repository of its own.
 
 ## Development
 
@@ -80,7 +81,7 @@ CC_wasm32_unknown_unknown=clang AR_wasm32_unknown_unknown=llvm-ar \
 
 `.github/workflows/ci.yml` runs on pull requests to `dev` and `prod` and on pushes to `prod`: formatting, clippy (native with every feature, and wasm32), the tests with both vector sets, the documentation, the wasm32 build, the dependency guard and the `NOTICE` check. A second job builds and tests against Heartwood Core's `dev` branch, so a change there is seen before the next `heartwood-crypto` tag; it does not block a merge.
 
-The workflows read `heartwood-core` with a read-only deploy key of that repository, stored in this repository as the secret `HEARTWOOD_DEPLOY_KEY`; `tools/ci/heartwood-access.sh` installs it for the host alias. Pull requests from forks get no secrets, so their runs stop at that step. While `heartwood-core` is private, only pull request runs save the dependency cache: it holds Cargo's copy of `heartwood-core`, and a pull request from a fork can restore the caches of this repository's branches.
+The workflows read `heartwood-core` with a read-only deploy key of that repository, stored in this repository as the secret `HEARTWOOD_DEPLOY_KEY`; `tools/ci/heartwood-access.sh` installs it under an SSH host alias of its own and rewrites `heartwood-core`'s `github.com` address to that alias, so the key serves that repository only. Pull requests from forks get no secrets, so their runs stop at that step. While `heartwood-core` is private, only pull request runs save the dependency cache: it holds Cargo's copy of `heartwood-core`, and a pull request from a fork can restore the caches of this repository's branches.
 
 ### Releasing
 

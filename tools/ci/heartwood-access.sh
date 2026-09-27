@@ -3,11 +3,14 @@
 #
 #   HEARTWOOD_DEPLOY_KEY=<private key> tools/ci/heartwood-access.sh
 #
-# heartwood-core is not public yet, and Cargo.toml fetches heartwood-crypto from it over SSH
-# through the host alias github-iceroot. This script installs a read-only deploy key of
-# heartwood-core for that alias, pins GitHub's published SSH host key, maps the plain github.com
-# addresses of heartwood-core to the alias (so either spelling in Cargo.toml works), and checks
-# the access. It changes the user's ~/.ssh and global git configuration: run it on CI machines.
+# heartwood-core is not public yet, and Cargo.toml fetches heartwood-crypto from it over SSH, at
+# ssh://git@github.com/iceroot-network/heartwood-core.git.
+# This script installs a read-only deploy key of heartwood-core under an SSH host alias of its
+# own, so that the key serves that repository only, pins GitHub's published SSH host key, rewrites
+# heartwood-core's github.com addresses (both spellings) to the alias, and checks the access
+# through the address Cargo uses. It changes the user's ~/.ssh and global git configuration: run
+# it on CI machines. Cargo fetches in a repository of its own, so the rewrite has to be global
+# there (or in git's environment); a repository's own git configuration would not reach it.
 set -euo pipefail
 
 if [ -z "${HEARTWOOD_DEPLOY_KEY:-}" ]; then
@@ -25,7 +28,7 @@ key="$HOME/.ssh/heartwood-core"
 echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
     >>"$HOME/.ssh/known_hosts"
 cat >>"$HOME/.ssh/config" <<CONFIG
-Host github-iceroot
+Host github-heartwood-core
     HostName github.com
     User git
     IdentityFile $key
@@ -33,9 +36,9 @@ Host github-iceroot
 CONFIG
 chmod 600 "$HOME/.ssh/config"
 
-alias_url="ssh://git@github-iceroot/iceroot-network/heartwood-core"
+alias_url="ssh://git@github-heartwood-core/iceroot-network/heartwood-core"
 git config --global --add url."$alias_url".insteadOf "ssh://git@github.com/iceroot-network/heartwood-core"
 git config --global --add url."$alias_url".insteadOf "git@github.com:iceroot-network/heartwood-core"
 
-git ls-remote --exit-code "$alias_url.git" HEAD >/dev/null
+git ls-remote --exit-code "ssh://git@github.com/iceroot-network/heartwood-core.git" HEAD >/dev/null
 echo "heartwood-access: heartwood-core is readable"

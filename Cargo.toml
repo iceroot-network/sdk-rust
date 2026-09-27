@@ -33,7 +33,7 @@ iceroot-sdk-api = { path = "crates/iceroot-sdk-api" }
 # milestone rules, the fee floor and the message signing domain, at its tagged release. No feature
 # is enabled here; tools/check-deps.sh keeps it that way. The consensus crates of heartwood-core
 # are never dependencies of the SDK.
-heartwood-crypto = { git = "ssh://git@github-iceroot/iceroot-network/heartwood-core.git", tag = "crypto-v0.1.0" }
+heartwood-crypto = { git = "ssh://git@github.com/iceroot-network/heartwood-core.git", tag = "crypto-v0.1.0" }
 
 # The same exact version as heartwood-crypto's own pin. The SDK uses it directly for one operation
 # only, the scalar addition of the hardened BIP32 step; every key, address and signature still

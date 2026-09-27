@@ -1,5 +1,4 @@
-# heartwood-core is fetched over SSH. With the git command line, the SSH configuration of the
-# machine applies, including the host alias `github-iceroot` in the dependency's URL (see the
-# README).
+# heartwood-core is fetched over SSH from github.com. With the git command line, the machine's SSH
+# and git configuration apply, including a URL rewrite to an SSH host alias (see the README).
 [net]
 git-fetch-with-cli = true

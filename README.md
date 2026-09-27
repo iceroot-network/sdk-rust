@@ -61,10 +61,13 @@ cargo test --workspace --all-features
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo fmt --all -- --check
 tools/check-deps.sh
+node tools/notice.mjs --check
 # WebAssembly: libsecp256k1 is C, so a clang with the wasm32 target is needed.
 CC_wasm32_unknown_unknown=clang AR_wasm32_unknown_unknown=llvm-ar \
   cargo build --workspace --target wasm32-unknown-unknown --release
 ```
+
+`NOTICE` lists the third-party crates a build links, with their licences, copyright lines and licence texts, and carries Heartwood Core's notice. It is generated from `Cargo.lock`: after changing a dependency, run `node tools/notice.mjs` and commit the result.
 
 ### Vectors
 

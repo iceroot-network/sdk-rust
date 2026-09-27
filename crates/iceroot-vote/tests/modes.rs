@@ -510,6 +510,16 @@ fn support_newcomers_criteria_and_weights() {
     let freq = frequency(&many(&s, m, 20, 600));
     assert!(freq["papaya"] > freq["lime"]);
     assert!(freq["pear"] > freq["acacia"]);
+    // Far below the cutoff the weight bottoms out at 1: still eligible, never dropped unexplained.
+    let mut far = s.clone();
+    far.records
+        .iter_mut()
+        .find(|r| r.name == "papaya")
+        .unwrap()
+        .rank = Some(1_000_000);
+    let papaya = &candidates(&far, m)["papaya"];
+    assert!(papaya.eligible && papaya.shortfalls.is_empty());
+    assert_eq!(papaya.weight, 1);
 }
 
 #[test]

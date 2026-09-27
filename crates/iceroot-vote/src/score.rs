@@ -69,8 +69,8 @@ pub struct Candidate {
 /// - **Support Newcomers:** ranked within the last 10 seats or below the cutoff, registered for
 ///   at least 7 days, complete declarations, no penalty ever, and at least 95 % of assigned slots
 ///   forged when there is a production record from earlier seated time. Weight
-///   `100,000 / (10 + distance)`, where the distance counts the ranks between the validator and
-///   the cutoff (0 for the last seat and the first rank below it).
+///   `100,000 / (10 + distance)`, at least 1, where the distance counts the ranks between the
+///   validator and the cutoff (0 for the last seat and the first rank below it).
 ///
 /// A snapshot without penalty records (a node's relay data) counts no penalties.
 pub fn evaluate(snapshot: &VoteSnapshot, mode: Mode) -> Result<Vec<Candidate>, SnapshotError> {
@@ -198,8 +198,11 @@ pub(crate) fn assess(
                         } else {
                             rank - seats - 1
                         };
-                        NEWCOMER_SCALE * NEWCOMER_HALF_DISTANCE
-                            / (NEWCOMER_HALF_DISTANCE + u128::from(distance))
+                        // At least 1, so that a healthy validator far below the cutoff stays
+                        // eligible (with the least weight) rather than dropping out unexplained.
+                        (NEWCOMER_SCALE * NEWCOMER_HALF_DISTANCE
+                            / (NEWCOMER_HALF_DISTANCE + u128::from(distance)))
+                        .max(1)
                     }
                 }
             };

@@ -101,7 +101,7 @@ fn payouts() -> impl Strategy<Value = Option<Payouts>> {
 
 prop_compose! {
     fn record(height: u64)(
-        rank in prop::option::weighted(0.95, 1u32..140),
+        rank in prop::option::weighted(0.95, prop_oneof![19 => 1u32..140, 1 => any::<u32>()]),
         status in status(),
         seated_roll in prop::bool::weighted(0.8),
         registered in prop::option::weighted(0.95, 0..=height),
@@ -333,6 +333,13 @@ proptest! {
             Some(index) => snapshot.records[index.index(snapshot.records.len())].address.clone(),
             None => format!("holder-{holder}"),
         };
+        // A candidate is eligible exactly when it has no shortfall, and then has weight.
+        for mode in Mode::ALL {
+            for candidate in evaluate(&snapshot, mode).unwrap() {
+                prop_assert_eq!(candidate.eligible, candidate.shortfalls.is_empty());
+                prop_assert_eq!(candidate.eligible, candidate.weight > 0);
+            }
+        }
         for (mode, count) in Mode::ALL.into_iter().zip(counts) {
             let request = SelectRequest { mode, account: &account, count, draw };
             match select(&snapshot, &request) {

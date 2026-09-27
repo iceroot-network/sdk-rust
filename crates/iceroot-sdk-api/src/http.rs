@@ -26,6 +26,25 @@ pub struct HttpOptions {
     pub backoff: Backoff,
     /// The `User-Agent` header.
     pub user_agent: String,
+    /// Extra headers sent to every relay with every request, as `(name, value)` pairs: for a
+    /// relay behind a proxy that asks for a token. The values are marked sensitive, so the
+    /// client's `Debug` output never shows them, and reqwest drops a sensitive header such as
+    /// `Authorization` when a redirect leads to another host. Default: none.
+    ///
+    /// ```no_run
+    /// use iceroot_sdk_api::{HttpClient, HttpOptions, Relay};
+    ///
+    /// # fn run(token: &str) -> Result<(), iceroot_sdk_api::ApiError> {
+    /// let options = HttpOptions {
+    ///     headers: vec![("authorization".to_owned(), format!("Bearer {token}"))],
+    ///     ..HttpOptions::default()
+    /// };
+    /// let relays = vec![Relay::parse("https://devnet.example/api")?];
+    /// let client = HttpClient::with_options(relays, options)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub headers: Vec<(String, String)>,
 }
 
 impl Default for HttpOptions {
@@ -35,6 +54,7 @@ impl Default for HttpOptions {
             rate_limit: RateLimit::REFERENCE_DEFAULT,
             backoff: Backoff::default(),
             user_agent: concat!("iceroot-sdk-api/", env!("CARGO_PKG_VERSION")).to_owned(),
+            headers: Vec::new(),
         }
     }
 }
@@ -64,14 +84,28 @@ impl HttpClient {
     ///
     /// # Errors
     ///
-    /// As [`HttpClient::new`].
+    /// As [`HttpClient::new`], and [`ApiError::InvalidRequest`] for an extra header whose name or
+    /// value HTTP does not allow (the error names the header, never its value).
     pub fn with_options(relays: Vec<Relay>, options: HttpOptions) -> Result<Self, ApiError> {
         if relays.is_empty() {
             return Err(ApiError::invalid("at least one relay is needed"));
         }
+        let mut headers = reqwest::header::HeaderMap::new();
+        for (name, value) in &options.headers {
+            let name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
+                .map_err(|_| ApiError::invalid(format!("{name:?} is not an HTTP header name")))?;
+            let mut value = reqwest::header::HeaderValue::from_str(value).map_err(|_| {
+                ApiError::invalid(format!(
+                    "the value of the header {name} is not valid in HTTP"
+                ))
+            })?;
+            value.set_sensitive(true);
+            headers.append(name, value);
+        }
         let http = reqwest::Client::builder()
             .timeout(options.timeout)
             .user_agent(options.user_agent)
+            .default_headers(headers)
             .build()
             .map_err(|e| ApiError::NodeUnavailable {
                 detail: format!("HTTP client: {e}"),

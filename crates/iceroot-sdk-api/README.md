@@ -39,7 +39,7 @@ The reference implementation allows 100 requests per 60 seconds per client addre
 
 ## Feature `http`
 
-`HttpClient` sends calls with reqwest (rustls) to a list of relays: reads go to the first relay that answers, 429 is retried after the backoff, and requests keep to the request budget. It is available on native targets only; a WebAssembly build never contains reqwest, hyper or tokio.
+`HttpClient` sends calls with reqwest (rustls) to a list of relays: reads go to the first relay that answers, 429 is retried after the backoff, and requests keep to the request budget. `HttpOptions::headers` adds headers to every request, for a relay behind a proxy that asks for a token; their values never appear in the client's `Debug` output. It is available on native targets only; a WebAssembly build never contains reqwest, hyper or tokio.
 
 ```rust,no_run
 use iceroot_sdk_api::{HttpClient, Relay, SolarCompat};

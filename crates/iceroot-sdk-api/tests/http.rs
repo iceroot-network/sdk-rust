@@ -168,3 +168,36 @@ async fn submits_the_transactions_json() {
     );
     assert!(seen[0].ends_with(r#"{"transactions":[{"id":"aa","version":3}]}"#));
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn sends_the_extra_headers_and_never_shows_their_values() {
+    let (live, seen) = server(vec![(200, STATUS)]).await;
+    let secret = "Bearer s3cret-t0ken";
+    let with_token = HttpOptions {
+        headers: vec![("authorization".to_owned(), secret.to_owned())],
+        ..options(0)
+    };
+    let client = HttpClient::with_options(vec![Relay::parse(&live).unwrap()], with_token).unwrap();
+    assert!(!format!("{client:?}").contains("s3cret"));
+    client
+        .send(&SolarCompat::new(53).node_status())
+        .await
+        .unwrap();
+    let seen = seen.lock().unwrap();
+    assert!(
+        seen[0]
+            .to_ascii_lowercase()
+            .contains("authorization: bearer s3cret-t0ken")
+    );
+
+    let relays = || vec![Relay::parse(&live).unwrap()];
+    for (name, value) in [("bad name", "x"), ("x-token", "line\nbreak s3cret")] {
+        let options = HttpOptions {
+            headers: vec![(name.to_owned(), value.to_owned())],
+            ..options(0)
+        };
+        let error = HttpClient::with_options(relays(), options).unwrap_err();
+        assert_eq!(error.code(), "InvalidRequest", "{name}");
+        assert!(!error.to_string().contains("s3cret"), "{error}");
+    }
+}

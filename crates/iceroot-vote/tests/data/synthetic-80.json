@@ -1,0 +1,2332 @@
+{
+ "height": "5000000",
+ "windowDays": 30,
+ "seats": 53,
+ "blockTimeSeconds": 8,
+ "source": "indexer",
+ "records": [
+  {
+   "name": "acacia",
+   "address": "addr-acacia",
+   "rank": 44,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1155200",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "56000000348436",
+   "voters": 38,
+   "production": {
+    "forged": 6123,
+    "assigned": 6128
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Acacia Nodes",
+    "hosting": "Metalbox",
+    "country": "NL",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1136",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 728
+  },
+  {
+   "name": "alder",
+   "address": "addr-alder",
+   "rank": 63,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 12,
+   "voteWeight": "37000000498897",
+   "voters": 29,
+   "production": {
+    "forged": 2376,
+    "assigned": 2400
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Alder Nodes",
+    "hosting": "Metalbox",
+    "country": "FI",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 531
+  },
+  {
+   "name": "almond",
+   "address": "addr-almond",
+   "rank": 51,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1230800",
+   "seatedDaysInWindow": 7,
+   "voteWeight": "49000000403869",
+   "voters": 35,
+   "production": {
+    "forged": 1390,
+    "assigned": 1400
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Almond Nodes",
+    "hosting": "Metalbox",
+    "country": "BR",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1669",
+    "intervals": 4
+   },
+   "selfFundedWeightBp": 87
+  },
+  {
+   "name": "apricot",
+   "address": "addr-apricot",
+   "rank": 52,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1241600",
+   "seatedDaysInWindow": 6,
+   "voteWeight": "48000000411788",
+   "voters": 34,
+   "production": {
+    "forged": 1200,
+    "assigned": 1200
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Apricot Nodes",
+    "hosting": "Hostco",
+    "country": "AU",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1488",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 124
+  },
+  {
+   "name": "aspen",
+   "address": "addr-aspen",
+   "rank": 17,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "863600",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "83000000134623",
+   "voters": 52,
+   "production": {
+    "forged": 6124,
+    "assigned": 6129
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Frostline",
+    "hosting": "Orbit",
+    "country": "AR",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "4800",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 629
+  },
+  {
+   "name": "balsa",
+   "address": "addr-balsa",
+   "rank": 62,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 10,
+   "voteWeight": "38000000490978",
+   "voters": 29,
+   "production": {
+    "forged": 1800,
+    "assigned": 2000
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Balsa Nodes",
+    "hosting": "Cloudnine",
+    "country": "US",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 494
+  },
+  {
+   "name": "banyan",
+   "address": "addr-banyan",
+   "rank": 13,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "820400",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "87000000102947",
+   "voters": 54,
+   "production": {
+    "forged": 6124,
+    "assigned": 6131
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Banyan Nodes",
+    "hosting": "Hostco",
+    "country": "DE",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1347",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 481
+  },
+  {
+   "name": "baobab",
+   "address": "addr-baobab",
+   "rank": 14,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "831200",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "86000000110866",
+   "voters": 53,
+   "production": {
+    "forged": 6116,
+    "assigned": 6118
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Baobab Nodes",
+    "hosting": "Cloudnine",
+    "country": "KE",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "0",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 518
+  },
+  {
+   "name": "beech",
+   "address": "addr-beech",
+   "rank": 47,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1187600",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "53000000372193",
+   "voters": 37,
+   "production": {
+    "forged": 6131,
+    "assigned": 6139
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Beech Nodes",
+    "hosting": "Cloudnine",
+    "country": "FR",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1493",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 839
+  },
+  {
+   "name": "birch",
+   "address": "addr-birch",
+   "rank": 31,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1014800",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "69000000245489",
+   "voters": 45,
+   "production": {
+    "forged": 6140,
+    "assigned": 6147
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": null,
+   "payouts": {
+    "perUnitWeight": "1689",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 247
+  },
+  {
+   "name": "boxwood",
+   "address": "addr-boxwood",
+   "rank": 48,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1198400",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "52000000380112",
+   "voters": 36,
+   "production": {
+    "forged": 6123,
+    "assigned": 6126
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Boxwood Nodes",
+    "hosting": "Hostco",
+    "country": "CA",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1312",
+    "intervals": 4
+   },
+   "selfFundedWeightBp": 876
+  },
+  {
+   "name": "buckeye",
+   "address": "addr-buckeye",
+   "rank": 70,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "30000000554330",
+   "voters": 25,
+   "production": null,
+   "penalties": null,
+   "declarations": {
+    "operator": "Buckeye Nodes",
+    "hosting": "Hostco",
+    "country": "GB",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": null
+  },
+  {
+   "name": "catalpa",
+   "address": "addr-catalpa",
+   "rank": 38,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1090400",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "62000000300922",
+   "voters": 41,
+   "production": {
+    "forged": 6098,
+    "assigned": 6106
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": true,
+    "ever": true
+   },
+   "declarations": {
+    "operator": "Catalpa Nodes",
+    "hosting": "Cloudnine",
+    "country": "NZ",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1322",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 506
+  },
+  {
+   "name": "cedar",
+   "address": "addr-cedar",
+   "rank": 6,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "744800",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "94000000047514",
+   "voters": 57,
+   "production": {
+    "forged": 6116,
+    "assigned": 6122
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Cedar Nodes",
+    "hosting": "Cloudnine",
+    "country": "SG",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 222
+  },
+  {
+   "name": "cherry",
+   "address": "addr-cherry",
+   "rank": 20,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "896000",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "80000000158380",
+   "voters": 50,
+   "production": {
+    "forged": 6132,
+    "assigned": 6140
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": true
+   },
+   "declarations": {
+    "operator": "Cherry Nodes",
+    "hosting": "Metalbox",
+    "country": "DE",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1880",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 740
+  },
+  {
+   "name": "chestnut",
+   "address": "addr-chestnut",
+   "rank": 2,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "701600",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "98000000015838",
+   "voters": 59,
+   "production": {
+    "forged": 6116,
+    "assigned": 6124
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Frostline",
+    "hosting": "Cloudnine",
+    "country": "US",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "5000",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 74
+  },
+  {
+   "name": "citron",
+   "address": "addr-citron",
+   "rank": 12,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "809600",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "88000000095028",
+   "voters": 54,
+   "production": {
+    "forged": 6141,
+    "assigned": 6144
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Citron Nodes",
+    "hosting": "Hostco",
+    "country": "AU",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1528",
+    "intervals": 4
+   },
+   "selfFundedWeightBp": 444
+  },
+  {
+   "name": "cypress",
+   "address": "addr-cypress",
+   "rank": 32,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1025600",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "68000000253408",
+   "voters": 44,
+   "production": {
+    "forged": 6132,
+    "assigned": 6134
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Cypress Nodes",
+    "hosting": "Metalbox",
+    "country": "AU",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1508",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 284
+  },
+  {
+   "name": "damson",
+   "address": "addr-damson",
+   "rank": 64,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "36000000506816",
+   "voters": 28,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": null,
+   "payouts": null,
+   "selfFundedWeightBp": 568
+  },
+  {
+   "name": "dogwood",
+   "address": "addr-dogwood",
+   "rank": 4,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "723200",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "96000000031676",
+   "voters": 58,
+   "production": {
+    "forged": 6141,
+    "assigned": 6148
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Polar Systems",
+    "hosting": "Hostco",
+    "country": "NL",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "3000",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 148
+  },
+  {
+   "name": "ebony",
+   "address": "addr-ebony",
+   "rank": 34,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1047200",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "66000000269246",
+   "voters": 43,
+   "production": {
+    "forged": 5699,
+    "assigned": 6000
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Ebony Nodes",
+    "hosting": "Hostco",
+    "country": "KE",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1146",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 358
+  },
+  {
+   "name": "elm",
+   "address": "addr-elm",
+   "rank": 59,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "41000000467221",
+   "voters": 31,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Elm Nodes",
+    "hosting": "Cloudnine",
+    "country": "ZA",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "3500",
+    "intervals": 10
+   },
+   "selfFundedWeightBp": 383
+  },
+  {
+   "name": "eucalyptus",
+   "address": "addr-eucalyptus",
+   "rank": 61,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4924850",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "39000000483059",
+   "voters": 30,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Eucalyptus Nodes",
+    "hosting": "Hostco",
+    "country": "DE",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 457
+  },
+  {
+   "name": "fig",
+   "address": "addr-fig",
+   "rank": 50,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1220000",
+   "seatedDaysInWindow": 5,
+   "voteWeight": "50000000395950",
+   "voters": 35,
+   "production": {
+    "forged": 1000,
+    "assigned": 1000
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Fig Nodes",
+    "hosting": "Cloudnine",
+    "country": "GB",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1850",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 50
+  },
+  {
+   "name": "fir",
+   "address": "addr-fir",
+   "rank": 22,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "917600",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "78000000174218",
+   "voters": 49,
+   "production": {
+    "forged": 6107,
+    "assigned": 6114
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Fir Nodes",
+    "hosting": "Hostco",
+    "country": "US",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1518",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 814
+  },
+  {
+   "name": "ginkgo",
+   "address": "addr-ginkgo",
+   "rank": 24,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "939200",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "76000000190056",
+   "voters": 48,
+   "production": {
+    "forged": 6132,
+    "assigned": 6138
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Ginkgo Nodes",
+    "hosting": "Hostco",
+    "country": "NL",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1156",
+    "intervals": 4
+   },
+   "selfFundedWeightBp": 888
+  },
+  {
+   "name": "guava",
+   "address": "addr-guava",
+   "rank": 8,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "766400",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "92000000063352",
+   "voters": 56,
+   "production": {
+    "forged": 6141,
+    "assigned": 6146
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Guava Nodes",
+    "hosting": "Metalbox",
+    "country": "CA",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1500",
+    "intervals": 0
+   },
+   "selfFundedWeightBp": 296
+  },
+  {
+   "name": "hawthorn",
+   "address": "addr-hawthorn",
+   "rank": 10,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "788000",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "90000000079190",
+   "voters": 55,
+   "production": {
+    "forged": 6116,
+    "assigned": 6120
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Hawthorn Nodes",
+    "hosting": "Hostco",
+    "country": "GB",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1890",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 370
+  },
+  {
+   "name": "hazel",
+   "address": "addr-hazel",
+   "rank": 55,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4967600",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "45000000435545",
+   "voters": 33,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Hazel Nodes",
+    "hosting": "Self-hosted",
+    "country": "IN",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 235
+  },
+  {
+   "name": "hemlock",
+   "address": "addr-hemlock",
+   "rank": 60,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4924400",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "40000000475140",
+   "voters": 30,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Hemlock Nodes",
+    "hosting": "Hostco",
+    "country": "DE",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 420
+  },
+  {
+   "name": "hickory",
+   "address": "addr-hickory",
+   "rank": 58,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "42000000459302",
+   "voters": 31,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Frostline",
+    "hosting": "Hostco",
+    "country": "NZ",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 346
+  },
+  {
+   "name": "holly",
+   "address": "addr-holly",
+   "rank": 49,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1209200",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "51000000388031",
+   "voters": 36,
+   "production": {
+    "forged": 6106,
+    "assigned": 6113
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Holly Nodes",
+    "hosting": "Hostco",
+    "country": "JP",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1131",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 13
+  },
+  {
+   "name": "ironwood",
+   "address": "addr-ironwood",
+   "rank": 65,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "35000000514735",
+   "voters": 28,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Ironwood Nodes",
+    "hosting": "Orbit",
+    "country": "US",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 605
+  },
+  {
+   "name": "jacaranda",
+   "address": "addr-jacaranda",
+   "rank": 66,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "34000000522654",
+   "voters": 27,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Jacaranda Nodes",
+    "hosting": "Cloudnine",
+    "country": "SG",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 642
+  },
+  {
+   "name": "juniper",
+   "address": "addr-juniper",
+   "rank": 11,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "798800",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "89000000087109",
+   "voters": 55,
+   "production": {
+    "forged": 6099,
+    "assigned": 6107
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Juniper Nodes",
+    "hosting": "Cloudnine",
+    "country": "BR",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 407
+  },
+  {
+   "name": "kapok",
+   "address": "addr-kapok",
+   "rank": 43,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1144400",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "57000000340517",
+   "voters": 39,
+   "production": {
+    "forged": 6140,
+    "assigned": 6141
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Kapok Nodes",
+    "hosting": "Self-hosted",
+    "country": "FI",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1317",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 691
+  },
+  {
+   "name": "larch",
+   "address": "addr-larch",
+   "rank": 72,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "28000000570168",
+   "voters": 24,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Larch Nodes",
+    "hosting": "Hostco",
+    "country": "AU",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 864
+  },
+  {
+   "name": "laurel",
+   "address": "addr-laurel",
+   "rank": 40,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1112000",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "60000000316760",
+   "voters": 40,
+   "production": {
+    "forged": 6123,
+    "assigned": 6130
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "polar systems ",
+    "hosting": "Hostco",
+    "country": "DE",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "2900",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 580
+  },
+  {
+   "name": "lemon",
+   "address": "addr-lemon",
+   "rank": null,
+   "seated": false,
+   "status": "resigned-temporary",
+   "registeredHeight": "788000",
+   "seatedDaysInWindow": 12,
+   "voteWeight": "90000000079190",
+   "voters": 55,
+   "production": {
+    "forged": 2000,
+    "assigned": 2000
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Lemon Nodes",
+    "hosting": "Hostco",
+    "country": "GB",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1890",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 370
+  },
+  {
+   "name": "lime",
+   "address": "addr-lime",
+   "rank": 76,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "24000000601844",
+   "voters": 22,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Lime Nodes",
+    "hosting": "Hostco",
+    "country": "KR",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 112
+  },
+  {
+   "name": "linden",
+   "address": "addr-linden",
+   "rank": 5,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "734000",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "95000000039595",
+   "voters": 58,
+   "production": {
+    "forged": 6133,
+    "assigned": 6135
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Linden Nodes",
+    "hosting": "Orbit",
+    "country": "US",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1895",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 185
+  },
+  {
+   "name": "locust",
+   "address": "addr-locust",
+   "rank": 25,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "950000",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "75000000197975",
+   "voters": 48,
+   "production": {
+    "forged": 6124,
+    "assigned": 6125
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Frostline",
+    "hosting": "Hostco",
+    "country": "US",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "4700",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 25
+  },
+  {
+   "name": "lychee",
+   "address": "addr-lychee",
+   "rank": 42,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1133600",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "58000000332598",
+   "voters": 39,
+   "production": {
+    "forged": 6098,
+    "assigned": 6104
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Lychee Nodes",
+    "hosting": "Cloudnine",
+    "country": "US",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1498",
+    "intervals": 4
+   },
+   "selfFundedWeightBp": 654
+  },
+  {
+   "name": "magnolia",
+   "address": "addr-magnolia",
+   "rank": 18,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "874400",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "82000000142542",
+   "voters": 51,
+   "production": {
+    "forged": 6116,
+    "assigned": 6116
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Magnolia Nodes",
+    "hosting": "Cloudnine",
+    "country": "NZ",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1342",
+    "intervals": 4
+   },
+   "selfFundedWeightBp": 666
+  },
+  {
+   "name": "mahogany",
+   "address": "addr-mahogany",
+   "rank": 21,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "906800",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "79000000166299",
+   "voters": 50,
+   "production": {
+    "forged": 6124,
+    "assigned": 6127
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Polar Systems",
+    "hosting": "Fjordhost",
+    "country": "DE",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "2950",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 777
+  },
+  {
+   "name": "mango",
+   "address": "addr-mango",
+   "rank": 36,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1068800",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "64000000285084",
+   "voters": 42,
+   "production": {
+    "forged": 6132,
+    "assigned": 6132
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Mango Nodes",
+    "hosting": "Hostco",
+    "country": "KR",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1684",
+    "intervals": 4
+   },
+   "selfFundedWeightBp": 432
+  },
+  {
+   "name": "mangrove",
+   "address": "addr-mangrove",
+   "rank": 33,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1036400",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "67000000261327",
+   "voters": 44,
+   "production": {
+    "forged": 5700,
+    "assigned": 6000
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Mangrove Nodes",
+    "hosting": "Fjordhost",
+    "country": "DE",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1327",
+    "intervals": 4
+   },
+   "selfFundedWeightBp": 321
+  },
+  {
+   "name": "maple",
+   "address": "addr-maple",
+   "rank": 28,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "982400",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "72000000221732",
+   "voters": 46,
+   "production": {
+    "forged": 6132,
+    "assigned": 6136
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Maple Nodes",
+    "hosting": "Hostco",
+    "country": "CA",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1332",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 136
+  },
+  {
+   "name": "medlar",
+   "address": "addr-medlar",
+   "rank": 56,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "44000000443464",
+   "voters": 32,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": true
+   },
+   "declarations": {
+    "operator": "Medlar Nodes",
+    "hosting": "Metalbox",
+    "country": "KR",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 272
+  },
+  {
+   "name": "mesquite",
+   "address": "addr-mesquite",
+   "rank": 7,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "755600",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "93000000055433",
+   "voters": 57,
+   "production": {
+    "forged": 5734,
+    "assigned": 6100
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Mesquite Nodes",
+    "hosting": "Self-hosted",
+    "country": "FR",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1533",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 259
+  },
+  {
+   "name": "mulberry",
+   "address": "addr-mulberry",
+   "rank": 19,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "885200",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "81000000150461",
+   "voters": 51,
+   "production": {
+    "forged": 6099,
+    "assigned": 6103
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Mulberry Nodes",
+    "hosting": "Self-hosted",
+    "country": "ZA",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1161",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 703
+  },
+  {
+   "name": "myrtle",
+   "address": "addr-myrtle",
+   "rank": 16,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "852800",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "84000000126704",
+   "voters": 52,
+   "production": {
+    "forged": 6141,
+    "assigned": 6142
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Myrtle Nodes",
+    "hosting": "Hostco",
+    "country": "KR",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1704",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 592
+  },
+  {
+   "name": "nutmeg",
+   "address": "addr-nutmeg",
+   "rank": 39,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1101200",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "61000000308841",
+   "voters": 41,
+   "production": {
+    "forged": 6140,
+    "assigned": 6143
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Nutmeg Nodes",
+    "hosting": "Metalbox",
+    "country": "ZA",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1141",
+    "intervals": 4
+   },
+   "selfFundedWeightBp": 543
+  },
+  {
+   "name": "oak",
+   "address": "addr-oak",
+   "rank": 71,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "29000000562249",
+   "voters": 25,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Oak Nodes",
+    "hosting": "Cloudnine",
+    "country": "BR",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 827
+  },
+  {
+   "name": "olive",
+   "address": "addr-olive",
+   "rank": null,
+   "seated": false,
+   "status": "resigned-permanent",
+   "registeredHeight": "820400",
+   "seatedDaysInWindow": 12,
+   "voteWeight": "87000000102947",
+   "voters": 54,
+   "production": {
+    "forged": 2000,
+    "assigned": 2000
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Olive Nodes",
+    "hosting": "Hostco",
+    "country": "DE",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1347",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 481
+  },
+  {
+   "name": "palm",
+   "address": "addr-palm",
+   "rank": null,
+   "seated": false,
+   "status": "resigned-permanent",
+   "registeredHeight": "798800",
+   "seatedDaysInWindow": 12,
+   "voteWeight": "89000000087109",
+   "voters": 55,
+   "production": {
+    "forged": 2000,
+    "assigned": 2000
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Palm Nodes",
+    "hosting": "Cloudnine",
+    "country": "BR",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1709",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 407
+  },
+  {
+   "name": "papaya",
+   "address": "addr-papaya",
+   "rank": 54,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4784000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "46000000427626",
+   "voters": 33,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Papaya Nodes",
+    "hosting": "Cloudnine",
+    "country": "KE",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 198
+  },
+  {
+   "name": "peach",
+   "address": "addr-peach",
+   "rank": 46,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1176800",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "54000000364274",
+   "voters": 37,
+   "production": {
+    "forged": 6098,
+    "assigned": 6102
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Peach Nodes",
+    "hosting": "Hostco",
+    "country": "SG",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1674",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 802
+  },
+  {
+   "name": "pear",
+   "address": "addr-pear",
+   "rank": 53,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1252400",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "47000000419707",
+   "voters": 34,
+   "production": {
+    "forged": 6106,
+    "assigned": 6111
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Pear Nodes",
+    "hosting": "Orbit",
+    "country": "DE",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1307",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 161
+  },
+  {
+   "name": "pecan",
+   "address": "addr-pecan",
+   "rank": 57,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "43000000451383",
+   "voters": 32,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Pecan Nodes",
+    "hosting": null,
+    "country": "AR",
+    "complete": false
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 309
+  },
+  {
+   "name": "persimmon",
+   "address": "addr-persimmon",
+   "rank": 9,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "777200",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "91000000071271",
+   "voters": 56,
+   "production": {
+    "forged": 6133,
+    "assigned": 6133
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Frostline",
+    "hosting": "Fjordhost",
+    "country": "JP",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "4900",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 333
+  },
+  {
+   "name": "pine",
+   "address": "addr-pine",
+   "rank": 68,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "32000000538492",
+   "voters": 26,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Pine Nodes",
+    "hosting": "Metalbox",
+    "country": "CA",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 716
+  },
+  {
+   "name": "plum",
+   "address": "addr-plum",
+   "rank": 1,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "690800",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "99000000007919",
+   "voters": 60,
+   "production": {
+    "forged": 6133,
+    "assigned": 6137
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Plum Nodes",
+    "hosting": "Hostco",
+    "country": "DE",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1719",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 37
+  },
+  {
+   "name": "poplar",
+   "address": "addr-poplar",
+   "rank": 45,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1166000",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "55000000356355",
+   "voters": 38,
+   "production": {
+    "forged": 6115,
+    "assigned": 6115
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": null,
+    "hosting": "Hostco",
+    "country": "DE",
+    "complete": false
+   },
+   "payouts": {
+    "perUnitWeight": "1855",
+    "intervals": 4
+   },
+   "selfFundedWeightBp": 765
+  },
+  {
+   "name": "quince",
+   "address": "addr-quince",
+   "rank": 30,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1004000",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "70000000237570",
+   "voters": 45,
+   "production": {
+    "forged": 6107,
+    "assigned": 6110
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": null,
+   "payouts": {
+    "perUnitWeight": "1870",
+    "intervals": 4
+   },
+   "selfFundedWeightBp": 210
+  },
+  {
+   "name": "redwood",
+   "address": "addr-redwood",
+   "rank": 35,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1058000",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "65000000277165",
+   "voters": 43,
+   "production": {
+    "forged": 6140,
+    "assigned": 6145
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Redwood Nodes",
+    "hosting": "Cloudnine",
+    "country": "IN",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1865",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 395
+  },
+  {
+   "name": "rowan",
+   "address": "addr-rowan",
+   "rank": 29,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "993200",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "71000000229651",
+   "voters": 46,
+   "production": {
+    "forged": 6115,
+    "assigned": 6123
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Rowan Nodes",
+    "hosting": "Orbit",
+    "country": "JP",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1151",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 173
+  },
+  {
+   "name": "sassafras",
+   "address": "addr-sassafras",
+   "rank": 73,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "27000000578087",
+   "voters": 24,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Sassafras Nodes",
+    "hosting": "Hostco",
+    "country": "DE",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 1
+  },
+  {
+   "name": "sequoia",
+   "address": "addr-sequoia",
+   "rank": 27,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "971600",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "73000000213813",
+   "voters": 47,
+   "production": {
+    "forged": 6149,
+    "assigned": 6149
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Sequoia Nodes",
+    "hosting": "Metalbox",
+    "country": "FR",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1513",
+    "intervals": 4
+   },
+   "selfFundedWeightBp": 99
+  },
+  {
+   "name": "spruce",
+   "address": "addr-spruce",
+   "rank": 15,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "842000",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "85000000118785",
+   "voters": 53,
+   "production": {
+    "forged": 6099,
+    "assigned": 6105
+   },
+   "penalties": {
+    "jailedInWindow": true,
+    "equivocationInWindow": false,
+    "ever": true
+   },
+   "declarations": {
+    "operator": "Spruce Nodes",
+    "hosting": "Metalbox",
+    "country": "IN",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1885",
+    "intervals": 4
+   },
+   "selfFundedWeightBp": 555
+  },
+  {
+   "name": "sumac",
+   "address": "addr-sumac",
+   "rank": 41,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1122800",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "59000000324679",
+   "voters": 40,
+   "production": {
+    "forged": 6115,
+    "assigned": 6117
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Sumac Nodes",
+    "hosting": "Orbit",
+    "country": "DE",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1679",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 617
+  },
+  {
+   "name": "sycamore",
+   "address": "addr-sycamore",
+   "rank": 26,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "960800",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "74000000205894",
+   "voters": 47,
+   "production": {
+    "forged": 6107,
+    "assigned": 6112
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Sycamore Nodes",
+    "hosting": "Cloudnine",
+    "country": "SG",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1694",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 62
+  },
+  {
+   "name": "tamarack",
+   "address": "addr-tamarack",
+   "rank": 74,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "26000000586006",
+   "voters": 23,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Tamarack Nodes",
+    "hosting": "Cloudnine",
+    "country": "KE",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 38
+  },
+  {
+   "name": "tamarind",
+   "address": "addr-tamarind",
+   "rank": null,
+   "seated": false,
+   "status": "resigned-temporary",
+   "registeredHeight": "809600",
+   "seatedDaysInWindow": 12,
+   "voteWeight": "88000000095028",
+   "voters": 54,
+   "production": {
+    "forged": 2000,
+    "assigned": 2000
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Tamarind Nodes",
+    "hosting": "Hostco",
+    "country": "AU",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1528",
+    "intervals": 4
+   },
+   "selfFundedWeightBp": 444
+  },
+  {
+   "name": "teak",
+   "address": "addr-teak",
+   "rank": 75,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "25000000593925",
+   "voters": 23,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Teak Nodes",
+    "hosting": "Metalbox",
+    "country": "IN",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 75
+  },
+  {
+   "name": "tupelo",
+   "address": "addr-tupelo",
+   "rank": 3,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "712400",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "97000000023757",
+   "voters": 59,
+   "production": {
+    "forged": 6108,
+    "assigned": 6111
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Tupelo Nodes",
+    "hosting": "Metalbox",
+    "country": "FI",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 111
+  },
+  {
+   "name": "walnut",
+   "address": "addr-walnut",
+   "rank": 23,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "928400",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "77000000182137",
+   "voters": 49,
+   "production": {
+    "forged": 6099,
+    "assigned": 6101
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Walnut Nodes",
+    "hosting": "Cloudnine",
+    "country": "FI",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1337",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 851
+  },
+  {
+   "name": "willow",
+   "address": "addr-willow",
+   "rank": 69,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "31000000546411",
+   "voters": 26,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Willow Nodes",
+    "hosting": "Fjordhost",
+    "country": "JP",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 753
+  },
+  {
+   "name": "yew",
+   "address": "addr-yew",
+   "rank": 37,
+   "seated": true,
+   "status": "active",
+   "registeredHeight": "1079600",
+   "seatedDaysInWindow": 30,
+   "voteWeight": "63000000293003",
+   "voters": 42,
+   "production": {
+    "forged": 6115,
+    "assigned": 6119
+   },
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Yew Nodes",
+    "hosting": "Hostco",
+    "country": "AR",
+    "complete": true
+   },
+   "payouts": {
+    "perUnitWeight": "1503",
+    "intervals": 30
+   },
+   "selfFundedWeightBp": 469
+  },
+  {
+   "name": "yuzu",
+   "address": "addr-yuzu",
+   "rank": 67,
+   "seated": false,
+   "status": "standby",
+   "registeredHeight": "4352000",
+   "seatedDaysInWindow": 0,
+   "voteWeight": "33000000530573",
+   "voters": 27,
+   "production": null,
+   "penalties": {
+    "jailedInWindow": false,
+    "equivocationInWindow": false,
+    "ever": false
+   },
+   "declarations": {
+    "operator": "Yuzu Nodes",
+    "hosting": "Self-hosted",
+    "country": "FR",
+    "complete": true
+   },
+   "payouts": null,
+   "selfFundedWeightBp": 679
+  }
+ ]
+}

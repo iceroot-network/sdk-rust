@@ -243,7 +243,12 @@ fn vote_problems_have_reasons_and_values() {
             json!({ "reason": "validator-account" }),
             json!({ "reason": "too-few-entries", "count": 3, "minimum": 20 }),
             json!({ "reason": "name", "validator": "Bad" }),
-            json!({ "reason": "share-too-large", "validator": "vaa", "basisPoints": 1_000, "maximum": 500 }),
+            json!({
+                "reason": "share-too-large",
+                "validator": "vaa",
+                "basisPoints": 1_000,
+                "maximum": 500,
+            }),
             json!({ "reason": "duplicate", "validator": "vaa" }),
             json!({ "reason": "zero-share", "validator": "vaa" }),
             json!({ "reason": "sum", "basisPoints": 1_500 }),

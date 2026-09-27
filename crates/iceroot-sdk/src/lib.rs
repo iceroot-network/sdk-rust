@@ -142,7 +142,10 @@ pub mod voting;
 /// assert_eq!(entries[0].basis_points, 3_334);
 ///
 /// // A mode's selection, refused here with a stable code: the snapshot has no validators.
-/// let request = SelectRequest { rules: VoteRules::SOLAR_COMPATIBLE, ..SelectRequest::new(Mode::Diversity, "holder") };
+/// let request = SelectRequest {
+///     rules: VoteRules::SOLAR_COMPATIBLE,
+///     ..SelectRequest::new(Mode::Diversity, "holder")
+/// };
 /// let refused = select(&snapshot, &request).unwrap_err();
 /// assert_eq!(refused.code(), "NotEnoughValidators");
 /// assert!(matches!(refused, SelectError::NotEnoughValidators { available: 0, .. }));

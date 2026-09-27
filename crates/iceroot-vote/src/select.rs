@@ -2,6 +2,8 @@
 
 use core::fmt;
 
+use serde_json::{Value, json};
+
 use crate::mode::Mode;
 use crate::reason::{Count, Grouped, Reason};
 use crate::rules::{
@@ -181,8 +183,10 @@ impl Selection {
     }
 }
 
-/// Why no selection could be made.
+/// Why no selection could be made. Each variant has a stable code ([`SelectError::code`]) and
+/// structured details ([`SelectError::details`]).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum SelectError {
     /// The requested number of picks is outside [`MIN_PICKS`] to [`MAX_PICKS`], or below the vote
     /// rules' fewest entries.
@@ -280,6 +284,70 @@ impl fmt::Display for SelectError {
 }
 
 impl std::error::Error for SelectError {}
+
+impl SelectError {
+    /// The stable code of the error, as the TypeScript and Go SDKs report it:
+    ///
+    /// | Variant | Code |
+    /// |---|---|
+    /// | [`SelectError::Count`] | `InvalidPickCount` |
+    /// | [`SelectError::ValidatorAccount`] | `ValidatorCannotVote` |
+    /// | [`SelectError::Snapshot`] | `InvalidSnapshot` |
+    /// | [`SelectError::NotEnoughValidators`] | `NotEnoughValidators` |
+    /// | [`SelectError::DoesNotFit`] | `DoesNotFit` |
+    /// | [`SelectError::BreaksRules`] | `BreaksRules` |
+    pub const fn code(&self) -> &'static str {
+        match self {
+            SelectError::Count { .. } => "InvalidPickCount",
+            SelectError::ValidatorAccount => "ValidatorCannotVote",
+            SelectError::Snapshot(error) => error.code(),
+            SelectError::NotEnoughValidators { .. } => "NotEnoughValidators",
+            SelectError::DoesNotFit { .. } => "DoesNotFit",
+            SelectError::BreaksRules { .. } => "BreaksRules",
+        }
+    }
+
+    /// The structured details of the error, as a JSON object. The keys of each code are part of
+    /// the API:
+    ///
+    /// | Code | Details |
+    /// |---|---|
+    /// | `InvalidPickCount` | `count`, `minimum`, `maximum` |
+    /// | `ValidatorCannotVote` | none |
+    /// | `InvalidSnapshot` | as [`SnapshotError::details`] |
+    /// | `NotEnoughValidators` | `requested`, `available` |
+    /// | `DoesNotFit` | `fits`, `minimum`, `maxEntries`, `maxBytes` |
+    /// | `BreaksRules` | `problems`: each as [`Problem::details`] |
+    pub fn details(&self) -> Value {
+        match self {
+            SelectError::Count {
+                count,
+                minimum,
+                maximum,
+            } => json!({ "count": count, "minimum": minimum, "maximum": maximum }),
+            SelectError::ValidatorAccount => json!({}),
+            SelectError::Snapshot(error) => error.details(),
+            SelectError::NotEnoughValidators {
+                requested,
+                available,
+            } => json!({ "requested": requested, "available": available }),
+            SelectError::DoesNotFit {
+                fits,
+                minimum,
+                max_entries,
+                max_bytes,
+            } => json!({
+                "fits": fits,
+                "minimum": minimum,
+                "maxEntries": max_entries,
+                "maxBytes": max_bytes,
+            }),
+            SelectError::BreaksRules { problems } => json!({
+                "problems": problems.iter().map(Problem::details).collect::<Vec<Value>>(),
+            }),
+        }
+    }
+}
 
 impl From<SnapshotError> for SelectError {
     fn from(error: SnapshotError) -> SelectError {

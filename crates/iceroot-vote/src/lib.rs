@@ -29,6 +29,9 @@
 //! picks that no longer meet their criteria, and any new selection is the holder's to review and
 //! sign.
 //!
+//! Every refusal has a stable code and structured details ([`SelectError::code`],
+//! [`SelectError::details`]), as the SDK's other crates give them.
+//!
 //! Everything is a pure function of a [`VoteSnapshot`]: no I/O, no clock, no floating point.
 //! [`VoteSnapshot::from_relay`] builds a snapshot from a node's relay data, which has only
 //! lifetime counters, and marks it [`SnapshotSource::RelayApproximate`]; an indexer supplies

@@ -3,6 +3,8 @@
 use core::cmp::Ordering;
 use core::fmt;
 
+use serde_json::{Value, json};
+
 use crate::snapshot::Voter;
 
 /// The total of a non-empty vote, in basis points: 10,000 is 100 %.
@@ -93,6 +95,7 @@ impl VoteRules {
 
 /// What is wrong with a vote.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Problem {
     /// The account belongs to a validator, and the rules forbid validators to vote.
     ValidatorAccount,
@@ -186,6 +189,60 @@ impl fmt::Display for Problem {
                 f,
                 "the vote takes {bytes} bytes; the limit is {maximum} bytes"
             ),
+        }
+    }
+}
+
+impl Problem {
+    /// A stable string for the problem: `validator-account`, `too-few-entries`,
+    /// `too-many-entries`, `name`, `duplicate`, `zero-share`, `share-too-large`, `sum` or
+    /// `too-large`. Where the core's vote problems have the same meaning, the string is the same.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Problem::ValidatorAccount => "validator-account",
+            Problem::TooFewEntries { .. } => "too-few-entries",
+            Problem::TooManyEntries { .. } => "too-many-entries",
+            Problem::InvalidName { .. } => "name",
+            Problem::DuplicateValidator { .. } => "duplicate",
+            Problem::ZeroShare { .. } => "zero-share",
+            Problem::ShareTooLarge { .. } => "share-too-large",
+            Problem::WrongTotal { .. } => "sum",
+            Problem::TooLarge { .. } => "too-large",
+        }
+    }
+
+    /// The problem as a JSON object: `reason` ([`Problem::as_str`]) and its values, `count`,
+    /// `minimum`, `maximum`, `validator`, `basisPoints` (a share, or the sum of the shares) or
+    /// `bytes`. The keys of each reason are part of the API.
+    pub fn details(&self) -> Value {
+        let reason = self.as_str();
+        match self {
+            Problem::ValidatorAccount => json!({ "reason": reason }),
+            Problem::TooFewEntries { count, minimum } => {
+                json!({ "reason": reason, "count": count, "minimum": minimum })
+            }
+            Problem::TooManyEntries { count, maximum } => {
+                json!({ "reason": reason, "count": count, "maximum": maximum })
+            }
+            Problem::InvalidName { validator }
+            | Problem::DuplicateValidator { validator }
+            | Problem::ZeroShare { validator } => {
+                json!({ "reason": reason, "validator": validator })
+            }
+            Problem::ShareTooLarge {
+                validator,
+                basis_points,
+                maximum,
+            } => json!({
+                "reason": reason,
+                "validator": validator,
+                "basisPoints": basis_points,
+                "maximum": maximum,
+            }),
+            Problem::WrongTotal { total } => json!({ "reason": reason, "basisPoints": total }),
+            Problem::TooLarge { bytes, maximum } => {
+                json!({ "reason": reason, "bytes": bytes, "maximum": maximum })
+            }
         }
     }
 }
@@ -311,6 +368,25 @@ impl fmt::Display for SplitError {
 }
 
 impl std::error::Error for SplitError {}
+
+impl SplitError {
+    /// The stable code of the error, as the TypeScript and Go SDKs report it: `InvalidVote`, the
+    /// core's code for a vote that cannot be made.
+    pub const fn code(&self) -> &'static str {
+        "InvalidVote"
+    }
+
+    /// The structured details of the error, as a JSON object:
+    /// `{ "reason": "too-many-entries", "count": <validators given>, "maximum": 10000 }`, the
+    /// details of the core's vote problem of the same name.
+    pub fn details(&self) -> Value {
+        json!({
+            "reason": "too-many-entries",
+            "count": self.count,
+            "maximum": TOTAL_BASIS_POINTS,
+        })
+    }
+}
 
 /// Share 10,000 basis points among validators in whole basis points, as evenly as possible: the
 /// remainder goes one basis point each to the first validators of the list. The entries come in

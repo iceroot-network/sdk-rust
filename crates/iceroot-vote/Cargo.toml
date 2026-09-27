@@ -9,6 +9,8 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The structured details of the errors, as the SDK's other crates give them.
+serde_json.workspace = true
 sha2.workspace = true
 
 [dev-dependencies]

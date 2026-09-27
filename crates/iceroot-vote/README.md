@@ -48,7 +48,23 @@ Validator accounts cannot vote: `select` refuses an account that belongs to a va
 
 ## Data
 
-Everything is a pure function of a `VoteSnapshot`: no I/O, no clock, no floating point, and one dependency (`sha2`). An indexer supplies windowed production, penalties, declarations and measured payouts. `VoteSnapshot::from_relay` builds a snapshot from a node's relay data, which has only lifetime counters and no declarations, payouts or penalties; it is marked `relay-approximate`, and every selection made from it records that. On such a snapshot Diversity works on rank bands only, Reliability needs a chain with 7 days of seated history, and Maximum Rewards and Support Newcomers top up from Diversity.
+Everything is a pure function of a `VoteSnapshot`: no I/O, no clock, no floating point, and two dependencies (`sha2` for the seed, `serde_json` for the errors' structured details). An indexer supplies windowed production, penalties, declarations and measured payouts. `VoteSnapshot::from_relay` builds a snapshot from a node's relay data, which has only lifetime counters and no declarations, payouts or penalties; it is marked `relay-approximate`, and every selection made from it records that. On such a snapshot Diversity works on rank bands only, Reliability needs a chain with 7 days of seated history, and Maximum Rewards and Support Newcomers top up from Diversity.
+
+## Errors
+
+Each refusal has a stable code and structured details (`code()` and `details()`, a JSON object), as the SDK's other crates give them; the TypeScript and Go SDKs report the same.
+
+| Code | When | Details |
+|---|---|---|
+| `InvalidPickCount` | `count` is outside 20 to 53, or below the rules' fewest entries | `count`, `minimum`, `maximum` |
+| `ValidatorCannotVote` | The account belongs to a validator that has not resigned for good | none |
+| `InvalidSnapshot` | The snapshot cannot be used (`select`, `evaluate`, `check`) | `reason`: `window` (with `days`), `no-seats`, `no-block-time`, `name` or `duplicate-name` (with `name`), `duplicate-address` (with `address`), `inconsistent` (with `name` and `field`, the record's field as the TypeScript SDK names it) |
+| `NotEnoughValidators` | The mode's pool and Diversity's together have fewer validators than requested | `requested`, `available` |
+| `DoesNotFit` | Fewer than 20 picks fit the rules' limits on entries and bytes | `fits`, `minimum`, `maxEntries`, `maxBytes` |
+| `BreaksRules` | The selection breaks the rules' name rule or largest share | `problems`, each as `validate_vote` reports it |
+| `InvalidVote` | `split` of more than 10,000 validators | `reason` (`too-many-entries`), `count`, `maximum` |
+
+`validate_vote` returns problems rather than an error. Each has a `reason` and its values: `validator-account`, `too-few-entries` and `too-many-entries` (`count`, `minimum` or `maximum`), `name`, `duplicate` and `zero-share` (`validator`), `share-too-large` (`validator`, `basisPoints`, `maximum`), `sum` (`basisPoints`, the total) and `too-large` (`bytes`, `maximum`). Where the SDK core's vote problems have the same meaning, the reason is the same.
 
 ## Example
 
@@ -86,6 +102,7 @@ for finding in check(&selection, &newer_snapshot)? {
 - attempts to game the draw, each with bounds on pick frequencies over 2,000 selections: validators that invent unique declarations, a crowd that declares nothing, a few that declare nothing among validators that all invent unique values, a small last rank band, one very large payer (up to a billion times the next best), floods of 20, 53 and 100 standby validators without votes that declare nothing or invent unique values, and a party of 30 validators ranked just below the cutoff under one operator name and under different names;
 - the size limits of both stages, with long names, and rules whose name rule or largest share a selection breaks;
 - a devnet-shaped snapshot from relay data (`tests/data/devnet-relay.json`), including a fresh chain where Reliability tops up;
-- top-up and `check` cases.
+- top-up and `check` cases;
+- the code and details of every refusal and every problem `validate_vote` reports.
 
 The fixtures use the JSON shape of the TypeScript API (camelCase, 64- and 128-bit integers as decimal strings), so other bindings can run the same vectors.

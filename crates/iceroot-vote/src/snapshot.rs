@@ -2,6 +2,8 @@
 
 use core::fmt;
 
+use serde_json::{Value, json};
+
 use crate::rules::is_solar_compatible_name;
 
 /// The length of the rolling window, in days, that windowed data covers.
@@ -230,8 +232,9 @@ pub struct VoteSnapshot {
     pub records: Vec<ValidatorRecord>,
 }
 
-/// Why a snapshot cannot be used.
+/// Why a snapshot cannot be used. Its code is `InvalidSnapshot` ([`SnapshotError::code`]).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum SnapshotError {
     /// The window is not [`WINDOW_DAYS`] days.
     Window {
@@ -289,6 +292,56 @@ impl fmt::Display for SnapshotError {
 }
 
 impl std::error::Error for SnapshotError {}
+
+impl SnapshotError {
+    /// The stable code of the error, as the TypeScript and Go SDKs report it: `InvalidSnapshot`
+    /// for every problem, which [`SnapshotError::as_str`] names.
+    pub const fn code(&self) -> &'static str {
+        "InvalidSnapshot"
+    }
+
+    /// A stable string for the problem: `window`, `no-seats`, `no-block-time`, `name`,
+    /// `duplicate-name`, `duplicate-address` or `inconsistent`.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            SnapshotError::Window { .. } => "window",
+            SnapshotError::NoSeats => "no-seats",
+            SnapshotError::NoBlockTime => "no-block-time",
+            SnapshotError::InvalidName { .. } => "name",
+            SnapshotError::DuplicateName { .. } => "duplicate-name",
+            SnapshotError::DuplicateAddress { .. } => "duplicate-address",
+            SnapshotError::Inconsistent { .. } => "inconsistent",
+        }
+    }
+
+    /// The structured details of the error, as a JSON object: `reason` ([`SnapshotError::as_str`])
+    /// and the problem's values, `days`, `name`, `address`, or `name` and `field` for an
+    /// inconsistent record, where `field` is the record's field as the TypeScript SDK names it
+    /// (`production`, `seatedDaysInWindow`, `registeredHeight`, `selfFundedWeightBp` or
+    /// `status`). The keys of each reason are part of the API.
+    pub fn details(&self) -> Value {
+        let reason = self.as_str();
+        match self {
+            SnapshotError::Window { days } => json!({ "reason": reason, "days": days }),
+            SnapshotError::NoSeats | SnapshotError::NoBlockTime => json!({ "reason": reason }),
+            SnapshotError::InvalidName { name } | SnapshotError::DuplicateName { name } => {
+                json!({ "reason": reason, "name": name })
+            }
+            SnapshotError::DuplicateAddress { address } => {
+                json!({ "reason": reason, "address": address })
+            }
+            SnapshotError::Inconsistent { name, field } => {
+                let field = match *field {
+                    "seated days" => "seatedDaysInWindow",
+                    "registration height" => "registeredHeight",
+                    "self-funded share" => "selfFundedWeightBp",
+                    other => other,
+                };
+                json!({ "reason": reason, "name": name, "field": field })
+            }
+        }
+    }
+}
 
 impl VoteSnapshot {
     /// Check that the snapshot can be used: a 30-day window, seats and a block time, unique valid

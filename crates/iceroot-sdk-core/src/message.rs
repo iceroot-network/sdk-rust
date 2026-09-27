@@ -53,6 +53,26 @@ pub fn sign_with(
     message: &str,
     aux: Aux,
 ) -> Result<MessageSignature, Error> {
+    sign_bytes_with(profile, account, message.as_bytes(), aux)
+}
+
+/// [`sign`] for a message given as bytes: the signature covers the SHA-256 of exactly these
+/// bytes. A text message is signed as its UTF-8 bytes, so for text both functions agree.
+pub fn sign_bytes(
+    profile: &Profile,
+    account: &Account,
+    message: &[u8],
+) -> Result<MessageSignature, Error> {
+    sign_bytes_with(profile, account, message, Aux::random())
+}
+
+/// [`sign_bytes`] with the auxiliary randomness `aux`. Outside tests only [`Aux::random`] exists.
+pub fn sign_bytes_with(
+    profile: &Profile,
+    account: &Account,
+    message: &[u8],
+    aux: Aux,
+) -> Result<MessageSignature, Error> {
     profile.require(Capability::MessageSigning)?;
     if account.profile() != profile.id() {
         return Err(Error::NetworkMismatch {
@@ -62,7 +82,7 @@ pub fn sign_with(
             },
         });
     }
-    let signature = sign_digest(account, &sha256(message.as_bytes()), aux)?;
+    let signature = sign_digest(account, &sha256(message), aux)?;
     Ok(MessageSignature {
         public_key: account.public_key().to_hex(),
         signature: signature.to_hex(),
@@ -92,6 +112,11 @@ pub fn sign_digest(account: &Account, digest: &[u8; 32], aux: Aux) -> Result<Sig
 /// verifies for the SHA-256 of the message under the public key. Malformed hex is a failed check,
 /// never an error. The network is the caller's to compare.
 pub fn verify(message: &str, signature: &MessageSignature) -> bool {
+    verify_bytes(message.as_bytes(), signature)
+}
+
+/// [`verify`] for a message given as bytes.
+pub fn verify_bytes(message: &[u8], signature: &MessageSignature) -> bool {
     if signature.algorithm != ALGORITHM {
         return false;
     }
@@ -101,7 +126,7 @@ pub fn verify(message: &str, signature: &MessageSignature) -> bool {
     let Ok(signature) = Signature::from_hex(&signature.signature) else {
         return false;
     };
-    verify_digest(&sha256(message.as_bytes()), &signature, &public_key)
+    verify_digest(&sha256(message), &signature, &public_key)
 }
 
 /// Whether `signature` is a BIP340 signature of the 32-byte `digest` for `public_key`, read as
@@ -188,6 +213,9 @@ mod tests {
         }
         let random = sign(&profile, &account, "fresh").unwrap();
         assert!(verify("fresh", &random));
+        let bytes = sign_bytes(&profile, &account, &[0xff, 0x00]).unwrap();
+        assert!(verify_bytes(&[0xff, 0x00], &bytes));
+        assert!(!verify_bytes(&[0xff], &bytes));
     }
 
     #[test]

@@ -12,7 +12,8 @@
 //! - the vote selection library ([`vote`], the crate `iceroot_vote`): the four vote modes that
 //!   fill a vote for the holder to review, the network's vote rules and the check that reports
 //!   picks that no longer meet their criteria, as pure functions; [`voting`] gives it the rules
-//!   in force and a snapshot of a node's validator list;
+//!   in force and a snapshot of a node's validator list, without the validators a vote may not
+//!   name;
 //! - the keystore (`keystore`, the crate `iceroot_keystore`, feature `keystore`, on by
 //!   default): a recovery phrase's entropy ([`Mnemonic::entropy`](phrase::Mnemonic::entropy))
 //!   encrypted under a password with Argon2id and XChaCha20-Poly1305. A server that never holds

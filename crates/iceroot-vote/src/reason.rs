@@ -150,7 +150,9 @@ pub enum Reason {
 /// One criterion a validator fails. [`fmt::Display`] gives a plain English sentence.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Shortfall {
-    /// The validator is not in the snapshot any more.
+    /// The validator is not in the snapshot any more: it is no longer registered, or a snapshot of
+    /// a node's validator list left it out because a vote may not name it now (its node has not
+    /// been seen running).
     NotInSnapshot,
     /// The validator resigned.
     Resigned {
@@ -505,7 +507,9 @@ impl fmt::Display for Reason {
 impl fmt::Display for Shortfall {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Shortfall::NotInSnapshot => f.write_str("No longer a registered validator"),
+            Shortfall::NotInSnapshot => {
+                f.write_str("No longer among the validators a vote can name")
+            }
             Shortfall::Resigned { status } => write!(f, "Validator {status}"),
             Shortfall::PenalizedInWindow {
                 jailed,

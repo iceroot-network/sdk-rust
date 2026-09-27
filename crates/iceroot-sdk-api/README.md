@@ -53,13 +53,53 @@ let validators = client.send(&api.validators(Default::default())).await?;
 # }
 ```
 
+## Feature `serde`
+
+With `serde`, the request values (`Request`, `Response`, `Relay`, `PageRequest`, `TxFilter`, `BlockRef`, `HistoryDirection`, `SubmitTx`) and every answer implement `Serialize` and `Deserialize`. The client stays sans-IO; the feature adds no dependency. The JSON form is the one every binding of the SDK exchanges, so it is the same for every language:
+
+- field names in camel case (`senderPublicKey`), enum values as lower-case words joined by hyphens (`resigned-temporary`, `low-fee`);
+- integers of 64 bits and more (amounts, nonces, heights, times, lifetime counters) as decimal strings, which JavaScript numbers could not hold exactly; smaller integers (ranks, basis points, page numbers, sizes, wire types) as numbers;
+- absent optional values left out;
+- asset ids as `ROOT` or 64 hex digits;
+- a transaction kind as a `kind` field, with `typeGroup` and `typeId` beside it for `other`; transaction details tagged by `kind`, and submission outcomes by `status` (`accepted` or `rejected`) next to the transaction's `id`.
+
+A transfer from the recorded devnet fixtures, as `serde_json` writes it:
+
+```json
+{
+  "id": "b2abe2cabab608935280c144a15ebea3e4e8348c530a983ffbf6013a13ab54a9",
+  "status": "confirmed",
+  "block": {
+    "id": "04bc52da30e3fcc46da881d48f9d50b6754befc6fdfe8faf6746f3591b8741ba",
+    "height": "82",
+    "confirmations": "1",
+    "time": { "chain": "648", "unix": "1790484455" }
+  },
+  "sender": "daTBxkSJk2tZhujYcYSQtxj5RRFZ8HcxW8",
+  "senderPublicKey": "03f5679f03b0f7569d29708aed1ce026a0a2c1aa4145f6aa51a3298253d58d725f",
+  "nonce": "1",
+  "fee": "2000000",
+  "burnedFee": "1800000",
+  "memo": "fixture: two recipients",
+  "secondSigned": false,
+  "version": 3,
+  "details": {
+    "kind": "transfer",
+    "recipients": [
+      { "address": "dZ1W1GsDCSyhR148oMhuHy3PkhnnSGCqVn", "amount": "1000000000" },
+      { "address": "dMVgdVMdEWR2rVH6RRgXqheywVTzbgLNyG", "amount": "2000000000" }
+    ]
+  }
+}
+```
+
 ## Tests
 
 ```sh
 cargo test -p iceroot-sdk-api --all-features
 ```
 
-The mappers are tested against responses recorded from a local devnet (`tests/fixtures/devnet`). `tests/live.rs` runs every call against a running node when `ICEROOT_SDK_LIVE_RELAY` names its API:
+The mappers are tested against responses recorded from a local devnet (`tests/fixtures/devnet`), and `tests/serde.rs` writes every decoded answer as JSON and reads it back unchanged. `tests/live.rs` runs every call against a running node when `ICEROOT_SDK_LIVE_RELAY` names its API:
 
 ```sh
 ICEROOT_SDK_LIVE_RELAY=http://127.0.0.1:4003/api cargo test -p iceroot-sdk-api --features http --test live -- --ignored

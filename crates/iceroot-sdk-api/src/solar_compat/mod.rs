@@ -24,10 +24,34 @@ use crate::types::{
 pub const MAX_PAGE_LIMIT: u32 = 100;
 
 /// Which page of a listing to fetch.
+///
+/// With the feature `serde` it is `{ page, limit }`, checked as [`PageRequest::new`] checks it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(try_from = "PageFields")
+)]
 pub struct PageRequest {
     page: u32,
     limit: u32,
+}
+
+/// The fields of a [`PageRequest`] before they are checked.
+#[cfg(feature = "serde")]
+#[derive(serde::Deserialize)]
+struct PageFields {
+    page: u32,
+    limit: u32,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<PageFields> for PageRequest {
+    type Error = ApiError;
+
+    fn try_from(fields: PageFields) -> Result<PageRequest, ApiError> {
+        PageRequest::new(fields.page, fields.limit)
+    }
 }
 
 impl PageRequest {
@@ -89,27 +113,75 @@ impl Default for PageRequest {
 }
 
 /// Filters for [`SolarCompat::transactions`]. Every field narrows the listing.
+///
+/// With the feature `serde` it is `{ sender?, recipient?, kind?, typeGroup?, typeId?, blockId?,
+/// oldestFirst? }`, the kind written as everywhere else (see the crate documentation).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "camelCase")
+)]
 pub struct TxFilter {
     /// Only transactions from this address.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub sender: Option<String>,
     /// Only transactions whose primary recipient is this address. Transfers to several recipients
     /// are listed for an account by [`SolarCompat::history`] instead.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub recipient: Option<String>,
     /// Only this kind.
+    #[cfg_attr(feature = "serde", serde(flatten))]
     pub kind: Option<TxKind>,
     /// Only transactions of this block (by id).
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
     pub block_id: Option<String>,
     /// Newest first (the default) or oldest first.
+    #[cfg_attr(feature = "serde", serde(default))]
     pub oldest_first: bool,
 }
 
 /// A signed transaction ready for submission.
+///
+/// With the feature `serde` it is `{ id, json, size }`, `json` being the transaction's JSON object
+/// itself, checked as [`SubmitTx::new`] checks it.
 #[derive(Debug, Clone)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(try_from = "SubmitFields")
+)]
 pub struct SubmitTx {
     id: String,
     json: Box<RawValue>,
     size: usize,
+}
+
+/// The fields of a [`SubmitTx`] before they are checked.
+#[cfg(feature = "serde")]
+#[derive(serde::Deserialize)]
+struct SubmitFields {
+    id: String,
+    json: Box<RawValue>,
+    size: usize,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<SubmitFields> for SubmitTx {
+    type Error = ApiError;
+
+    fn try_from(fields: SubmitFields) -> Result<SubmitTx, ApiError> {
+        SubmitTx::new(fields.id, fields.json.get(), fields.size)
+    }
 }
 
 impl SubmitTx {
@@ -886,6 +958,64 @@ mod tests {
         max_transactions_per_request: 40,
         ..LIMITS
     };
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn request_values_as_json() {
+        use serde_json::json;
+
+        let page: PageRequest = serde_json::from_value(json!({ "page": 2, "limit": 25 })).unwrap();
+        assert_eq!(page, PageRequest::new(2, 25).unwrap());
+        assert_eq!(
+            serde_json::to_value(page).unwrap(),
+            json!({ "page": 2, "limit": 25 })
+        );
+        for bad in [
+            json!({ "page": 0, "limit": 1 }),
+            json!({ "page": 1, "limit": 101 }),
+        ] {
+            assert!(serde_json::from_value::<PageRequest>(bad).is_err());
+        }
+
+        let filter = TxFilter {
+            sender: Some("dA".into()),
+            kind: Some(TxKind::Other {
+                type_group: 1,
+                type_id: 4,
+            }),
+            oldest_first: true,
+            ..TxFilter::default()
+        };
+        let value = serde_json::to_value(&filter).unwrap();
+        assert_eq!(
+            value,
+            json!({ "sender": "dA", "kind": "other", "typeGroup": 1, "typeId": 4, "oldestFirst": true })
+        );
+        assert_eq!(serde_json::from_value::<TxFilter>(value).unwrap(), filter);
+        assert_eq!(
+            serde_json::from_value::<TxFilter>(json!({})).unwrap(),
+            TxFilter::default()
+        );
+        assert_eq!(
+            serde_json::from_value::<TxFilter>(json!({ "kind": "vote", "blockId": "ab" })).unwrap(),
+            TxFilter {
+                kind: Some(TxKind::Vote),
+                block_id: Some("ab".into()),
+                ..TxFilter::default()
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(TxFilter::default()).unwrap(),
+            json!({ "oldestFirst": false })
+        );
+
+        let text = r#"{"id":"a1","json":{"id":"a1","fee":"5"},"size":120}"#;
+        let tx: SubmitTx = serde_json::from_str(text).unwrap();
+        assert_eq!((tx.id(), tx.size()), ("a1", 120));
+        assert_eq!(serde_json::to_string(&tx).unwrap(), text);
+        assert!(serde_json::from_str::<SubmitTx>(r#"{"id":"a 1","json":{},"size":1}"#).is_err());
+        assert!(serde_json::from_str::<SubmitTx>(r#"{"id":"a1","json":[],"size":1}"#).is_err());
+    }
 
     #[test]
     fn unreported_transaction_is_a_bad_response() {

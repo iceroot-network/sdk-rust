@@ -12,7 +12,7 @@ The SDK is in early development. Releases are tagged here on GitHub; nothing is 
 |---|---|
 | `iceroot-sdk` | The one crate applications depend on. It re-exports the others. |
 | `iceroot-sdk-core` | Network profiles and capabilities, the rules and economics in force, BIP39 recovery phrases and hardened key derivation, accounts, addresses, amounts, transaction drafts and signing, serialized drafts, message signing and the sign-in message, and the error type with its stable codes. No input or output: it reads what the node API client decodes (the chain, a draft's nonce, height and second key, fee statistics, submission outcomes) and checks it on the way. |
-| `iceroot-sdk-api` | A sans-IO node API client: it builds each request and decodes each answer into IceRoot-shaped values (accounts, validators, transactions, blocks, node facts), and plans submissions within the pool's limits. The host performs the HTTP exchange; the optional `http` feature adds an async reqwest transport on native targets. See [its README](crates/iceroot-sdk-api/README.md). |
+| `iceroot-sdk-api` | A sans-IO node API client: it builds each request and decodes each answer into IceRoot-shaped values (accounts, validators, transactions, blocks, node facts), and plans submissions within the pool's limits. The host performs the HTTP exchange; the optional `http` feature adds an async reqwest transport on native targets, and the optional `serde` feature gives every request value and answer the JSON form the SDK's bindings share. See [its README](crates/iceroot-sdk-api/README.md). |
 
 Every byte and verdict of a key, address, signature or transaction comes from `heartwood-crypto`. The SDK adds only client code and never enables a `heartwood-crypto` feature; `tools/check-deps.sh` enforces that, and keeps Heartwood Core's consensus crates out of the dependency tree.
 
@@ -33,6 +33,9 @@ Releases are tags of this repository, `v0.1.0`, `v0.2.0` and so on, each with a 
 iceroot-sdk = { git = "https://github.com/iceroot-network/sdk-rust", tag = "v0.1.0" }
 # With the async HTTP transport (native targets only):
 # iceroot-sdk = { git = "https://github.com/iceroot-network/sdk-rust", tag = "v0.1.0", features = ["http"] }
+# With Serialize and Deserialize on the node API client's values (for example to hand them to a
+# web page as JSON):
+# iceroot-sdk = { git = "https://github.com/iceroot-network/sdk-rust", tag = "v0.1.0", features = ["serde"] }
 ```
 
 `Cargo.lock` then records the exact commit. Nothing is published to crates.io yet. JavaScript and TypeScript applications use the package of [sdk-typescript](https://github.com/iceroot-network/sdk-typescript) instead: its release of the same version attaches the npm package tarball, built from this release, which installs by URL with `npm install https://github.com/iceroot-network/sdk-typescript/releases/download/v0.1.0/iceroot-network-sdk-0.1.0.tgz`.

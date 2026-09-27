@@ -7,9 +7,12 @@
 // <reference checkout> is a built checkout of the reference implementation (its packages/crypto
 // has dist/ and node_modules/): the phrases, seeds and hardened derivations come from the
 // libraries it uses itself (bip39 and @scure/bip32), and the passphrase keys, addresses and
-// message signatures from its crypto package. <browser wallet checkout> holds the wallet's
-// signing-protocol.js, whose checks give the verdicts of the sign-in vectors. The output is
-// deterministic: running it again gives the same files.
+// message signatures from its crypto package. The transactions are built and signed by its own
+// transaction builders, and their fee floors come from its own transaction handlers
+// (packages/transactions), under the devnet chain of Heartwood Core's vectors. <browser wallet
+// checkout> holds the wallet's signing-protocol.js, whose checks give the verdicts of the sign-in
+// vectors. The reference needs Node 18. The output is deterministic: running it again gives the
+// same files.
 //
 // Every file is in the heartwood-vectors/1 record format: a meta record, then one record per
 // case, {"op", "network", "height", "name", "input", "output"} or the same with "error" in place
@@ -375,11 +378,304 @@ function signIn() {
     write('S04-signin', records, { signingProtocolSha256: hex(sha256(fs.readFileSync(protocolFile))) });
 }
 
+// ---- transactions -------------------------------------------------------------------------------
+//
+// The classes below run the reference's transaction builders and handlers under the devnet chain
+// that Heartwood Core's vectors use: the network description and milestones of the first chain of
+// its V10 class, whose milestones hash the meta record names. Signatures take the fixed aux 0x42 x
+// 32, as Heartwood Core's oracle signs; the SDK signs its drafts with the same aux to compare.
+
+const TX_HEIGHT = 2;
+const FIXED_AUX = Buffer.alloc(32, 0x42);
+const RESIGNATION_TYPES = { temporary: 0, permanent: 1, revoke: 2 };
+
+let devnetChain;
+function devnet() {
+    if (!devnetChain) {
+        const genesis = fs
+            .readFileSync(path.join(__dirname, '..', '..', 'vectors', 'heartwood', 'V10-genesis.jsonl'), 'utf8')
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line))
+            .find((r) => r.op === 'genesis.generate');
+        const files = genesis.output.files;
+        const config = {
+            network: JSON.parse(files['crypto/network.json']),
+            milestones: JSON.parse(files['crypto/milestones.json']),
+            genesisBlock: JSON.parse(files['crypto/genesisBlock.json']),
+            exceptions: JSON.parse(files['crypto/exceptions.json']),
+        };
+        reference.Managers.configManager.setConfig(config);
+        reference.Managers.configManager.setHeight(TX_HEIGHT);
+        check(config.network.pubKeyHash === NETWORK_BYTE, 'the devnet network byte');
+        // Signatures of the transaction builders, which pass no aux, take the fixed aux. Only in
+        // this process; the other classes pass their aux explicitly.
+        const Hash = reference.Crypto.Hash;
+        const original = Hash.signSchnorrBip340;
+        Hash.signSchnorrBip340 = (hash, keys, aux) => original.call(Hash, hash, keys, aux ?? FIXED_AUX);
+        devnetChain = {
+            milestonesSha256: hex(sha256(files['crypto/milestones.json'])),
+            wif: config.network.wif,
+        };
+    }
+    return devnetChain;
+}
+
+let registry;
+// The reference's transaction handlers, without the node's container: each handler's
+// getMinimumFee is the pool's fee floor, and it reads nothing but the transaction and the table.
+function handlerRegistry() {
+    if (!registry) {
+        const transactionsDir = path.join(referenceDir, 'packages', 'transactions');
+        const { Handlers } = require(path.join(transactionsDir, 'dist', 'index.js'));
+        const shared = require(require.resolve('@solar-network/crypto', { paths: [transactionsDir] }));
+        check(shared === reference, 'the transaction handlers load the same crypto package');
+        registry = Object.create(Handlers.Registry.prototype);
+        registry.provider = { isRegistrationRequired: () => false, registerHandlers: () => {} };
+        registry.handlers = [...Object.values(Handlers.Core), ...Object.values(Handlers.Solar)].map((H) =>
+            Object.create(H.prototype),
+        );
+    }
+    return registry;
+}
+
+/** The reference's fee floor of a built transaction at the vectors' height. */
+function minimumFee(tx) {
+    const type = reference.Transactions.InternalTransactionType.from(tx.data.type, tx.data.typeGroup);
+    const handler = handlerRegistry().getRegisteredHandlerByType(type);
+    const table = reference.Managers.configManager.getMilestone(TX_HEIGHT).dynamicFees;
+    return handler.getMinimumFee(tx, table).toString();
+}
+
+// Signers: legacy passphrase keys (the devnet tooling's genesis wallets are such keys) and new
+// accounts, derived with hardened steps from a recovery phrase.
+const PASSPHRASE = 'this is a top secret passphrase';
+const SECOND_PASSPHRASE = 'heartwood message domain';
+const WALLET_PHRASE = bip39.entropyToMnemonic(entropy('transactions 24', 32));
+const WALLET_PHRASE_18 = bip39.entropyToMnemonic(entropy('transactions 18', 24));
+
+function signer(spec) {
+    if (spec.passphrase !== undefined && spec.mnemonic === undefined) {
+        const key = legacyKey(spec.passphrase);
+        return { spec, keys: key.keys, publicKey: key.publicKey, address: key.address };
+    }
+    const seed = bip39.mnemonicToSeedSync(spec.mnemonic, spec.passphrase);
+    const node = HDKey.fromMasterSeed(seed).derive(`m/44'/1'/${spec.account}'/0'/${spec.index}'`);
+    const keys = reference.Identities.Keys.fromPrivateKey(hex(node.privateKey));
+    const publicKey = keys.publicKey.secp256k1;
+    return { spec, keys, publicKey, address: reference.Identities.Address.fromPublicKey(publicKey, NETWORK_BYTE) };
+}
+
+const legacySigner = (passphrase) => signer({ passphrase });
+const walletSigner = (account, index, mnemonic = WALLET_PHRASE, passphrase = '') =>
+    signer({ mnemonic, passphrase, account, index });
+
+// Recipients: addresses of legacy keys, so that anyone can check them.
+const recipient = (n) => legacyKey(`iceroot-sdk vectors/recipient ${n}`).address;
+const validator = (n) => `genesis_${n}`;
+
+/**
+ * The reference's transaction for an SDK request, or the error it throws. `second` signs as the
+ * sender's second key. The fee is `fee` when given, else the reference's own floor of the
+ * transaction (built once to learn its size; the fee field has a fixed width).
+ */
+function referenceTransaction({ operation, memo, nonce, fee }, sender, second) {
+    const B = reference.Transactions.BuilderFactory;
+    const build = (feeText) => {
+        let b;
+        switch (operation.kind) {
+            case 'transfer':
+                b = B.transfer();
+                for (const { address, amount } of operation.to) {
+                    b = b.addTransfer(address, amount);
+                }
+                break;
+            case 'vote':
+                b = B.vote().votesAsset(
+                    Object.fromEntries(operation.entries.map(({ validator: name, basisPoints }) => [name, basisPoints / 100])),
+                );
+                break;
+            case 'burn':
+                b = B.burn().amount(operation.amount);
+                break;
+            case 'register-second-key':
+                b = B.secondSignature();
+                b.data.asset.signature.publicKey = operation.publicKey;
+                break;
+            case 'register-validator':
+                b = B.delegateRegistration().usernameAsset(operation.name);
+                break;
+            case 'resign-validator':
+                b = B.delegateResignation().resignationTypeAsset(RESIGNATION_TYPES[operation.resignation]);
+                break;
+            default:
+                throw new Error(`no builder for ${operation.kind}`);
+        }
+        b = b.nonce(nonce).fee(feeText);
+        if (memo !== null) {
+            b = b.memo(memo);
+        }
+        b = sender.spec.mnemonic === undefined
+            ? b.sign(sender.spec.passphrase)
+            : b.signWithWif(reference.Identities.WIF.fromKeys(sender.keys, { wif: devnet().wif }));
+        if (second !== undefined) {
+            b = b.secondSign(second.spec.passphrase);
+        }
+        return b.build();
+    };
+    const floor = minimumFee(build('1'));
+    const tx = build(fee ?? floor);
+    check(tx.isVerified, `the reference verifies its own ${operation.kind}`);
+    const unsigned = reference.Transactions.Serialiser.getBytes(tx.data, { excludeSignature: true, excludeSecondSignature: true });
+    return { tx, floor, unsigned: hex(unsigned) };
+}
+
+/** A case of S05 or S06: the SDK's request and facts, and the reference's outcome. */
+function transactionCase(op, name, { operation, memo = null, sender, second, nonce = '1', fee }, output) {
+    const request = { operation, memo, nonce, fee };
+    const input = {
+        signer: sender.spec,
+        ...(second === undefined ? {} : { secondSigner: second.spec }),
+        request: { operation, memo },
+        facts: { nonce, height: TX_HEIGHT, ...(second === undefined ? {} : { secondKey: second.publicKey }) },
+        aux: hex(FIXED_AUX),
+    };
+    let built;
+    try {
+        built = referenceTransaction(request, sender, second);
+    } catch (error) {
+        return {
+            op, network: 'devnet', height: TX_HEIGHT, name, input,
+            error: { class: error.constructor.name, message: String(error.message) },
+        };
+    }
+    input.request.fee = { kind: 'exact', amount: built.tx.data.fee.toString() };
+    return { op, network: 'devnet', height: TX_HEIGHT, name, input, output: output(built) };
+}
+
+// S05: transactions of the six operations, signed by legacy and derived keys, with and without a
+// second signature, at the edges the rules draw: recipients, memo bytes and vote entries. Each pays
+// exactly the reference's fee floor. Requests the reference refuses are recorded with its error.
+function transactions() {
+    const chain = devnet();
+    const legacy = legacySigner(PASSPHRASE);
+    const secondKey = legacySigner(SECOND_PASSPHRASE);
+    const wallet = walletSigner(0, 0);
+    const walletPassphrase = walletSigner(3, 7, WALLET_PHRASE_18, 'TREZOR');
+    const transfer = (count, amount = (i) => String(100000000 + i)) => ({
+        kind: 'transfer',
+        to: Array.from({ length: count }, (_, i) => ({ address: recipient(i), amount: amount(i) })),
+    });
+    const vote = (count, basisPoints) => ({
+        kind: 'vote',
+        // Given in reverse order: the SDK and the reference both sort the entries.
+        entries: Array.from({ length: count }, (_, i) => ({ validator: validator(count - i), basisPoints: basisPoints(count - 1 - i) })),
+    });
+    const even = (count) => (i) => Math.trunc(10000 / count) + (i < 10000 % count ? 1 : 0);
+    const cases = [
+        ['transfer to one recipient', { operation: transfer(1), sender: legacy }],
+        ['transfer to one recipient, empty memo', { operation: transfer(1), memo: '', sender: legacy }],
+        ['transfer to one recipient, one-byte memo', { operation: transfer(1), memo: 'x', sender: legacy }],
+        ['transfer to two recipients, 255-byte memo', { operation: transfer(2), memo: 'm'.repeat(255), sender: wallet }],
+        ['transfer, 255-byte memo of 3-byte characters', { operation: transfer(1), memo: '✓'.repeat(85), sender: wallet }],
+        ['transfer, 256-byte memo', { operation: transfer(1), memo: 'm'.repeat(256), sender: wallet }],
+        ['transfer, 256-byte memo of 4-byte characters', { operation: transfer(1), memo: '\u{1F332}'.repeat(64), sender: wallet }],
+        ['transfer to 256 recipients', { operation: transfer(256, (i) => String(i + 1)), sender: wallet, nonce: '42' }],
+        ['transfer to 257 recipients', { operation: transfer(257, (i) => String(i + 1)), sender: wallet }],
+        ['transfer from a derived account with a BIP39 passphrase', { operation: transfer(3), memo: 'derived', sender: walletPassphrase }],
+        ['transfer signed with a second key', { operation: transfer(1), memo: 'second', sender: legacy, second: secondKey }],
+        ['transfer to two recipients from a derived account, second-signed', { operation: transfer(2), sender: wallet, second: secondKey, nonce: '9' }],
+        ['vote for one validator', { operation: vote(1, () => 10000), sender: legacy }],
+        ['vote for 20 validators at 500 basis points', { operation: vote(20, () => 500), sender: wallet }],
+        ['vote for 53 validators', { operation: vote(53, even(53)), sender: wallet }],
+        ['vote for 54 validators', { operation: vote(54, even(54)), sender: wallet }],
+        ['vote withdrawal', { operation: { kind: 'vote', entries: [] }, sender: wallet }],
+        ['vote, second-signed', { operation: vote(3, (i) => [5000, 2500, 2500][i]), sender: legacy, second: secondKey }],
+        ['burn of the smallest amount', { operation: { kind: 'burn', amount: '2000000' }, sender: legacy }],
+        ['burn with a memo, second-signed', { operation: { kind: 'burn', amount: '123456789' }, memo: 'burn', sender: wallet, second: secondKey }],
+        ['second key registration', { operation: { kind: 'register-second-key', publicKey: secondKey.publicKey }, sender: wallet }],
+        ['validator registration', { operation: { kind: 'register-validator', name: 'sdk_validator' }, sender: wallet }],
+        ['validator registration, second-signed', { operation: { kind: 'register-validator', name: 'a.b!c@d$e&f_1' }, sender: legacy, second: secondKey }],
+        ['temporary resignation', { operation: { kind: 'resign-validator', resignation: 'temporary' }, sender: wallet }],
+        ['permanent resignation', { operation: { kind: 'resign-validator', resignation: 'permanent' }, sender: legacy }],
+        ['revoke of a resignation, second-signed', { operation: { kind: 'resign-validator', resignation: 'revoke' }, sender: wallet, second: secondKey }],
+    ];
+    const records = cases.map(([name, spec]) =>
+        transactionCase('sdk.transaction', name, spec, ({ tx, unsigned }) => ({
+            unsigned,
+            size: tx.serialised.length,
+            id: tx.id,
+            hex: tx.serialised.toString('hex'),
+            json: JSON.parse(JSON.stringify(tx.toJson())),
+        })),
+    );
+    write('S05-transactions', records, { network: { name: 'devnet', pubKeyHash: NETWORK_BYTE, milestonesSha256: chain.milestonesSha256 }, aux: hex(FIXED_AUX) });
+}
+
+// S06: the fee floor of every operation at sizes around the rounding of half the size: memos of
+// 0 to 3 bytes and of 254 and 255 bytes, with and without a second signature, plus transfers and
+// votes of a few more entries. The transaction pays its floor.
+function feeFloors() {
+    const chain = devnet();
+    const legacy = legacySigner(PASSPHRASE);
+    const secondKey = legacySigner(SECOND_PASSPHRASE);
+    const wallet = walletSigner(0, 0);
+    const operations = [
+        ['transfer', { kind: 'transfer', to: [{ address: recipient(0), amount: '100000000' }] }],
+        ['transfer to three recipients', { kind: 'transfer', to: [0, 1, 2].map((i) => ({ address: recipient(i), amount: '1' })) }],
+        ['vote', { kind: 'vote', entries: [{ validator: validator(7), basisPoints: 10000 }] }],
+        ['vote for two', { kind: 'vote', entries: [{ validator: validator(12), basisPoints: 4000 }, { validator: validator(3), basisPoints: 6000 }] }],
+        ['vote withdrawal', { kind: 'vote', entries: [] }],
+        ['burn', { kind: 'burn', amount: '2000000' }],
+        ['second key registration', { kind: 'register-second-key', publicKey: secondKey.publicKey }],
+        ['validator registration', { kind: 'register-validator', name: 'floor_validator' }],
+        ['temporary resignation', { kind: 'resign-validator', resignation: 'temporary' }],
+        ['revoke', { kind: 'resign-validator', resignation: 'revoke' }],
+    ];
+    const records = [];
+    for (const [label, operation] of operations) {
+        for (const memoBytes of [0, 1, 2, 3, 254, 255]) {
+            for (const [sender, second, how] of [
+                [wallet, undefined, 'single'],
+                [legacy, secondKey, 'second-signed'],
+            ]) {
+                // Registering a second key is refused by the rules when the sender already has one.
+                if (operation.kind === 'register-second-key' && second !== undefined) {
+                    continue;
+                }
+                const memo = memoBytes === 0 ? null : 'f'.repeat(memoBytes);
+                records.push(
+                    transactionCase('fee.floor', `${label}, memo of ${memoBytes} bytes, ${how}`, { operation, memo, sender, second }, ({ tx, floor, unsigned }) => ({
+                        unsigned,
+                        size: tx.serialised.length,
+                        floor,
+                    })),
+                );
+            }
+        }
+    }
+    for (const record of records) {
+        check(record.output !== undefined, `the reference builds ${record.name}`);
+    }
+    // Both parities of the size occur for every operation.
+    const parities = new Map();
+    for (const record of records) {
+        const kind = record.input.request.operation.kind;
+        parities.set(kind, new Set([...(parities.get(kind) ?? []), record.output.size % 2]));
+    }
+    for (const [kind, seen] of parities) {
+        check(seen.size === 2, `odd and even sizes of ${kind}`);
+    }
+    write('S06-fee-floor', records, { network: { name: 'devnet', pubKeyHash: NETWORK_BYTE, milestonesSha256: chain.milestonesSha256 }, aux: hex(FIXED_AUX) });
+}
+
 fs.mkdirSync(outDir, { recursive: true });
 phrases();
 derivation();
 messages();
 signIn();
+transactions();
+feeFloors();
 
 // MANIFEST.sha256, in the format of sha256sum, over every vector file.
 const manifest = fs

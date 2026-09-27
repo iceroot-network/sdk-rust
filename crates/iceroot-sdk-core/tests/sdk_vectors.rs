@@ -618,7 +618,9 @@ fn every_class_is_run() {
             "S04-signin",
             "S05-transactions",
             "S06-fee-floor",
+            // Run by the keystore's own tests (crates/iceroot-keystore/tests/vectors.rs).
+            "S07-keystore",
         ],
-        "a vector class without a test here"
+        "a vector class without a test"
     );
 }

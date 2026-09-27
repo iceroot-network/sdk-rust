@@ -10,6 +10,8 @@
 #   - heartwood-crypto is built with a feature outside the allow-list tools/check-deps.allow on a
 #     normal or build edge (features that only tests enable do not count); `genesis`, `fixed-aux`
 #     and `legacy-schnorr` are refused even if listed;
+#   - iceroot-keystore is built with its test-only feature `testing` (the weak bounds and the
+#     caller's salt and nonce) on a normal or build edge;
 #   - tokio, reqwest or hyper is in the build for wasm32-unknown-unknown.
 #
 # Runs from any directory; needs cargo on PATH.
@@ -70,7 +72,13 @@ for feature in $features; do
     fi
 done
 
-# 3. No async runtime or HTTP stack in the WebAssembly build.
+# 3. The keystore's test-only feature on normal and build edges.
+if grep -E '^iceroot-keystore ' <<<"$normal_edges" | cut -d'|' -f2 | tr ',' '\n' | grep -qx 'testing'; then
+    echo "FAIL iceroot-keystore is built with the test-only feature 'testing' on a normal or build edge"
+    fail=1
+fi
+
+# 4. No async runtime or HTTP stack in the WebAssembly build.
 if hits=$(grep -E '^(tokio|reqwest|hyper) ' <<<"$wasm_edges" | sort -u); then
     echo "FAIL the wasm32 build contains:"
     sed 's/^/    /' <<<"$hits"

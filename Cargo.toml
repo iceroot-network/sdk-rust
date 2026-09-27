@@ -29,6 +29,7 @@ indexing_slicing = "deny"
 iceroot-sdk-core = { path = "crates/iceroot-sdk-core" }
 iceroot-sdk-api = { path = "crates/iceroot-sdk-api" }
 iceroot-vote = { path = "crates/iceroot-vote" }
+iceroot-keystore = { path = "crates/iceroot-keystore" }
 
 # Heartwood Core's byte-exact layer: keys, addresses, signatures, the transaction codec, the
 # milestone rules, the fee floor and the message signing domain, at its tagged release. No feature
@@ -49,12 +50,25 @@ sha2 = "0.11"
 hmac = "0.13"
 pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
 icu_normalizer = { version = "2.3", default-features = false, features = ["compiled_data"] }
-# Tests only: a second NFKD implementation that the normaliser is compared with, code point by code
-# point.
+# The keystore's password normalisation, an NFKD over this crate's character tables that wipes
+# every buffer it uses (iceroot-keystore); in the core's tests, a second NFKD implementation that
+# the ICU4X normaliser is compared with, code point by code point.
 unicode-normalization = "0.1.25"
 
 zeroize = "1.9"
 getrandom = "0.4"
+
+# The keystore format (iceroot-keystore): Argon2id, XChaCha20-Poly1305 and the text armor's
+# base64url, all pure Rust so that the same code runs natively and in WebAssembly.
+argon2 = { version = "0.6", default-features = false, features = ["alloc", "zeroize"] }
+chacha20poly1305 = { version = "0.11", default-features = false, features = ["zeroize"] }
+# Not called by the keystore: their `zeroize` features wipe, when dropped, the Blake2b state inside
+# Argon2 (which absorbs the password), XChaCha20's keystream buffer (which, with the stored
+# ciphertext, gives the payload) and the Poly1305 state.
+blake2 = { version = "0.11", default-features = false, features = ["zeroize"] }
+cipher = { version = "0.5", features = ["zeroize"] }
+poly1305 = { version = "0.9", features = ["zeroize"] }
+base64ct = { version = "1.8", features = ["alloc"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip", "preserve_order", "raw_value"] }
 thiserror = "2"

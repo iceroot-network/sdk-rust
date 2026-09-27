@@ -372,12 +372,12 @@ impl Profile {
         }
     }
 
-    /// The same devnet chain after its post-quantum milestone. Declared only: every capability is
-    /// off until the SDK release that supports the post-quantum formats.
+    /// The same devnet chain after its post-quantum milestone, served by the same backend and
+    /// relay API as [`Profile::devnet`]. Declared only: every capability is off until the SDK
+    /// release that supports the post-quantum formats.
     pub fn devnet_pq(options: DevnetOptions) -> Profile {
         Profile {
             id: "devnet-pq".to_owned(),
-            backend: Backend::IceRoot,
             stage: Stage::Pq,
             key_scheme: KeyScheme::Slip10MlDsa65,
             capabilities: Capabilities::NONE,
@@ -576,6 +576,9 @@ mod tests {
         let id = Profile::id_devnet(IdDevnetOptions::default());
         assert_eq!(pq.capabilities().iter().count(), 0);
         assert_eq!(id.capabilities().iter().count(), 0);
+        assert_eq!(pq.backend(), Backend::SolarCompatible);
+        assert_eq!(pq.chain().network_byte, Some(DEVNET_NETWORK_BYTE));
+        assert_eq!(id.backend(), Backend::IceRoot);
         assert_eq!(id.chain().hrp, Some(Hrp::Tice));
         assert_eq!(id.coin_type(), 1);
         let error = pq.require(Capability::Transfer).unwrap_err();

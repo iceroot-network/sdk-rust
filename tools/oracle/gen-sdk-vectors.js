@@ -11,8 +11,9 @@
 // transaction builders, and their fee floors come from its own transaction handlers
 // (packages/transactions), under the devnet chain of Heartwood Core's vectors. <browser wallet
 // checkout> holds the wallet's signing-protocol.js, whose checks give the verdicts of the sign-in
-// vectors. The reference needs Node 18. The output is deterministic: running it again gives the
-// same files.
+// vectors, and its legacy signer (legacy-signer/proof-protocol.js and sandbox.js), whose checks
+// give the verdicts of the ownership proof vectors. The reference needs Node 18. The output is
+// deterministic: running it again gives the same files.
 //
 // Every file is in the heartwood-vectors/1 record format: a meta record, then one record per
 // case, {"op", "network", "height", "name", "input", "output"} or the same with "error" in place
@@ -669,6 +670,364 @@ function feeFloors() {
     write('S06-fee-floor', records, { network: { name: 'devnet', pubKeyHash: NETWORK_BYTE, milestonesSha256: chain.milestonesSha256 }, aux: hex(FIXED_AUX) });
 }
 
+// ---- ownership proofs ------------------------------------------------------------------------
+//
+// S08: ownership proofs of Solar addresses, version 1: the migration ownership proofs of the
+// browser wallet's legacy signer. The verdicts on messages and signed proofs come from the legacy
+// signer's own scripts: proof-protocol.js (the format) and sandbox.js (signing, and checking a
+// signature made elsewhere), run in a context of their own with the reference's crypto package in
+// place of the Solar bundle the signer loads, and a clock set to each record's time. Keys, Solar
+// mainnet addresses (network byte 63) and signatures come from the reference; signatures take the
+// fixed aux 0x42 x 32. IceRoot accounts are encoded with the bech32m of @scure/base, the library
+// under the reference's own @scure/bip32. Runs last: the sandbox sets the reference's network to
+// mainnet.
+
+const SOLAR_MAINNET = 63;
+
+function legacySignerScripts() {
+    const dir = path.join(walletDir, 'legacy-signer');
+    const files = ['proof-protocol.js', 'sandbox.js'].map((name) => path.join(dir, name));
+    let handler;
+    const context = { SolarCrypto: reference, __now: 0 };
+    context.window = context;
+    context.parent = { postMessage: (reply) => { context.reply = reply; } };
+    context.addEventListener = (type, listener) => {
+        if (type === 'message') {
+            handler = listener;
+        }
+    };
+    vm.createContext(context);
+    new vm.Script('Date.now = () => globalThis.__now;').runInContext(context);
+    for (const file of files) {
+        new vm.Script(fs.readFileSync(file, 'utf8'), { filename: file }).runInContext(context);
+    }
+    check(typeof handler === 'function', 'the sandbox listens for requests');
+    // One request to the sandbox, as the signer page makes it, at the time `now`.
+    const call = (op, args, now) => {
+        context.__now = now;
+        context.reply = undefined;
+        handler({ source: context.parent, data: { __legacySigner: 1, id: 1, op, args } });
+        const reply = context.reply;
+        if (!reply.ok) {
+            throw new Error(reply.error);
+        }
+        return reply.result;
+    };
+    check(call('ping', {}, 0).ready === true, 'the sandbox loads the reference');
+    const hashes = Object.fromEntries(files.map((file) => [path.basename(file), hex(sha256(fs.readFileSync(file)))]));
+    return { Proof: context.IceRootLegacyProof, call, hashes };
+}
+
+function ownershipProofs() {
+    const { Proof, call, hashes } = legacySignerScripts();
+    const bip32Dir = path.dirname(require.resolve('@scure/bip32', { paths: [cryptoDir] }));
+    const baseEntry = require.resolve('@scure/base', { paths: [bip32Dir] });
+    const { bech32, bech32m } = require(baseEntry);
+    const basePackage = JSON.parse(fs.readFileSync(path.join(path.dirname(baseEntry), '..', 'package.json'), 'utf8'));
+    check(basePackage.name === '@scure/base', 'the package of @scure/base');
+
+    const records = [];
+    const aux = FIXED_AUX;
+    const refused = (op, name, input, error) => records.push(refusal(op, name, input, 'refused', error.message));
+    const solarKey = (passphrase) => {
+        const keys = reference.Identities.Keys.fromPassphrase(passphrase);
+        const publicKey = keys.publicKey.secp256k1;
+        const key = { passphrase, keys, publicKey, address: reference.Identities.Address.fromPublicKey(publicKey, SOLAR_MAINNET) };
+        const fromSandbox = call('phraseAccount', { phrase: passphrase }, 0);
+        check(fromSandbox.address === key.address && fromSandbox.publicKey === publicKey, `the sandbox's address of ${passphrase}`);
+        check(key.address.startsWith('S'), 'a Solar mainnet address');
+        return key;
+    };
+    const hashOf = (label) => sha256(`iceroot-sdk vectors/${label}`);
+    const accountOf = (prefix, label) => bech32m.encode(prefix, bech32m.toWords(hashOf(`account ${label}`)));
+    const nonceOf = (label) => hex(hashOf(`nonce ${label}`));
+    const iso = (ms) => new Date(ms).toISOString();
+
+    // The legacy signer's own test key and account, and its fixed proof.
+    const wallet = solarKey('this is a top secret passphrase');
+    check(wallet.address === 'SNAgA2XCRZDKfm5Vu9h4KR1bZw5xn9EiC3', "the legacy signer's test address");
+    const walletAccount = 'ice1q8y55x5z8dr5uepshat727uvt328lfkklzwvvmt4p42qlcrggxtsk8zw2r';
+    const keys = [
+        wallet,
+        solarKey(bip39.entropyToMnemonic(entropy('solar 12', 16))),
+        solarKey('Crème brûlée ✓'),
+    ];
+    const other = solarKey('another passphrase');
+    const mainnet = [accountOf('ice', 0), accountOf('ice', 1)];
+    const testnet = [accountOf('tice', 0), accountOf('tice', 1)];
+    const issued = Date.parse('2026-09-01T12:00:00Z');
+    const compose = (fields) => Proof.compose({
+        address: wallet.address, account: mainnet[0], nonce: nonceOf(0), issuedAt: iso(issued), ...fields,
+    });
+
+    // proof.account: the IceRoot account as a person types it.
+    let kelvin = 0;
+    while (!accountOf('ice', `kelvin ${kelvin}`).slice(4).includes('k')) {
+        kelvin += 1;
+    }
+    const withK = accountOf('ice', `kelvin ${kelvin}`);
+    const mixed = mainnet[0].slice(0, 5) + mainnet[0].slice(5).replace(/[a-z]/, (c) => c.toUpperCase());
+    check(mixed !== mainnet[0], 'a mixed-case account');
+    const typo = (() => {
+        const data = [...mainnet[0]];
+        data[10] = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'[('qpzry9x8gf2tvdw0s3jn54khce6mua7l'.indexOf(data[10]) + 1) % 32];
+        return data.join('');
+    })();
+    const spareWords = bech32m.toWords(hashOf('account spare'));
+    spareWords[51] |= 1;
+    const accountCases = [
+        [mainnet[0], 'mainnet'],
+        [mainnet[1], 'mainnet, another'],
+        [testnet[0], 'testnet'],
+        [testnet[1], 'testnet, another'],
+        [walletAccount, "the legacy signer's test account"],
+        [mainnet[0].toUpperCase(), 'in capitals'],
+        [testnet[0].toUpperCase(), 'testnet in capitals'],
+        [` \t${mainnet[0]}\n`, 'surrounded by white space'],
+        [`﻿${mainnet[0]}　`, 'a byte order mark and an ideographic space around it'],
+        [`\u0085${mainnet[0]}`, 'a next-line character before it'],
+        [withK.toUpperCase().replace('K', 'K'), 'in capitals with a Kelvin sign for K'],
+        [mixed, 'mixed case'],
+        [`ICE1${mainnet[0].slice(4)}`, 'prefix in capitals only'],
+        [typo, 'one character changed'],
+        [bech32.encode('ice', bech32m.toWords(hashOf('account 0'))), 'a Bech32 checksum, not Bech32m'],
+        [bech32m.encode('ice', spareWords), 'spare bits set'],
+        [bech32m.encode('ice', bech32m.toWords(hashOf('account 20').subarray(0, 20))), 'a 20-byte hash'],
+        [bech32m.encode('ice', bech32m.toWords(Buffer.concat([hashOf('account 33'), Buffer.from([0])]))), 'a 33-byte hash'],
+        [`t${mainnet[0]}`, 'a mainnet account under the testnet prefix'],
+        [bech32m.encode('bc', bech32m.toWords(hashOf('account 0'))), 'another prefix'],
+        [mainnet[0].replace('1', ''), 'no separator'],
+        ['', 'empty'],
+    ];
+    for (const [text, name] of accountCases) {
+        try {
+            const account = Proof.account(text);
+            records.push(record('proof.account', name, { text }, { account: account.account, network: account.network }));
+        } catch (error) {
+            refused('proof.account', name, { text }, error);
+        }
+    }
+
+    // A Solar-looking address of another network byte, which the format's pattern accepts.
+    let probe = 0;
+    let otherByte;
+    while (!otherByte) {
+        const publicKey = reference.Identities.Keys.fromPassphrase(`network byte probe ${probe}`).publicKey.secp256k1;
+        const address = reference.Identities.Address.fromPublicKey(publicKey, 62);
+        if (address.startsWith('S')) {
+            otherByte = address;
+        }
+        probe += 1;
+    }
+    const badChecksum = wallet.address.slice(0, 33) + (wallet.address[33] === 'z' ? 'y' : 'z');
+
+    // proof.build: the legacy signer's compose, refused when its parse refuses the result.
+    const builds = [
+        [{ address: wallet.address, account: walletAccount, nonce: '7e'.repeat(32), issuedAtMs: issued }, "the legacy signer's fixed proof"],
+        [{ address: keys[1].address, account: mainnet[0], nonce: nonceOf(1), issuedAtMs: Date.parse('2026-09-27T08:15:30.123Z') }, 'mainnet account'],
+        [{ address: keys[2].address, account: testnet[0], nonce: nonceOf(2), issuedAtMs: 0 }, 'testnet account, 1970'],
+        [{ address: wallet.address, account: mainnet[1], nonce: nonceOf(3), issuedAtMs: Date.parse('9999-12-31T23:59:59.999Z') }, 'the last millisecond of 9999'],
+        [{ address: wallet.address, account: mainnet[0], nonce: nonceOf(4).slice(1), issuedAtMs: issued }, 'a short nonce'],
+        [{ address: wallet.address, account: mainnet[0], nonce: nonceOf(4).toUpperCase(), issuedAtMs: issued }, 'a nonce in capitals'],
+        [{ address: wallet.address, account: mainnet[0].toUpperCase(), nonce: nonceOf(4), issuedAtMs: issued }, 'an account in capitals'],
+        [{ address: legacyKey('this is a top secret passphrase').address, account: mainnet[0], nonce: nonceOf(4), issuedAtMs: issued }, 'a devnet address'],
+        [{ address: otherByte, account: mainnet[0], nonce: nonceOf(4), issuedAtMs: issued }, 'an S address of network byte 62'],
+    ];
+    for (const [input, name] of builds) {
+        const message = Proof.compose({ address: input.address, account: input.account, nonce: input.nonce, issuedAt: iso(input.issuedAtMs) });
+        try {
+            Proof.parse(message, {}, input.issuedAtMs);
+            records.push(record('proof.build', name, input, { message }));
+        } catch (error) {
+            refused('proof.build', name, input, error);
+        }
+    }
+    const walletProof = [
+        'IceRoot migration ownership proof', 'Version: 1', 'Source network: solar-mainnet', `Source address: ${wallet.address}`,
+        `IceRoot account: ${walletAccount}`, `Nonce: ${'7e'.repeat(32)}`, 'Issued at: 2026-09-01T12:00:00.000Z',
+        'Statement: I control the source address above and ask for its holding to be bound to the IceRoot account above.',
+        'No transaction or transfer is authorized.',
+    ].join('\n');
+    check(records.find((r) => r.name === "the legacy signer's fixed proof").output.message === walletProof, "the legacy signer's fixed proof");
+
+    // proof.parse: the legacy signer's parse, at the reader's time.
+    const base = compose();
+    const now = issued + 1000;
+    const replaceLine = (message, index, line) => message.split('\n').map((l, i) => (i === index ? line : l)).join('\n');
+    const swapped = (() => {
+        const lines = base.split('\n');
+        [lines[4], lines[5]] = [lines[5], lines[4]];
+        return lines.join('\n');
+    })();
+    const at = (text) => compose({ issuedAt: text });
+    const parses = [
+        [base, {}, now, 'valid'],
+        [base, { address: wallet.address }, now, 'valid, address expected'],
+        [compose({ account: testnet[0] }), {}, now, 'testnet account'],
+        [at('2026-09-01T12:00:00Z'), {}, now, 'issued without milliseconds'],
+        [walletProof, { address: wallet.address }, issued, "the legacy signer's fixed proof"],
+        [base, {}, issued - 300000, 'issued five minutes ahead'],
+        [base, {}, issued - 300001, 'issued more than five minutes ahead'],
+        [base, {}, issued + 365 * 86400000, 'issued a year ago'],
+        [base, { address: other.address }, now, 'another address expected'],
+        [`${base}\n`, {}, now, 'trailing newline'],
+        [base.replace(/\n/g, '\r\n'), {}, now, 'CRLF'],
+        [base.split('\n').slice(0, 8).join('\n'), {}, now, 'eight lines'],
+        [`${base}\nP.S.`, {}, now, 'ten lines'],
+        [replaceLine(base, 0, 'Iceroot migration ownership proof'), {}, now, 'title changed'],
+        [replaceLine(base, 1, 'Version: 2'), {}, now, 'version 2'],
+        [replaceLine(base, 7, 'Statement: I control the source address above.'), {}, now, 'statement changed'],
+        [replaceLine(base, 8, 'A transfer is authorized.'), {}, now, 'closing line changed'],
+        [base.replace('Nonce: ', 'Nonce:'), {}, now, 'field without its space'],
+        [swapped, {}, now, 'account and nonce lines swapped'],
+        [compose().replace('solar-mainnet', 'solar-testnet'), {}, now, 'Solar testnet'],
+        [compose({ address: `s${wallet.address.slice(1)}` }), {}, now, 'address in lowercase s'],
+        [compose({ address: legacyKey('this is a top secret passphrase').address }), {}, now, 'a devnet address'],
+        [compose({ address: badChecksum }), {}, now, 'address with a bad checksum'],
+        [compose({ address: otherByte }), {}, now, 'an S address of network byte 62'],
+        [compose({ address: `${wallet.address.slice(0, 20)}0${wallet.address.slice(21)}` }), {}, now, 'address with a 0'],
+        [compose({ address: wallet.address.slice(0, 33) }), {}, now, '33-character address'],
+        [compose({ account: mainnet[0].toUpperCase() }), {}, now, 'account in capitals'],
+        [compose({ account: typo }), {}, now, 'account with one character changed'],
+        [compose({ account: bech32.encode('ice', bech32m.toWords(hashOf('account 0'))) }), {}, now, 'account with a Bech32 checksum'],
+        [compose({ account: bech32m.encode('ice', spareWords) }), {}, now, 'account with spare bits set'],
+        [compose({ account: ` ${mainnet[0]}` }), {}, now, 'account after two spaces'],
+        [compose({ nonce: nonceOf(0).toUpperCase() }), {}, now, 'nonce in capitals'],
+        [compose({ nonce: nonceOf(0).slice(2) }), {}, now, '62-digit nonce'],
+        [compose({ nonce: `g${nonceOf(0).slice(1)}` }), {}, now, 'nonce with a g'],
+        [at('2026-09-01T12:00:00+00:00'), {}, now, 'issued with an offset'],
+        [at('2026-09-01T12:00:00.00Z'), {}, now, 'issued with two digits of milliseconds'],
+        [at('2026-09-01T12:00:00.000000Z'), {}, now, 'issued with microseconds'],
+        [at('2026-09-01T12:00:00'), {}, now, 'issued without a zone'],
+        [at('2026-09-01 12:00:00Z'), {}, now, 'issued with a space'],
+        [at('2026-02-30T12:00:00Z'), {}, now, 'issued on 30 February'],
+        [at('2027-02-29T12:00:00Z'), {}, Date.parse('2027-03-01T12:00:00Z'), 'issued on 29 February of a common year'],
+        [at('2028-02-29T12:00:00Z'), {}, Date.parse('2028-02-29T12:00:00Z'), 'issued on 29 February of a leap year'],
+        [at('2026-08-31T24:00:00Z'), {}, now, 'issued at 24:00:00'],
+        [at('2026-13-01T12:00:00Z'), {}, now, 'issued in month 13'],
+        [at('0000-01-01T00:00:00Z'), {}, now, 'issued in the year 0'],
+        [at('yesterday'), {}, now, 'not a time'],
+        [replaceLine(base, 7, 'Statement: I control the source address above and ask for its holding to be bound to the IceRoot account above. é'), {}, now, 'a character outside ASCII'],
+        [replaceLine(base, 8, 'No transaction\tor transfer is authorized.'), {}, now, 'a tab'],
+        [`${base}${' '.repeat(1024 - base.length + 1)}`, {}, now, 'over 1024 characters'],
+        ['', {}, now, 'empty'],
+        ['IceRoot Validator Portal sign-in\nVersion: 1\nNo transaction or transfer is authorized.', {}, now, 'a sign-in message'],
+        [`Transfer 1000 SXP to S${'1'.repeat(33)}`, {}, now, 'a transfer'],
+    ];
+    for (const [message, expected, time, name] of parses) {
+        const input = { message, expected, now: time };
+        try {
+            const fields = Proof.parse(message, expected, time);
+            records.push(record('proof.parse', name, input, {
+                network: fields.network,
+                address: fields.address,
+                account: fields.account,
+                accountNetwork: fields.accountNetwork,
+                nonce: fields.nonce,
+                issuedAt: fields.issuedAt,
+                issuedAtMs: Date.parse(fields.issuedAt),
+            }));
+        } catch (error) {
+            refused('proof.parse', name, input, error);
+        }
+    }
+
+    // proof.sign: the sandbox signs as the legacy signer does (fresh aux) and checks its own
+    // signature; the record holds the reference's signature of the same digest with the fixed aux.
+    const signed = [];
+    const signs = [];
+    keys.forEach((key, index) => {
+        signs.push([key, compose({ address: key.address, account: mainnet[index % 2], nonce: nonceOf(`sign ${index}`) }), now, `key ${index}, mainnet account`]);
+        signs.push([key, compose({ address: key.address, account: testnet[index % 2], nonce: nonceOf(`sign t${index}`), issuedAt: '2026-09-01T12:00:00Z' }), now, `key ${index}, testnet account`]);
+    });
+    signs.push([wallet, walletProof, issued, "the legacy signer's fixed proof"]);
+    signs.push([other, base, now, "a message naming another key's address"]);
+    signs.push([wallet, base, issued - 300001, 'issued more than five minutes ahead']);
+    signs.push([wallet, 'IceRoot Validator Portal sign-in\nVersion: 1\nNo transaction or transfer is authorized.', now, 'a sign-in message']);
+    for (const [key, message, time, name] of signs) {
+        const input = { passphrase: key.passphrase, message, now: time, aux: hex(aux) };
+        let fromSandbox;
+        try {
+            fromSandbox = call('signProof', { phrase: key.passphrase, message }, time);
+        } catch (error) {
+            refused('proof.sign', name, input, error);
+            continue;
+        }
+        check(fromSandbox.publicKey === key.publicKey, `the sandbox signs with the key: ${name}`);
+        check(reference.Crypto.Message.verify({ message, publicKey: key.publicKey, signature: fromSandbox.signature }), `the sandbox's signature verifies: ${name}`);
+        const signature = reference.Crypto.Hash.signSchnorr(reference.Crypto.HashAlgorithms.sha256(message), key.keys, true, aux);
+        check(call('verifyProof', { message, publicKey: key.publicKey, signature }, time) === true, `the sandbox accepts the fixed-aux signature: ${name}`);
+        const proof = {
+            type: Proof.TYPE, version: 1, network: Proof.NETWORK, address: key.address,
+            publicKey: key.publicKey, algorithm: Proof.ALGORITHM, message, signature,
+        };
+        signed.push({ proof, now: time, name });
+        records.push(record('proof.sign', name, input, { proof, json: JSON.stringify(proof) }));
+    }
+
+    // proof.verify: the documented verification. The signed proof's constant fields and its
+    // address (step 1, with the legacy signer's parse), then the sandbox's check of a signature
+    // made elsewhere (steps 1 to 3: the message, the address of the public key and the signature).
+    const verifyDocumented = (proof, time) => {
+        if (proof.type !== Proof.TYPE || proof.version !== 1 || proof.network !== Proof.NETWORK || proof.algorithm !== Proof.ALGORITHM) {
+            return false;
+        }
+        try {
+            Proof.parse(proof.message, { address: proof.address }, time);
+            return call('verifyProof', { message: proof.message, publicKey: proof.publicKey, signature: proof.signature }, time) === true;
+        } catch (error) {
+            return false;
+        }
+    };
+    const first = signed[0];
+    const flip = (text) => text.slice(0, -1) + (text.endsWith('0') ? '1' : '0');
+    const flipPrefix = (key) => (key.startsWith('02') ? '03' : '02') + key.slice(2);
+    const otherAux = reference.Crypto.Hash.signSchnorr(reference.Crypto.HashAlgorithms.sha256(first.proof.message), wallet.keys, true, hashOf('aux verify'));
+    const forged = reference.Crypto.Hash.signSchnorr(reference.Crypto.HashAlgorithms.sha256(walletProof), other.keys, true, aux);
+    const invalidKey = `02${'00'.repeat(32)}`;
+    // Address.fromPublicKey refuses such a key, so its address is built from the same parts.
+    check(!reference.Identities.PublicKey.verify(invalidKey), 'a key that is not on the curve');
+    const invalidKeyAddress = reference.Identities.Address.fromBuffer(
+        Buffer.concat([Buffer.from([SOLAR_MAINNET]), reference.Crypto.HashAlgorithms.ripemd160(Buffer.from(invalidKey, 'hex'))]),
+    );
+    const invalidKeyMessage = compose({ address: invalidKeyAddress });
+    const byOther = reference.Crypto.Hash.signSchnorr(reference.Crypto.HashAlgorithms.sha256(first.proof.message), other.keys, true, aux);
+    const change = (fields) => ({ ...first.proof, ...fields });
+    const verifies = [
+        ...signed.map(({ proof, now: time, name }) => [proof, time, name]),
+        [change({ signature: otherAux }), first.now, 'a signature with another aux'],
+        [change({ message: first.proof.message.replace('Nonce: ', 'Nonce: 0').replace(/(Nonce: [0-9a-f]{64})[0-9a-f]/, '$1') }), first.now, 'message changed'],
+        [change({ address: other.address }), first.now, "another key's address"],
+        [change({ publicKey: other.publicKey }), first.now, "another key's public key"],
+        [change({ publicKey: other.publicKey, signature: byOther }), first.now, "another key's public key and signature"],
+        [change({ publicKey: first.proof.publicKey.toUpperCase() }), first.now, 'public key in capitals'],
+        [change({ publicKey: flipPrefix(first.proof.publicKey) }), first.now, 'public key prefix changed'],
+        [change({ signature: first.proof.signature.toUpperCase() }), first.now, 'signature in capitals'],
+        [change({ signature: flip(first.proof.signature) }), first.now, 'signature changed'],
+        [change({ signature: first.proof.signature.slice(2) }), first.now, '63-byte signature'],
+        [change({ type: 'iceroot-ownership-proof' }), first.now, 'another type'],
+        [change({ version: 2 }), first.now, 'version 2'],
+        [change({ version: '1' }), first.now, 'version as a string'],
+        [change({ network: 'solar-testnet' }), first.now, 'another network'],
+        [change({ algorithm: 'ml-dsa-65' }), first.now, 'another algorithm'],
+        [first.proof, issued - 300001, 'read more than five minutes before it was issued'],
+        [first.proof, issued - 300000, 'read five minutes before it was issued'],
+        [{ ...first.proof, address: wallet.address, message: walletProof, signature: forged }, issued, "a signature by another key, as from a wrong Ledger"],
+        [{ ...first.proof, address: invalidKeyAddress, publicKey: invalidKey, message: invalidKeyMessage, signature: first.proof.signature }, now, 'a public key that is not on the curve'],
+    ];
+    for (const [proof, time, name] of verifies) {
+        records.push(record('proof.verify', name, { proof, now: time }, { valid: verifyDocumented(proof, time) }));
+    }
+    check(records.filter((r) => r.op === 'proof.verify' && r.output.valid).length >= signed.length + 2, 'the valid proofs verify');
+
+    write('S08-ownership-proofs', records, {
+        aux: hex(aux),
+        sourceNetworkByte: SOLAR_MAINNET,
+        legacySignerSha256: hashes,
+        scureBase: basePackage.version,
+    });
+}
+
 fs.mkdirSync(outDir, { recursive: true });
 phrases();
 derivation();
@@ -676,6 +1035,7 @@ messages();
 signIn();
 transactions();
 feeFloors();
+ownershipProofs();
 
 // MANIFEST.sha256, in the format of sha256sum, over every vector file.
 const manifest = fs

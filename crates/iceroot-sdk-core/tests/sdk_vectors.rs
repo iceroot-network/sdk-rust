@@ -537,7 +537,10 @@ fn s05_transactions() {
 fn s06_fee_floor() {
     let file = load("S06-fee-floor");
     check_devnet(&file);
-    let floor_computed = chain().rules(2).fees.floor_available;
+    assert!(
+        chain().rules(2).fees.floor_available,
+        "the build computes the exact fee floor"
+    );
     let tally = run_class(&file, |record| {
         assert_eq!(record.op, "fee.floor");
         let expected = output(record);
@@ -557,10 +560,7 @@ fn s06_fee_floor() {
         }
         let floor = expected["floor"].clone();
         match chain().fee_floor(draft.kind(), draft.size(), record.height) {
-            None if !floor_computed => {
-                Outcome::Skipped("the exact fee floor is not computed by this build")
-            }
-            None => Outcome::Failed("the build computes floors but gave none".into()),
+            None => Outcome::Failed("no fee floor for this transaction".into()),
             Some(ours) => {
                 if let Outcome::Failed(message) = compare(&floor, &json!(ours.to_string())) {
                     return Outcome::Failed(message);
@@ -584,22 +584,15 @@ fn s06_fee_floor() {
             }
         }
     });
-    let records = file.records.len();
-    let expected = if floor_computed {
+    assert_eq!(file.records.len(), 114);
+    assert_eq!(
+        tally,
         Tally {
-            matched: records,
+            matched: 114,
             divergent: 0,
             skipped: 0,
         }
-    } else {
-        Tally {
-            matched: 0,
-            divergent: 0,
-            skipped: records,
-        }
-    };
-    assert_eq!(records, 114);
-    assert_eq!(tally, expected);
+    );
 }
 
 #[test]

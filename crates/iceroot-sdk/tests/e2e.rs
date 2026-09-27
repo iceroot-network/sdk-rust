@@ -143,9 +143,9 @@ impl Devnet {
 
     /// A draft of `operation` by `sender`, with the facts the node reports and the fee floor.
     ///
-    /// When this build of the SDK computes the floor, the draft takes the default fee choice
-    /// and must come out at the floor the node's fees give. Until then the floor computed here is
-    /// given as an exact fee, `below` base units under it.
+    /// The draft takes the default fee choice and must come out at the floor the node's fees
+    /// give. With `below` above zero, the same transaction is built again with an exact fee that
+    /// many base units under the floor.
     async fn draft(
         &self,
         operation: Operation,
@@ -163,23 +163,20 @@ impl Devnet {
             memo: memo.map(str::to_owned),
             fee,
         };
-        if self.chain.rules(facts.height).fees.floor_available {
-            let draft = Draft::build(&self.chain, &request(FeeChoice::Minimum), &facts, None)
-                .expect("a draft at the floor");
-            let floor = self.node_floor(draft.kind(), draft.size());
-            assert_eq!(draft.fee().source, FeeSource::Floor);
-            assert_eq!(draft.fee().amount, Amount::from(floor));
-            if below == 0 {
-                return draft;
-            }
+        assert!(self.chain.rules(facts.height).fees.floor_available);
+        let draft = Draft::build(&self.chain, &request(FeeChoice::Minimum), &facts, None)
+            .expect("a draft at the floor");
+        let floor = self.node_floor(draft.kind(), draft.size());
+        assert_eq!(draft.fee().source, FeeSource::Floor);
+        assert_eq!(draft.fee().amount, Amount::from(floor));
+        if below == 0 {
+            return draft;
         }
-        let exact = |fee: u64| request(FeeChoice::Exact(Amount::from(fee)));
         // The size does not depend on the fee, whose field has a fixed width.
-        let probe = Draft::build(&self.chain, &exact(1), &facts, None).expect("a draft");
-        let floor = self.node_floor(probe.kind(), probe.size());
-        let draft = Draft::build(&self.chain, &exact(floor - below), &facts, None).unwrap();
-        assert_eq!(draft.size(), probe.size());
-        draft
+        let exact = request(FeeChoice::Exact(Amount::from(floor - below)));
+        let below_floor = Draft::build(&self.chain, &exact, &facts, None).unwrap();
+        assert_eq!(below_floor.size(), draft.size());
+        below_floor
     }
 
     /// Submits one signed transaction and returns the node's verdict.

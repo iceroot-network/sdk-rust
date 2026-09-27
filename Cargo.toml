@@ -1,0 +1,42 @@
+[workspace]
+resolver = "3"
+members = ["crates/iceroot-vote"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "Apache-2.0"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+
+[workspace.dependencies]
+sha2 = "0.11"
+
+# Tests only.
+proptest = "1.11"
+serde_json = "1"
+
+# The vote library's property test draws about 40,000 selections: light optimization keeps
+# debug runs short. Overflow checks and debug assertions stay on.
+[profile.dev.package.iceroot-vote]
+opt-level = 1
+
+[profile.dev.package.proptest]
+opt-level = 2
+
+[profile.dev.package.regex-syntax]
+opt-level = 2
+
+[profile.dev.package.sha2]
+opt-level = 2

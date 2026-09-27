@@ -458,7 +458,9 @@ dependencies = [
 name = "iceroot-sdk"
 version = "0.1.0"
 dependencies = [
+ "iceroot-sdk-api",
  "iceroot-sdk-core",
+ "serde_json",
 ]
 
 [[package]]

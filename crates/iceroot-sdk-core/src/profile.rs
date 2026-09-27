@@ -416,6 +416,16 @@ impl Profile {
         self
     }
 
+    /// The same profile with the address network byte `network_byte`, for a custom development
+    /// devnet generated with another byte than [`DEVNET_NETWORK_BYTE`]. Profiles without today's
+    /// address format are returned unchanged.
+    pub fn with_network_byte(mut self, network_byte: u8) -> Profile {
+        if self.chain.network_byte.is_some() {
+            self.chain.network_byte = Some(network_byte);
+        }
+        self
+    }
+
     /// The same profile with the network hash `nethash` pinned (64 hex digits).
     pub fn with_nethash(mut self, nethash: &str) -> Result<Profile, Error> {
         if nethash.len() != 64 || !nethash.bytes().all(|byte| byte.is_ascii_hexdigit()) {

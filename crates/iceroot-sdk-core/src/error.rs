@@ -50,6 +50,8 @@ pub enum ErrorCode {
     InvalidTransaction,
     /// A sign-in message fails a check.
     InvalidSignIn,
+    /// A request to a node could not be built from its arguments.
+    InvalidRequest,
     /// No node could be reached.
     NodeUnavailable,
     /// The node refused the request for its rate limit.
@@ -58,6 +60,10 @@ pub enum ErrorCode {
     Timeout,
     /// The node's response cannot be used.
     BadResponse,
+    /// The node has no such resource.
+    NotFound,
+    /// The node refused the request.
+    Refused,
     /// The node or the data belongs to another network than the profile.
     NetworkMismatch,
     /// The node refused a submitted transaction.
@@ -98,10 +104,13 @@ impl ErrorCode {
             ErrorCode::InvalidDraft => "InvalidDraft",
             ErrorCode::InvalidTransaction => "InvalidTransaction",
             ErrorCode::InvalidSignIn => "InvalidSignIn",
+            ErrorCode::InvalidRequest => "InvalidRequest",
             ErrorCode::NodeUnavailable => "NodeUnavailable",
             ErrorCode::RateLimited => "RateLimited",
             ErrorCode::Timeout => "Timeout",
             ErrorCode::BadResponse => "BadResponse",
+            ErrorCode::NotFound => "NotFound",
+            ErrorCode::Refused => "Refused",
             ErrorCode::NetworkMismatch => "NetworkMismatch",
             ErrorCode::TxRejected => "TxRejected",
             ErrorCode::StaleDraft => "StaleDraft",
@@ -131,11 +140,14 @@ impl ErrorCode {
             | ErrorCode::InvalidFee
             | ErrorCode::InvalidDraft
             | ErrorCode::InvalidTransaction
-            | ErrorCode::InvalidSignIn => ErrorGroup::Input,
+            | ErrorCode::InvalidSignIn
+            | ErrorCode::InvalidRequest => ErrorGroup::Input,
             ErrorCode::NodeUnavailable
             | ErrorCode::RateLimited
             | ErrorCode::Timeout
             | ErrorCode::BadResponse
+            | ErrorCode::NotFound
+            | ErrorCode::Refused
             | ErrorCode::NetworkMismatch => ErrorGroup::Network,
             ErrorCode::TxRejected | ErrorCode::StaleDraft | ErrorCode::FeeUnavailable => {
                 ErrorGroup::Submission
@@ -278,6 +290,13 @@ pub enum Error {
         /// The check it fails.
         problem: SignInProblem,
     },
+    /// A request to a node could not be built from its arguments, such as a relay URL without
+    /// a scheme or a page out of range.
+    #[error("invalid request: {reason}")]
+    InvalidRequest {
+        /// What is wrong.
+        reason: String,
+    },
     /// No node could be reached.
     #[error("no node is available: {reason}")]
     NodeUnavailable {
@@ -298,6 +317,22 @@ pub enum Error {
     BadResponse {
         /// What is wrong with it.
         reason: String,
+    },
+    /// The node has no such resource, where the request needs one (a lookup that may find nothing
+    /// returns `None` instead).
+    #[error("not found: {message}")]
+    NotFound {
+        /// The node's message.
+        message: String,
+    },
+    /// The node refused the request with an error status, such as 422 for an argument it does not
+    /// accept.
+    #[error("the node refused the request with HTTP {status}: {message}")]
+    Refused {
+        /// The HTTP status.
+        status: u16,
+        /// The node's message.
+        message: String,
     },
     /// The node or the data belongs to another network than the profile.
     #[error("another network: {problem}")]
@@ -372,10 +407,13 @@ impl Error {
             Error::InvalidDraft { .. } => ErrorCode::InvalidDraft,
             Error::InvalidTransaction { .. } => ErrorCode::InvalidTransaction,
             Error::InvalidSignIn { .. } => ErrorCode::InvalidSignIn,
+            Error::InvalidRequest { .. } => ErrorCode::InvalidRequest,
             Error::NodeUnavailable { .. } => ErrorCode::NodeUnavailable,
             Error::RateLimited { .. } => ErrorCode::RateLimited,
             Error::Timeout => ErrorCode::Timeout,
             Error::BadResponse { .. } => ErrorCode::BadResponse,
+            Error::NotFound { .. } => ErrorCode::NotFound,
+            Error::Refused { .. } => ErrorCode::Refused,
             Error::NetworkMismatch { .. } => ErrorCode::NetworkMismatch,
             Error::TxRejected { .. } => ErrorCode::TxRejected,
             Error::StaleDraft { .. } => ErrorCode::StaleDraft,
@@ -414,6 +452,7 @@ impl Error {
             Error::InvalidFee { reason } => json!({ "reason": reason }),
             Error::FeeUnavailable { operation } => json!({ "operation": operation.as_str() }),
             Error::InvalidDraft { reason }
+            | Error::InvalidRequest { reason }
             | Error::NodeUnavailable { reason }
             | Error::BadResponse { reason }
             | Error::StaleDraft { reason }
@@ -426,6 +465,8 @@ impl Error {
                 retry_after_seconds,
             } => json!({ "retryAfterSeconds": retry_after_seconds }),
             Error::NetworkMismatch { problem } => problem.details(),
+            Error::NotFound { message } => json!({ "message": message }),
+            Error::Refused { status, message } => json!({ "status": status, "message": message }),
             Error::TxRejected {
                 reason,
                 node_code,

@@ -11,5 +11,17 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+# The node API client's async HTTP transport over reqwest (`api::HttpClient`). Native targets
+# only: on wasm32 the feature adds nothing, and the host language performs the requests.
+http = ["iceroot-sdk-api/http"]
+# Test seam of the bindings only: see the feature of the same name in iceroot-sdk-core.
+fixed-aux = ["iceroot-sdk-core/fixed-aux"]
+
 [dependencies]
+iceroot-sdk-api.workspace = true
 iceroot-sdk-core.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

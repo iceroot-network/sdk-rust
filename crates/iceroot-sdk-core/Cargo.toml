@@ -11,6 +11,14 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+# Test seam: `Aux::fixed`, so that bindings (WebAssembly, later Go) can sign with chosen auxiliary
+# bytes and compare their signatures with native Rust byte for byte. Only the test builds of the
+# bindings enable it; no published build does, and tools/check-deps.sh refuses it in the default
+# build.
+fixed-aux = ["heartwood-crypto/fixed-aux"]
+
 [dependencies]
 getrandom.workspace = true
 heartwood-crypto.workspace = true

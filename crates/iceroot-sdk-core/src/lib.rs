@@ -14,6 +14,9 @@
 //! - [`fee`]: fee choices and their resolution.
 //! - [`transaction`]: operations, drafts, signing, serialized drafts and signed transactions.
 //! - [`message`] and [`signin`]: message signatures and the sign-in message.
+//! - [`node`]: what the node API client (`iceroot-sdk-api`) decodes, read into the core's inputs
+//!   and checked on the way: the chain, a draft's online facts, fee statistics, submissions and
+//!   errors.
 //! - [`error`]: the one error type, with stable codes.
 //!
 //! The values both this crate and the node API client use (asset ids, vote entries, supply
@@ -47,6 +50,7 @@ pub mod error;
 pub mod fee;
 pub mod keys;
 pub mod message;
+pub mod node;
 pub mod phrase;
 pub mod profile;
 pub mod rules;

@@ -1,9 +1,17 @@
 //! The IceRoot SDK for Rust: the one crate applications depend on.
 //!
-//! It re-exports the SDK's crates under one name. Today that is the core
-//! ([`iceroot_sdk_core`]): network profiles and capabilities, recovery phrases and keys,
-//! addresses, amounts, transaction drafts and signing, message signing and the sign-in message.
-//! The node API client joins it as its own crate.
+//! It re-exports the SDK's crates under one name:
+//!
+//! - the core ([`iceroot_sdk_core`], at the root of this crate): network profiles and
+//!   capabilities, recovery phrases and keys, addresses, amounts, transaction drafts and signing,
+//!   message signing and the sign-in message;
+//! - the node API client ([`api`], the crate `iceroot_sdk_api`): a sans-IO client that builds each
+//!   request and decodes each answer into IceRoot-shaped values, with an optional async HTTP
+//!   transport (feature `http`, native targets only).
+//!
+//! The core reads what the client decodes ([`node`]): [`Chain::from_node`] loads the chain a node
+//! serves, [`OnlineFacts::from_node`] gives a draft its nonce, height and second key, and
+//! [`SignedTransaction::to_submit`] prepares a signed transaction for submission.
 //!
 //! # Example
 //!
@@ -82,3 +90,6 @@
 #![warn(missing_docs)]
 
 pub use iceroot_sdk_core::*;
+
+/// The node API client: request builders, typed answers and the backend mappers.
+pub use iceroot_sdk_api as api;

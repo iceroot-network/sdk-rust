@@ -7,6 +7,12 @@
 //! first load ([`Chain::profile`] returns the pinned profile, for the application to keep); a
 //! later load of another chain is refused with [`Error::NetworkMismatch`].
 //!
+//! The configuration's labels are checked too, since a review screen shows them and the network
+//! hash does not cover them: the token's symbol is 1 to 10 ASCII letters and digits, and its name
+//! 1 to 32 ASCII letters, digits, `-`, `.` and single inner spaces. Anything else is refused with
+//! [`Error::BadResponse`], so no configuration, from a node or inside a serialized draft, can
+//! write text of its own into a line that names an amount.
+//!
 //! A chain answers the questions that depend on the milestone in force: the rules
 //! ([`Chain::rules`]) and the economics ([`Chain::economics`]) at a height, and the format stage.
 //! Drafts are built against a chain ([`crate::transaction::Draft::build`]).
@@ -27,14 +33,22 @@ use crate::transaction::OperationKind;
 /// The decimals of ROOT in today's formats.
 pub const S1_DECIMALS: u8 = 8;
 
+/// The longest token symbol a configuration may give, in ASCII characters.
+pub const MAX_SYMBOL_LENGTH: usize = 10;
+
+/// The longest token name a configuration may give, in ASCII characters.
+pub const MAX_TOKEN_NAME_LENGTH: usize = 32;
+
 /// The network's own asset, as clients show it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Token {
     /// The asset: ROOT.
     pub asset: AssetId,
-    /// The name the network's configuration gives it.
+    /// The name the network's configuration gives it: 1 to [`MAX_TOKEN_NAME_LENGTH`] ASCII
+    /// letters, digits, `-`, `.` and single spaces between them.
     pub name: String,
-    /// The symbol the network's configuration gives it.
+    /// The symbol the network's configuration gives it: 1 to [`MAX_SYMBOL_LENGTH`] ASCII letters
+    /// and digits.
     pub symbol: String,
     /// Decimals of its amounts: 8 in today's formats.
     pub decimals: u8,
@@ -117,6 +131,7 @@ impl Chain {
                 },
             });
         }
+        check_labels(&network)?;
         let nethash = network.nethash.to_ascii_lowercase();
         if !Profile::is_nethash(&nethash) {
             return Err(Error::BadResponse {
@@ -222,6 +237,39 @@ impl Chain {
     pub(crate) fn milestones_json(&self) -> &str {
         &self.inner.milestones_json
     }
+}
+
+/// The token's labels, which review screens show next to amounts: a symbol of 1 to
+/// [`MAX_SYMBOL_LENGTH`] ASCII letters and digits, and a name of 1 to [`MAX_TOKEN_NAME_LENGTH`]
+/// ASCII letters, digits, `-` and `.`, with single spaces between words.
+fn check_labels(network: &Network) -> Result<(), Error> {
+    let symbol = &network.symbol;
+    let symbol_ok = (1..=MAX_SYMBOL_LENGTH).contains(&symbol.len())
+        && symbol.bytes().all(|byte| byte.is_ascii_alphanumeric());
+    if !symbol_ok {
+        return Err(Error::BadResponse {
+            reason: format!(
+                "the token symbol is not 1 to {MAX_SYMBOL_LENGTH} ASCII letters and digits"
+            ),
+        });
+    }
+    let name = &network.token;
+    let name_ok = (1..=MAX_TOKEN_NAME_LENGTH).contains(&name.len())
+        && name.split(' ').all(|word| {
+            !word.is_empty()
+                && word
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'.')
+        });
+    if !name_ok {
+        return Err(Error::BadResponse {
+            reason: format!(
+                "the token name is not 1 to {MAX_TOKEN_NAME_LENGTH} ASCII letters, digits, '-' \
+                 and '.', with single spaces between words"
+            ),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -352,6 +400,23 @@ pub(crate) mod tests {
             Chain::load(&profile, "not json"),
             Err(Error::BadResponse { .. })
         ));
+        for (key, text) in [
+            ("symbol", "ROOT to dAddress          "),
+            ("symbol", ""),
+            ("symbol", "ROOT\u{2003}"),
+            ("token", "ROOT\n"),
+            ("token", "two  spaces"),
+        ] {
+            let mut value: Value = serde_json::from_str(&network).unwrap();
+            value["client"][key] = Value::from(text);
+            assert!(
+                matches!(
+                    Chain::from_parts(&profile, &value.to_string(), &milestones),
+                    Err(Error::BadResponse { .. })
+                ),
+                "{key} {text:?}"
+            );
+        }
         let declared = Profile::devnet_pq(DevnetOptions::default());
         assert!(matches!(
             Chain::from_parts(&declared, &network, &milestones),

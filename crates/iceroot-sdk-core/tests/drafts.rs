@@ -847,3 +847,56 @@ fn a_message_signature_never_signs_a_transaction() {
     assert!(message::verify("ünïcödé ✓", &text));
     assert!(message::verify_bytes("ünïcödé ✓".as_bytes(), &text));
 }
+
+/// The token's symbol and name come from the network configuration, which a serialized draft
+/// carries and the pinned network hash does not cover. A configuration whose symbol could write
+/// text of its own into a review line, such as a recipient padded out of sight, is refused, from
+/// a draft and from a node alike.
+#[test]
+fn a_draft_s_configuration_cannot_rewrite_the_token_s_labels() {
+    use serde_json::Value;
+
+    let sender = phrase_account(0);
+    let recipient = phrase_account(1);
+    let draft = build(&sender, transfer(&recipient, 10_000_000_000)).unwrap();
+    let profile = chain().profile();
+    let form: Value = serde_json::from_slice(&draft.serialize()).unwrap();
+    let with_client = |key: &str, text: &str| {
+        let mut tampered = form.clone();
+        tampered["configuration"]["network"]["client"][key] = Value::from(text);
+        serde_json::to_vec(&tampered).unwrap()
+    };
+    assert_eq!(chain().token().symbol, "dRT");
+    assert!(Draft::deserialize(&with_client("symbol", "dRT"), profile).is_ok());
+
+    let padded = format!("dRT to {}{}", recipient.address(), " ".repeat(400));
+    let spaced = format!("dRT{}", "\u{3000}".repeat(40));
+    for symbol in [padded.as_str(), spaced.as_str(), "", "d\tRT", "ABCDEFGHIJK"] {
+        assert!(
+            matches!(
+                Draft::deserialize(&with_client("symbol", symbol), profile),
+                Err(Error::BadResponse { .. })
+            ),
+            "{symbol:?}"
+        );
+    }
+    for name in ["", " dROOT", "dROOT\n", &"n".repeat(33), "d  ROOT"] {
+        assert!(
+            matches!(
+                Draft::deserialize(&with_client("token", name), profile),
+                Err(Error::BadResponse { .. })
+            ),
+            "{name:?}"
+        );
+    }
+    let named = Draft::deserialize(&with_client("token", "Dev ROOT-2.0"), profile).unwrap();
+    assert_eq!(named.chain().token().name, "Dev ROOT-2.0");
+
+    // The same configuration from a node is refused when the chain is loaded.
+    let mut configuration = form["configuration"].clone();
+    configuration["network"]["client"]["symbol"] = Value::from(padded.as_str());
+    assert!(matches!(
+        Chain::load(profile, &configuration.to_string()),
+        Err(Error::BadResponse { .. })
+    ));
+}

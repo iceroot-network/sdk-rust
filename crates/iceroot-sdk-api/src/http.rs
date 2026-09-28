@@ -192,6 +192,23 @@ impl HttpClient {
     /// The decoder's errors, [`ApiError::RateLimited`], and [`ApiError::NodeUnavailable`] or
     /// [`ApiError::Timeout`] when no relay answered.
     pub async fn send<T>(&self, call: &Call<T>) -> Result<T, ApiError> {
+        self.exchange(call.request(), |response| call.decode(response))
+            .await
+    }
+
+    /// Sends `request` and decodes the answer with `decode`, exactly as [`HttpClient::send`] sends
+    /// a call: for a host that keeps its calls in another form, such as the SDK's bindings, which
+    /// hold each call with a decoder that writes its answer as JSON. `decode` is called once per
+    /// answer received, so it may be called again after a 429 or on the next relay.
+    ///
+    /// # Errors
+    ///
+    /// As [`HttpClient::send`].
+    pub async fn exchange<T>(
+        &self,
+        request: &Request,
+        decode: impl Fn(&Response) -> Result<T, ApiError>,
+    ) -> Result<T, ApiError> {
         let mut last = ApiError::NodeUnavailable {
             detail: "no relay was tried".into(),
         };
@@ -199,14 +216,14 @@ impl HttpClient {
             let mut attempt = 0u32;
             loop {
                 self.spend().await;
-                let response = match self.fetch(relay, call.request()).await {
+                let response = match self.fetch(relay, request).await {
                     Ok(response) => response,
                     Err(error) => {
                         last = error;
                         break;
                     }
                 };
-                match call.decode(&response) {
+                match decode(&response) {
                     Err(ApiError::RateLimited { retry_after }) => {
                         match self.backoff.delay(attempt, retry_after) {
                             Some(wait) => {

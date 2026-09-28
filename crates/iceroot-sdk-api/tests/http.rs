@@ -117,6 +117,32 @@ async fn fails_over_and_retries_after_429() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn exchanges_a_request_with_the_host_s_own_decoder() {
+    // A host that keeps its calls in another form (the SDK's bindings write each answer as
+    // JSON) gets the same failover and backoff; its decoder sees every answer, the 429 included.
+    let dead = dead_relay().await;
+    let (live, seen) = server(vec![(429, TOO_MANY), (200, STATUS)]).await;
+    let relays = vec![Relay::parse(&dead).unwrap(), Relay::parse(&live).unwrap()];
+    let client = HttpClient::with_options(relays, options(2)).unwrap();
+    let call = SolarCompat::new(53).node_status();
+    let answers = Mutex::new(Vec::new());
+    let height = client
+        .exchange(call.request(), |response| {
+            answers
+                .lock()
+                .unwrap()
+                .push((response.status(), response.block_height()));
+            call.decode(response)
+                .map(|status| status.height.to_string())
+        })
+        .await
+        .unwrap();
+    assert_eq!(height, "42");
+    assert_eq!(*answers.lock().unwrap(), [(429, Some(42)), (200, Some(42))]);
+    assert_eq!(seen.lock().unwrap().len(), 2);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn reports_the_rate_limit_when_retries_are_spent() {
     let (live, _) = server(vec![(429, TOO_MANY), (429, TOO_MANY)]).await;
     let client = HttpClient::with_options(vec![Relay::parse(&live).unwrap()], options(1)).unwrap();

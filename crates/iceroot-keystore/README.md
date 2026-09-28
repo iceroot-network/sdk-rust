@@ -27,6 +27,7 @@ let entropy = payload.secret_bytes(); // wiped when `payload` is dropped
 | `inspect(bytes)` | The `Header` (version, KDF, parameters, salt, nonce, payload kind and length), without the password |
 | `change_password(bytes, old, new, params)` | Decrypt and encrypt again under a new password, salt and nonce |
 | `reencrypt(bytes, password, params)` | Move a keystore to new parameters with a new salt and nonce, for example after `header.params().is_weaker_than(&Preset::Mobile.params())` |
+| `change_password_with_bounds(...)`, `reencrypt_with_bounds(...)` | The same under tighter bounds: the old keystore is opened, and the new parameters checked, under the given ceiling |
 | `armor(bytes)`, `dearmor(text)` | The text form, `irks:` and unpadded base64url, for stores that hold strings only |
 
 The salt and nonce always come from the operating system's generator: no function of a normal build takes them, or a generator, from the caller. Deterministic encryption for vectors (`encrypt_with_salt_and_nonce`) and the weak test bounds exist only with the test-only feature `testing`, which the crate's own tests turn on through a dev-dependency on itself and which `tools/check-deps.sh` refuses on any normal or build dependency; an app must never enable it.
@@ -103,7 +104,7 @@ All three are at or above RFC 9106's second recommended option (64 MiB, 3 iterat
 - **Pick the preset of the platform** the keystore is created on, and re-encrypt with `reencrypt` after an unlock when `inspect(...).params().is_weaker_than(&preset.params())` (never to less memory).
 - **Show one message for `WrongPasswordOrCorrupt`,** such as "wrong password", and keep a backup path: the recovery phrase restores the account when a keystore is lost or damaged.
 - **Set the password rules:** the format refuses only an empty password; the app decides the minimum length and strength.
-- **In WebAssembly,** run the keystore functions in a worker that can be ended, or accept that the module's memory stays at its peak (64 MiB and more) after an unlock. Tighten the memory ceiling with `decrypt_with_bounds` where the platform cannot spare 512 MiB.
+- **In WebAssembly,** run the keystore functions in a worker that can be ended, or accept that the module's memory stays at its peak (64 MiB and more) after an unlock. Tighten the memory ceiling with `decrypt_with_bounds`, `change_password_with_bounds` and `reencrypt_with_bounds` where the platform cannot spare 512 MiB.
 
 ## Tests
 

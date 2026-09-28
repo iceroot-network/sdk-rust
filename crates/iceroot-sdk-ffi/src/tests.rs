@@ -105,3 +105,37 @@ fn chain_facts_are_those_of_the_height_asked_for() {
         );
     }
 }
+#[test]
+fn a_password_change_keeps_to_a_lowered_memory_ceiling() {
+    let mut session = Session::default();
+    let phrase = hex::encode(
+        "legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth useful legal will",
+    );
+    let params = json!({"memoryKib":24576,"iterations":2,"parallelism":1});
+    let low = json!({"memoryKib":19456,"iterations":2,"parallelism":1});
+    let stored = call(
+        &mut session,
+        json!({"op":"keystoreEncrypt","phrase":phrase,"password":hex::encode("pw"),"params":params}),
+    )["result"]
+        .clone();
+    for request in [
+        json!({"op":"keystoreReencrypt","keystore":stored,"password":hex::encode("pw"),"params":low,"maxMemoryKib":20480}),
+        json!({"op":"keystoreChangePassword","keystore":stored,"password":hex::encode("pw"),"newPassword":hex::encode("new"),"params":low,"maxMemoryKib":20480}),
+    ] {
+        let refused = call(&mut session, request);
+        assert_eq!(refused["error"]["code"], "ParamsOutOfRange", "{refused}");
+    }
+    // Without a ceiling, or with a null one, the standard bounds apply.
+    for ceiling in [json!(null), json!(24576)] {
+        let changed = call(
+            &mut session,
+            json!({"op":"keystoreReencrypt","keystore":stored,"password":hex::encode("pw"),"params":low,"maxMemoryKib":ceiling}),
+        );
+        assert!(changed["result"].is_string(), "{changed}");
+    }
+    let changed = call(
+        &mut session,
+        json!({"op":"keystoreChangePassword","keystore":stored,"password":hex::encode("pw"),"newPassword":hex::encode("new"),"params":low}),
+    );
+    assert!(changed["result"].is_string(), "{changed}");
+}

@@ -211,10 +211,25 @@ pub fn change_password(
     new_password: &str,
     params: impl Into<Params>,
 ) -> Result<Vec<u8>, Error> {
+    change_password_with_bounds(bytes, old_password, new_password, params, &Bounds::STANDARD)
+}
+
+/// [`change_password`] under other bounds: [`Bounds::STANDARD`] with a lower memory ceiling
+/// ([`Bounds::with_memory_ceiling_kib`]) on a platform that cannot spare more memory. The old
+/// keystore is opened, and the new parameters are checked, under the same bounds, so a keystore
+/// that asks for more memory than the platform allows is refused before any key derivation.
+pub fn change_password_with_bounds(
+    bytes: &[u8],
+    old_password: &str,
+    new_password: &str,
+    params: impl Into<Params>,
+    bounds: &Bounds,
+) -> Result<Vec<u8>, Error> {
     let params = params.into();
     Bounds::STANDARD.check(&params)?;
+    bounds.check(&params)?;
     crypto::password_bytes(new_password)?;
-    let payload = decrypt(bytes, old_password)?;
+    let payload = decrypt_with_bounds(bytes, old_password, bounds)?;
     encrypt(&payload, new_password, params)
 }
 
@@ -227,6 +242,16 @@ pub fn reencrypt(
     params: impl Into<Params>,
 ) -> Result<Vec<u8>, Error> {
     change_password(bytes, password, password, params)
+}
+
+/// [`reencrypt`] under other bounds, as [`change_password_with_bounds`].
+pub fn reencrypt_with_bounds(
+    bytes: &[u8],
+    password: &str,
+    params: impl Into<Params>,
+    bounds: &Bounds,
+) -> Result<Vec<u8>, Error> {
+    change_password_with_bounds(bytes, password, password, params, bounds)
 }
 
 #[cfg(test)]

@@ -847,39 +847,49 @@ pub(crate) async fn keystore_inspect(keystore: String) -> Result<String> {
     )?)?)
 }
 
-/// The keystore encrypted again under a new password.
+/// The keystore encrypted again under a new password. `max_memory_kib` lowers the memory the old
+/// keystore and the new parameters may ask for, as for `keystore_decrypt`.
 #[command]
 pub(crate) async fn keystore_change_password(
     keystore: String,
     old_password: Secret,
     new_password: Secret,
     params: String,
+    max_memory_kib: Option<u32>,
 ) -> Result<String> {
     let stored = from_hex(&keystore, "the keystore")?;
     blocking(move || {
         let (mut old, mut new) = (old_password, new_password);
-        let changed = self::keystore::keystore_change_password(
+        let changed = self::keystore::keystore_change_password_with_bounds(
             &stored,
             old.bytes_mut(),
             new.bytes_mut(),
             &params,
+            max_memory_kib,
         )?;
         Ok(to_hex(&changed))
     })
     .await
 }
 
-/// The keystore encrypted again under the same password with new parameters.
+/// The keystore encrypted again under the same password with new parameters. `max_memory_kib`
+/// as for `keystore_change_password`.
 #[command]
 pub(crate) async fn keystore_reencrypt(
     keystore: String,
     password: Secret,
     params: String,
+    max_memory_kib: Option<u32>,
 ) -> Result<String> {
     let stored = from_hex(&keystore, "the keystore")?;
     blocking(move || {
         let mut password = password;
-        let changed = self::keystore::keystore_reencrypt(&stored, password.bytes_mut(), &params)?;
+        let changed = self::keystore::keystore_reencrypt_with_bounds(
+            &stored,
+            password.bytes_mut(),
+            &params,
+            max_memory_kib,
+        )?;
         Ok(to_hex(&changed))
     })
     .await

@@ -70,11 +70,31 @@ pub fn keystore_change_password(
     new_password: &mut [u8],
     params: &str,
 ) -> Result<Vec<u8>> {
+    keystore_change_password_with_bounds(keystore, old_password, new_password, params, None)
+}
+
+/// [`keystore_change_password`] with the memory ceiling lowered to `max_memory_kib`, as
+/// [`keystore_decrypt`] takes it: the old keystore is opened, and the new parameters checked,
+/// under that ceiling, so a keystore that asks for more memory than the platform can spare is
+/// refused before any key derivation.
+pub fn keystore_change_password_with_bounds(
+    keystore: &[u8],
+    old_password: &mut [u8],
+    new_password: &mut [u8],
+    params: &str,
+    max_memory_kib: Option<u32>,
+) -> Result<Vec<u8>> {
     let result = (|| {
         let params = params_from_json(params)?;
         let old = password_text(old_password)?;
         let new = password_text(new_password)?;
-        Ok(keystore::change_password(keystore, old, new, params)?)
+        Ok(keystore::change_password_with_bounds(
+            keystore,
+            old,
+            new,
+            params,
+            &bounds(max_memory_kib),
+        )?)
     })();
     old_password.zeroize();
     new_password.zeroize();
@@ -85,10 +105,26 @@ pub fn keystore_change_password(
 /// fresh nonce: for moving it to a newer preset after an unlock. The password array is
 /// overwritten with zeros.
 pub fn keystore_reencrypt(keystore: &[u8], password: &mut [u8], params: &str) -> Result<Vec<u8>> {
+    keystore_reencrypt_with_bounds(keystore, password, params, None)
+}
+
+/// [`keystore_reencrypt`] with the memory ceiling lowered to `max_memory_kib`, as
+/// [`keystore_change_password_with_bounds`] applies it.
+pub fn keystore_reencrypt_with_bounds(
+    keystore: &[u8],
+    password: &mut [u8],
+    params: &str,
+    max_memory_kib: Option<u32>,
+) -> Result<Vec<u8>> {
     let result = (|| {
         let params = params_from_json(params)?;
         let password = password_text(password)?;
-        Ok(keystore::reencrypt(keystore, password, params)?)
+        Ok(keystore::reencrypt_with_bounds(
+            keystore,
+            password,
+            params,
+            &bounds(max_memory_kib),
+        )?)
     })();
     password.zeroize();
     result
@@ -335,6 +371,31 @@ mod tests {
         let header: Value = serde_json::from_str(&keystore_inspect(&changed).unwrap()).unwrap();
         assert_eq!(header["memoryKib"], 65_536);
         let mnemonic = open(&changed, b"battery staple", &Bounds::STANDARD).unwrap();
+        assert_eq!(mnemonic.phrase(), PHRASE);
+
+        // Under a memory ceiling the keystore's 64 MiB is refused before any key derivation,
+        // for a password change and a re-encryption alike, and every password is still wiped.
+        let (mut old, mut new) = (b"wrong".to_vec(), b"new".to_vec());
+        let error = keystore_change_password_with_bounds(
+            &changed,
+            &mut old,
+            &mut new,
+            LOW,
+            Some(32 * 1024),
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "ParamsOutOfRange");
+        assert_eq!(error.details()["param"], "memory");
+        assert!(old.iter().chain(&new).all(|&b| b == 0));
+        let mut password = b"battery staple".to_vec();
+        let error = keystore_reencrypt_with_bounds(&changed, &mut password, LOW, Some(32 * 1024))
+            .unwrap_err();
+        assert_eq!(error.code(), "ParamsOutOfRange");
+        assert!(password.iter().all(|&b| b == 0));
+        let mut password = b"battery staple".to_vec();
+        let lowered =
+            keystore_reencrypt_with_bounds(&changed, &mut password, LOW, Some(64 * 1024)).unwrap();
+        let mnemonic = open(&lowered, b"battery staple", &Bounds::STANDARD).unwrap();
         assert_eq!(mnemonic.phrase(), PHRASE);
     }
 

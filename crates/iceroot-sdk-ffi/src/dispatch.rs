@@ -26,6 +26,13 @@ fn number(v: &Value, name: &str) -> Result<u32> {
         .and_then(|n| u32::try_from(n).ok())
         .ok_or_else(|| BindingError::argument(format!("{name} must be a u32")))
 }
+/// A u32 argument that may be left out, or given as null.
+fn optional_number(v: &Value, name: &str) -> Result<Option<u32>> {
+    match v.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(_) => number(v, name).map(Some),
+    }
+}
 fn bytes(v: &Value, name: &str) -> Result<Vec<u8>> {
     hex::decode(text(v, name)?).map_err(|_| BindingError::argument(format!("{name} must be hex")))
 }
@@ -161,19 +168,23 @@ impl Session {
                 &raw(v, "params")?
             )?))),
             "keystoreInspect" => parsed(b::keystore::keystore_inspect(&bytes(v, "keystore")?)?),
-            "keystoreReencrypt" => Ok(json!(hex::encode(b::keystore::keystore_reencrypt(
-                &bytes(v, "keystore")?,
-                &mut secret_bytes(v, "password")?,
-                &raw(v, "params")?
-            )?))),
-            "keystoreChangePassword" => {
-                Ok(json!(hex::encode(b::keystore::keystore_change_password(
+            "keystoreReencrypt" => Ok(json!(hex::encode(
+                b::keystore::keystore_reencrypt_with_bounds(
+                    &bytes(v, "keystore")?,
+                    &mut secret_bytes(v, "password")?,
+                    &raw(v, "params")?,
+                    optional_number(v, "maxMemoryKib")?,
+                )?
+            ))),
+            "keystoreChangePassword" => Ok(json!(hex::encode(
+                b::keystore::keystore_change_password_with_bounds(
                     &bytes(v, "keystore")?,
                     &mut secret_bytes(v, "password")?,
                     &mut secret_bytes(v, "newPassword")?,
-                    &raw(v, "params")?
-                )?)))
-            }
+                    &raw(v, "params")?,
+                    optional_number(v, "maxMemoryKib")?,
+                )?
+            ))),
             "keystoreArmor" => Ok(json!(b::keystore::keystore_armor(&bytes(v, "keystore")?))),
             "keystoreDearmor" => Ok(json!(hex::encode(b::keystore::keystore_dearmor(text(
                 v, "text"

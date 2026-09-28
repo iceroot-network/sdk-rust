@@ -12,8 +12,9 @@
 
 use iceroot_keystore::{
     ARMOR_PREFIX, Bounds, Error, HEADER_LEN, Header, Malformed, Param, Params, Payload,
-    PayloadKind, Preset, SALT_LEN, TAG_LEN, armor, change_password, dearmor, decrypt,
-    decrypt_with_bounds, encrypt, encrypt_with_salt_and_nonce, inspect, reencrypt,
+    PayloadKind, Preset, SALT_LEN, TAG_LEN, armor, change_password, change_password_with_bounds,
+    dearmor, decrypt, decrypt_with_bounds, encrypt, encrypt_with_salt_and_nonce, inspect,
+    reencrypt, reencrypt_with_bounds,
 };
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -153,6 +154,42 @@ fn a_tighter_memory_ceiling_refuses_before_deriving() {
             maximum: 20 * 1024,
         }
     );
+}
+
+#[test]
+fn a_tighter_memory_ceiling_holds_for_a_password_change_and_a_reencryption() {
+    let keystore = encrypt(&entropy(), "password", Params::new(24 * 1024, 2, 1)).unwrap();
+    let tight = Bounds::STANDARD.with_memory_ceiling_kib(20 * 1024);
+    let refused = Error::ParamsOutOfRange {
+        param: Param::Memory,
+        value: 24 * 1024,
+        minimum: 19 * 1024,
+        maximum: 20 * 1024,
+    };
+    // The old keystore asks for more memory than the platform can spare: refused before any
+    // key derivation, whatever the password.
+    assert_eq!(
+        change_password_with_bounds(&keystore, "wrong", "new password", FLOOR, &tight).unwrap_err(),
+        refused
+    );
+    assert_eq!(
+        reencrypt_with_bounds(&keystore, "password", FLOOR, &tight).unwrap_err(),
+        refused
+    );
+    // New parameters above the ceiling are refused too.
+    let within = encrypt(&entropy(), "password", FLOOR).unwrap();
+    assert_eq!(
+        reencrypt_with_bounds(&within, "password", Params::new(24 * 1024, 2, 1), &tight)
+            .unwrap_err(),
+        refused
+    );
+    // Within the ceiling both work as without it.
+    let changed =
+        change_password_with_bounds(&within, "password", "new password", FLOOR, &tight).unwrap();
+    assert_eq!(decrypt(&changed, "new password").unwrap(), entropy());
+    let again = reencrypt_with_bounds(&within, "password", FLOOR, &tight).unwrap();
+    fresh(&within, &again);
+    assert_eq!(decrypt(&again, "password").unwrap(), entropy());
 }
 
 #[test]

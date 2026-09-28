@@ -18,5 +18,9 @@ proptest.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# Process isolation is available only on native hosts. WASI runs vector tests in one thread.
+proptest = { workspace = true, features = ["fork", "timeout"] }
+
 [lints]
 workspace = true

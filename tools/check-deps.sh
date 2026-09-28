@@ -40,6 +40,7 @@ all_edges+=$'\n'$(plugin_tree --target all -e all --format '{p}')
 normal_edges=$(tree --target all -e normal,build --format '{p}|{f}')
 normal_edges+=$'\n'$(plugin_tree --target all -e normal,build --format '{p}|{f}')
 wasm_edges=$(tree --target wasm32-unknown-unknown -e normal,build --format '{p}')
+wasm_edges+=$'\n'$(tree --target wasm32-wasip1 -e normal,build --format '{p}')
 
 # 1. No consensus or node crate of heartwood-core, anywhere.
 forbidden='^(heartwood-kernel|heartwood-state|heartwood-transactions|heartwood-p2p-wire|heartwood-logger) '

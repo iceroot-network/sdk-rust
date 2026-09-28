@@ -87,7 +87,7 @@ webpki-root-certs = "1"
 
 # Tests only.
 hex = "0.4"
-proptest = "1.11"
+proptest = { version = "1.11", default-features = false, features = ["std", "bit-set"] }
 
 [profile.release]
 overflow-checks = true

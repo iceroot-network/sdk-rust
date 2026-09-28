@@ -18,6 +18,8 @@ env:
   # libsecp256k1 is C: the wasm32 build compiles it with clang.
   CC_wasm32_unknown_unknown: clang-18
   AR_wasm32_unknown_unknown: llvm-ar-18
+  CC_wasm32_wasip1: clang-18
+  AR_wasm32_wasip1: llvm-ar-18
 
 jobs:
   production-merge:
@@ -56,7 +58,7 @@ jobs:
         with:
           toolchain: '1.98.0'
           components: rustfmt,clippy
-          targets: wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown,wasm32-wasip1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22.21.1'

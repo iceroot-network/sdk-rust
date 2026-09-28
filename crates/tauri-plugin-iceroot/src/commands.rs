@@ -43,6 +43,11 @@ fn profile(json: &str) -> Result<Profile> {
     Ok(profiles::from_json(json)?)
 }
 
+/// The page `webview` shows now, recorded with the window it is in.
+fn page_of<R: Runtime>(state: &Iceroot, webview: &Webview<R>) -> Page {
+    state.page(webview.label(), webview.window().label())
+}
+
 // ---- the plugin ---------------------------------------------------------------------------------
 
 /// The plugin's version, and whether it was built with the test seams.
@@ -218,7 +223,7 @@ pub(crate) async fn key_from_phrase<R: Runtime>(
     index: u32,
     passphrase: Secret,
 ) -> Result<KeyInfo> {
-    let page = state.page(webview.label());
+    let page = page_of(&state, &webview);
     let profile = self::profile(&profile)?;
     let key = blocking(move || {
         let (mut phrase, passphrase) = (phrase, passphrase);
@@ -243,7 +248,7 @@ pub(crate) async fn key_from_legacy_passphrase<R: Runtime>(
     profile: String,
     passphrase: Secret,
 ) -> Result<KeyInfo> {
-    let page = state.page(webview.label());
+    let page = page_of(&state, &webview);
     let profile = self::profile(&profile)?;
     let mut passphrase = passphrase;
     let key = Key::from_legacy_passphrase_bytes(&profile, passphrase.bytes_mut())?;
@@ -265,7 +270,7 @@ pub(crate) async fn key_from_keystore<R: Runtime>(
     passphrase: Secret,
     max_memory_kib: Option<u32>,
 ) -> Result<KeyInfo> {
-    let page = state.page(webview.label());
+    let page = page_of(&state, &webview);
     let profile = self::profile(&profile)?;
     let stored = from_hex(&keystore, "the keystore")?;
     let key = blocking(move || {
@@ -344,7 +349,7 @@ pub(crate) async fn chain_load<R: Runtime>(
     profile: String,
     configuration: String,
 ) -> Result<ChainInfo> {
-    let page = state.page(webview.label());
+    let page = page_of(&state, &webview);
     let chain = chains::load(&self::profile(&profile)?, &configuration)?;
     let info = chain_info(0, &chain);
     let id = state.add_chain(&page, Arc::new(chain))?;
@@ -494,7 +499,7 @@ pub(crate) async fn draft_deserialize<R: Runtime>(
     bytes: String,
     profile: String,
 ) -> Result<DraftInfo> {
-    let page = state.page(webview.label());
+    let page = page_of(&state, &webview);
     let draft = drafts::deserialize(&from_hex(&bytes, "the draft")?, &self::profile(&profile)?)?;
     let chain = Arc::new(draft.chain().clone());
     let id = state.add_chain(&page, Arc::clone(&chain))?;
@@ -559,7 +564,7 @@ pub(crate) async fn draft_sign<R: Runtime>(
     )
 }
 
-/// A serialized signed transaction for a profile; it must verify.
+/// A serialized signed transaction for a profile; the sender's signature must verify.
 #[command]
 pub(crate) async fn signed_deserialize(bytes: String, profile: String) -> Result<SignedInfo> {
     let signed = drafts::signed_deserialize(
@@ -654,7 +659,7 @@ pub(crate) async fn net_connect<R: Runtime>(
             return Err(Error::relay_not_allowed(relay.as_str()));
         }
     }
-    let page = state.page(webview.label());
+    let page = page_of(&state, &webview);
     let connected = Session::connect(&profile, options.unwrap_or_default()).await?;
     let session = connected.session;
     let at = AtNext::of(&session.chain, session.height());
@@ -946,7 +951,7 @@ pub(crate) async fn proof_key_from_passphrase<R: Runtime>(
 ) -> Result<ProofKeyInfo> {
     let mut passphrase = passphrase;
     let key = ProofKey::from_passphrase(passphrase.bytes_mut())?;
-    let page = state.page(webview.label());
+    let page = page_of(&state, &webview);
     let address = key.address()?;
     let public_key = key.public_key()?;
     Ok(ProofKeyInfo {

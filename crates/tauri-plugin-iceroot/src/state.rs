@@ -5,6 +5,12 @@
 //! window is destroyed, everything it held is dropped, which wipes its keys: a key never outlives
 //! the page that opened it. A command that was still working when its page went away (deriving a
 //! key, connecting) finds a new page and drops what it made instead of handing it over ([`Page`]).
+//!
+//! A window usually has one webview with the window's label. A window with several webviews
+//! (Tauri's multi-webview windows) has webviews with labels of their own: each webview's values
+//! record the window it was in when it last held one, and a destroyed window drops the values of
+//! every webview recorded in it. Tauri reports no event when one webview of such a window closes
+//! on its own, so its page should release its keys first.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -30,6 +36,8 @@ pub(crate) struct Page {
 pub(crate) struct Handles {
     /// The page's number, never used for another page in this process.
     page: u64,
+    /// The label of the window the webview was in when it last asked to hold a value.
+    window: Option<String>,
     pub(crate) keys: HashMap<u64, Key>,
     pub(crate) proof_keys: HashMap<u64, ProofKey>,
     pub(crate) chains: HashMap<u64, Arc<Chain>>,
@@ -65,11 +73,17 @@ impl Iceroot {
         f(handles)
     }
 
-    /// The page the webview `label` shows now, for a command that holds a value when it is done.
-    pub(crate) fn page(&self, label: &str) -> Page {
+    /// The page the webview `label`, in the window `window`, shows now, for a command that holds
+    /// a value when it is done. The window is recorded, so that destroying it drops the values.
+    pub(crate) fn page(&self, label: &str, window: &str) -> Page {
         Page {
             label: label.to_owned(),
-            number: self.with(label, |handles| handles.page),
+            number: self.with(label, |handles| {
+                if handles.window.as_deref() != Some(window) {
+                    handles.window = Some(window.to_owned());
+                }
+                handles.page
+            }),
         }
     }
 
@@ -104,6 +118,25 @@ impl Iceroot {
     /// Drops everything the webview `label` holds; its keys are wiped.
     pub(crate) fn clear(&self, label: &str) {
         let removed = self.lock().remove(label);
+        drop(removed);
+    }
+
+    /// Drops everything the webviews of the destroyed window `window` hold: the webview with the
+    /// window's label and every webview recorded in it. Their keys are wiped.
+    pub(crate) fn clear_window(&self, window: &str) {
+        let mut webviews = self.lock();
+        let gone: Vec<String> = webviews
+            .iter()
+            .filter(|(label, handles)| {
+                label.as_str() == window || handles.window.as_deref() == Some(window)
+            })
+            .map(|(label, _)| label.clone())
+            .collect();
+        let removed: Vec<Handles> = gone
+            .iter()
+            .filter_map(|label| webviews.remove(label))
+            .collect();
+        drop(webviews);
         drop(removed);
     }
 
@@ -273,7 +306,7 @@ mod tests {
     fn keys_belong_to_their_webview_and_go_with_its_page() {
         let state = Iceroot::default();
         let key = Key::from_legacy_passphrase(&profile(), "probe passphrase".to_owned()).unwrap();
-        let id = state.add_key(&state.page("main"), key).unwrap();
+        let id = state.add_key(&state.page("main", "main"), key).unwrap();
         let address = state
             .with_key("main", id, |key| Ok(key.address()?))
             .unwrap();
@@ -287,7 +320,7 @@ mod tests {
         assert_eq!(error.code(), "KeyReleased");
 
         let key = Key::from_legacy_passphrase(&profile(), "x".to_owned()).unwrap();
-        let second = state.add_key(&state.page("main"), key).unwrap();
+        let second = state.add_key(&state.page("main", "main"), key).unwrap();
         assert_ne!(second, id);
         state.release_key("main", second);
         assert!(state.with_key("main", second, |_| Ok(())).is_err());
@@ -298,7 +331,7 @@ mod tests {
     fn a_command_whose_page_went_away_holds_nothing() {
         let state = Iceroot::default();
         // A command starts on a page, which loads another page before the key is derived.
-        let page = state.page("main");
+        let page = state.page("main", "main");
         state.clear("main");
         let key = Key::from_legacy_passphrase(&profile(), "late".to_owned()).unwrap();
         assert_eq!(state.add_key(&page, key).unwrap_err().code(), "KeyReleased");
@@ -312,12 +345,51 @@ mod tests {
         assert!(state.add_chain(&page, Arc::clone(&chain)).is_err());
         assert!(format!("{state:?}").contains("(0, 0, 0, 0)"));
         // The new page holds what it asks for.
-        let fresh = state.page("main");
+        let fresh = state.page("main", "main");
         let id = state.add_chain(&fresh, chain).unwrap();
         assert!(state.chain("main", id).is_ok());
         // A window with the same label later is another page too.
         state.clear("main");
         assert!(state.chain("main", id).is_err());
-        assert_ne!(state.page("main").number, fresh.number);
+        assert_ne!(state.page("main", "main").number, fresh.number);
+    }
+
+    #[test]
+    fn a_destroyed_window_drops_the_values_of_every_webview_in_it() {
+        let state = Iceroot::default();
+        let key = |text: &str| Key::from_legacy_passphrase(&profile(), text.to_owned()).unwrap();
+        // A window "main" with its own webview and a child webview "panel", and another window.
+        let own = state
+            .add_key(&state.page("main", "main"), key("a"))
+            .unwrap();
+        let child = state
+            .add_key(&state.page("panel", "main"), key("b"))
+            .unwrap();
+        let other = state
+            .add_key(&state.page("side", "side"), key("c"))
+            .unwrap();
+        state.clear_window("main");
+        assert!(state.with_key("main", own, |_| Ok(())).is_err());
+        assert!(state.with_key("panel", child, |_| Ok(())).is_err());
+        assert!(state.with_key("side", other, |_| Ok(())).is_ok());
+        // A command that started before the window went away holds nothing.
+        let page = state.page("panel", "main");
+        state.clear_window("main");
+        assert_eq!(
+            state.add_key(&page, key("d")).unwrap_err().code(),
+            "KeyReleased"
+        );
+        // A webview moved to another window is dropped with that window.
+        let moved = state
+            .add_key(&state.page("panel", "main"), key("e"))
+            .unwrap();
+        let later = state
+            .add_key(&state.page("panel", "side"), key("f"))
+            .unwrap();
+        state.clear_window("main");
+        assert!(state.with_key("panel", moved, |_| Ok(())).is_ok());
+        state.clear_window("side");
+        assert!(state.with_key("panel", later, |_| Ok(())).is_err());
+        assert!(state.with_key("side", other, |_| Ok(())).is_err());
     }
 }

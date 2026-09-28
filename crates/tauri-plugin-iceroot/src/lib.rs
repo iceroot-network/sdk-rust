@@ -7,14 +7,15 @@
 //! - **Keys stay in Rust.** Keys from recovery phrases, legacy passphrases and keystores, and the
 //!   Solar keys of ownership proofs, are held by the plugin; the webview holds opaque numbers and
 //!   receives public keys, addresses and signatures only. Keys are held for the webview that
-//!   opened them, and wiped when it releases them, loads another page or closes.
+//!   opened them, and wiped when it releases them, when it loads another page and when its window
+//!   closes.
 //! - **Drafts cross as serialized bytes.** A draft is built by the core, and signing reads its
 //!   serialized form again under the network's pinned profile, so what is signed is what the plugin
 //!   read, never what the webview said it was.
 //! - **Node requests leave from Rust.** The SDK's node API client, the same request builders and
 //!   answer decoders as in WebAssembly, over reqwest, to the relays the application's
-//!   capabilities allow ([`network`]). The webview's content security policy needs no node origin
-//!   and no `'wasm-unsafe-eval'`.
+//!   capabilities allow and nowhere else: a redirect is never followed ([`network`]). The
+//!   webview's content security policy needs no node origin and no `'wasm-unsafe-eval'`.
 //! - **One implementation.** Arguments are read and answers written by `iceroot-sdk-bindings`,
 //!   the code the WebAssembly module uses, and every key, address, signature, transaction, vote
 //!   selection, keystore and proof comes from the SDK's core and through it from
@@ -29,15 +30,15 @@
 //! }
 //! ```
 //!
-//! The application's capability grants the plugin's commands (`iceroot:default`) and the relays
-//! it may reach, as an `allow` scope of `iceroot:allow-net-connect`:
+//! The application's capability grants the plugin's commands (`iceroot:default`, every command
+//! but `net_connect`) and the relays it may reach, as an `allow` scope of
+//! `iceroot:allow-net-connect`:
 //!
 //! ```json
 //! {
 //!   "identifier": "main",
 //!   "windows": ["main"],
 //!   "permissions": [
-//!     "core:default",
 //!     "iceroot:default",
 //!     { "identifier": "iceroot:allow-net-connect", "allow": [{ "url": "http://127.0.0.1:6003/api" }] }
 //!   ]
@@ -152,6 +153,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
                 state.clear(webview.label());
             }
         })
+        // A destroyed window drops everything its webviews held: the webview with its label and
+        // any other webview recorded in it (a multi-webview window).
         .on_event(|app, event| {
             if let RunEvent::WindowEvent {
                 label,
@@ -160,7 +163,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             } = event
                 && let Some(state) = app.try_state::<Iceroot>()
             {
-                state.clear(label);
+                state.clear_window(label);
             }
         })
         .build()

@@ -59,7 +59,8 @@ fn production() -> impl Strategy<Value = Option<Production>> {
                 assigned,
             })
         }),
-        1 => (any::<u64>(), any::<u64>()).prop_map(|(a, b)| Some(Production {
+        // Up to the largest count a snapshot accepts, 2^53 - 1.
+        1 => (0u64..1 << 53, 0u64..1 << 53).prop_map(|(a, b)| Some(Production {
             forged: a.min(b),
             assigned: a.max(b),
         })),

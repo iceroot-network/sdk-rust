@@ -233,6 +233,9 @@ pub struct VoteSnapshot {
     pub records: Vec<ValidatorRecord>,
 }
 
+/// The largest integer a JavaScript number holds exactly, 2^53 - 1.
+const MAX_EXACT_IN_JAVASCRIPT: u64 = (1 << 53) - 1;
+
 /// The most records a snapshot may have: far more validators than any network registers, and few
 /// enough that a selection stays quick where it runs on a page's own thread.
 pub const MAX_RECORDS: usize = 10_000;
@@ -368,8 +371,9 @@ impl SnapshotError {
 impl VoteSnapshot {
     /// Check that the snapshot can be used: a 30-day window, seats and a block time, at most
     /// [`MAX_RECORDS`] records, unique valid names and unique addresses, and consistent records
-    /// (forged at most assigned, seated days within the window, registration not after the
-    /// snapshot, shares at most 10,000 basis points, resigned validators without a seat).
+    /// (forged at most assigned, and assigned at most 2^53 - 1; seated days within the window,
+    /// registration not after the snapshot, shares at most 10,000 basis points, resigned
+    /// validators without a seat).
     pub fn validate(&self) -> Result<(), SnapshotError> {
         if self.records.len() > MAX_RECORDS {
             return Err(SnapshotError::TooManyRecords {
@@ -400,7 +404,12 @@ impl VoteSnapshot {
                 name: record.name.clone(),
                 field,
             };
-            if record.production.is_some_and(|p| p.forged > p.assigned) {
+            // Counts above 2^53 - 1 exist on no chain, and would not cross into JavaScript
+            // exactly: the same data would be judged differently there.
+            if record
+                .production
+                .is_some_and(|p| p.forged > p.assigned || p.assigned > MAX_EXACT_IN_JAVASCRIPT)
+            {
                 return Err(inconsistent("production"));
             }
             if record
@@ -721,6 +730,20 @@ mod tests {
                 .collect(),
         );
         assert_eq!(most.validate(), Ok(()));
+        // Counts beyond 2^53 - 1 do not cross into JavaScript exactly, so the same data would
+        // be judged differently there.
+        let mut wide = snapshot(vec![record("a")]);
+        wide.records[0].production = Some(Production {
+            forged: 19 * (1 << 50) - 1,
+            assigned: 20 * (1 << 50),
+        });
+        assert_eq!(
+            wide.validate(),
+            Err(SnapshotError::Inconsistent {
+                name: "a".to_owned(),
+                field: "production"
+            })
+        );
         let mut bad = snapshot(vec![record("a")]);
         bad.records[0].production = Some(Production {
             forged: 11,

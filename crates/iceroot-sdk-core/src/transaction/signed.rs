@@ -147,8 +147,11 @@ impl SignedTransaction {
         .encode(&self.chain)
     }
 
-    /// The signed transaction in `bytes`, for `profile`, whose network hash must be pinned. It
-    /// must verify. Data made for another profile or network is refused with
+    /// The signed transaction in `bytes`, for `profile`, whose network hash must be pinned. The
+    /// sender's signature must verify. A second signature is not checked here, since that needs
+    /// the account's second public key: check it with
+    /// [`SignedTransaction::verify_second_signature`] (a node refuses a transaction whose second
+    /// signature does not verify). Data made for another profile or network is refused with
     /// [`Error::NetworkMismatch`].
     pub fn deserialize(bytes: &[u8], profile: &Profile) -> Result<SignedTransaction, Error> {
         let (chain, envelope) = envelope::decode(bytes, profile, EnvelopeKind::Signed)?;

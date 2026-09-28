@@ -1,10 +1,10 @@
 # tauri-plugin-iceroot
 
-The IceRoot SDK as a Tauri 2 plugin, for desktop (Linux, macOS, Windows) and mobile (Android, iOS) applications. It is the native implementation of the SDK's TypeScript interface: the application's page imports `@iceroot-network/sdk/tauri` from [sdk-typescript](https://github.com/iceroot-network/sdk-typescript) instead of `@iceroot-network/sdk`, and the same calls run here, in Rust, instead of in WebAssembly inside the webview.
+The IceRoot SDK as a Tauri 2 plugin, for desktop and mobile applications (tested on Linux and built for Android so far; see [Platforms](#platforms)). It is the native implementation of the SDK's TypeScript interface: the application's page imports `@iceroot-network/sdk/tauri` from [sdk-typescript](https://github.com/iceroot-network/sdk-typescript) instead of `@iceroot-network/sdk`, and the same calls run here, in Rust, instead of in WebAssembly inside the webview.
 
-- **Keys stay in Rust.** Keys from recovery phrases, legacy passphrases and keystores, and the Solar keys of ownership proofs, are held by the plugin. The page holds opaque numbers and receives public keys, addresses and signatures only. A key is held for the webview that opened it, reachable from that webview only, and wiped when the page releases it, when the webview loads another page and when its window closes.
+- **Keys stay in Rust.** Keys from recovery phrases, legacy passphrases and keystores, and the Solar keys of ownership proofs, are held by the plugin. The page holds opaque numbers and receives public keys, addresses and signatures only. A key is held for the webview that opened it, reachable from that webview only, and wiped when the page releases it, when the webview loads another page and when its window closes (for a webview closed on its own, see [What the plugin does not protect](#what-the-plugin-does-not-protect)).
 - **Drafts cross as serialized bytes.** A draft is built by the core and given to the page as its serialized form with its review summary. Signing sends the bytes back: the plugin reads the draft again under the network's pinned profile and signs what it read.
-- **Node requests leave from Rust.** The SDK's node API client, with the same request builders and answer decoders as the WebAssembly module, sends each request with reqwest (rustls), to the relays the application's capabilities allow. The page reaches no node, so its content security policy needs no node origin and no `'wasm-unsafe-eval'`; Android's cleartext rule and iOS App Transport Security, which govern the platform's own HTTP stacks, do not apply to these requests.
+- **Node requests leave from Rust.** The SDK's node API client, with the same request builders and answer decoders as the WebAssembly module, sends each request with reqwest (rustls), to the relays the application's capabilities allow and nowhere else: it follows no redirect. The page reaches no node, so its content security policy needs no node origin and no `'wasm-unsafe-eval'`; Android's cleartext rule and iOS App Transport Security, which govern the platform's own HTTP stacks, do not apply to these requests.
 - **The keystore runs natively.** Argon2id with the desktop or mobile preset (256 or 128 MiB) runs on a blocking thread, off the webview. `Keys.fromKeystore` opens an account straight from a keystore: the phrase is decrypted and the key derived in the plugin, and never enters the page.
 - **One implementation.** Arguments are read and answers written by [`iceroot-sdk-bindings`](../iceroot-sdk-bindings/README.md), the code the WebAssembly module uses, and every key, address, signature, transaction, vote selection, keystore and proof comes from the SDK's core and, through it, from `heartwood-crypto`. The SDK's TypeScript test suites and its native vectors pass through the plugin as they pass through WebAssembly.
 
@@ -39,7 +39,6 @@ Grant its commands and the relays it may reach in a capability (`src-tauri/capab
   "identifier": "main",
   "windows": ["main"],
   "permissions": [
-    "core:default",
     "iceroot:default",
     {
       "identifier": "iceroot:allow-net-connect",
@@ -49,7 +48,7 @@ Grant its commands and the relays it may reach in a capability (`src-tauri/capab
 }
 ```
 
-`iceroot:default` allows every command of the SDK. No relay is reachable until an `allow` entry of `iceroot:allow-net-connect` (or of the plugin's global scope) names it: an entry is a relay URL with its API base path, where `*` matches any run of characters other than `/` and `**` any run at all; a `deny` entry wins over an allow. The plugin compares the relay as a URL parser writes it (lowercase host, normalized escapes), so no other spelling of a URL reaches a host the entries do not name. A relay that is not allowed is refused with `InvalidProfile` (`details.reason: "not-allowed"`) before any request.
+`iceroot:default` allows every command of the SDK except `net_connect`, which needs `iceroot:allow-net-connect` with the relays it may reach. The page needs no other permission; add Tauri's own (`core:default` and the like) only for what the application's page uses itself. No relay is reachable until an `allow` entry of `iceroot:allow-net-connect` (or of the plugin's global scope) names it: an entry is a relay URL with its API base path, where `*` matches any run of characters other than `/` and `**` any run at all; a `deny` entry wins over an allow. The plugin compares the relay as a URL parser writes it (lowercase host, normalized escapes), so no other spelling of a URL reaches a host the entries do not name, and it follows no redirect: a relay that answers with one counts as unavailable and the next relay is tried. A relay that is not allowed is refused with `InvalidProfile` (`details.reason: "not-allowed"`) before any request. Without `iceroot:allow-net-connect` in the capability, Tauri refuses `net_connect` itself, which the page sees as `SdkNotInitialized`.
 
 The page then uses the SDK as with the WebAssembly entry, awaiting each call; see the Tauri quickstart and the desktop and mobile wallet guides of sdk-typescript.
 
@@ -77,15 +76,18 @@ An application that never shows a recovery phrase after creating it can deny `ke
 - **The page itself.** Code running in the application's page can ask the plugin to sign with the keys that page opened. The plugin keeps keys out of the page's memory and out of other webviews, not out of reach of a compromised page; the application's content security policy and review screens still matter.
 - **The IPC messages.** A phrase or password the page sends travels in Tauri's IPC message, which neither the page nor the plugin can wipe. Keep secrets out of the page where possible: create a phrase, show it once, encrypt it with `keystore_encrypt`, and afterwards open accounts with `key_from_keystore`.
 - **A key the page never releases** stays in the plugin until the page's object is collected (the guest code asks the plugin to drop it), the page navigates or reloads, or the window closes.
+- **A webview closed on its own.** In a window with several webviews (Tauri's multi-webview windows, behind its `unstable` feature), each webview's keys are wiped with its page and with its window, but Tauri reports no event when one webview closes while its window stays open: its keys stay until the window closes. Release them before closing such a webview.
+- **Remote pages.** Never grant `iceroot` permissions in a capability with a `remote` entry (pages loaded from a URL). The plugin's handles are numbers counted up from 1, and every frame of a webview's page can use that page's handles: that is safe only when every page and frame the webview shows is the application's own code.
+- **Memory below the heap.** The plugin wipes the keys it holds and the secrets it receives. Deriving a key or signing can leave copies of intermediate values on the thread's stack, which the plugin does not overwrite (the WebAssembly entry overwrites its stack after such calls).
 
 ## Platforms
 
 | Target | State |
 |---|---|
 | Linux (`x86_64-unknown-linux-gnu`, WebKitGTK) | Built and tested: the SDK's TypeScript suites, its native vectors and the devnet end-to-end scenario run through the plugin in the Tauri example of sdk-typescript under `tauri-driver` (`npm run test:tauri-plugin`, and the job `tauri` of `npm run test:e2e`) |
-| Android (`aarch64-linux-android`) | Builds with the Android NDK (r29, API level 24), the plugin alone and the example application as the library an Android project loads |
+| Android (`aarch64-linux-android`) | Builds with the Android NDK (r29, API level 24), the plugin alone and the example application as the library an Android project loads; not yet run on a device or an emulator. HTTPS relays are verified against the Mozilla root certificates built into the plugin (`webpki-root-certs`), since the platform's verifier needs the application's Java environment, which a plugin cannot set up: a relay whose certificate comes from a private or user-installed authority is refused |
 | macOS, iOS (`aarch64-apple-ios`) | Not built yet: needs a macOS machine with Xcode |
-| Windows | Not built yet |
+| Windows | Not built yet. WebView2 reports a page load when the navigation starts, before the old page stops, so the page-bound wiping needs another check there (for example, again when the load finishes) before Windows is supported |
 
 ## Development
 

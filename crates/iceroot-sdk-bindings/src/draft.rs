@@ -82,7 +82,8 @@ pub fn fixed_aux(aux: &[u8]) -> Result<Aux> {
 }
 
 /// The signed transaction in `bytes` (from [`SignedTransaction::serialize`]), for `profile`,
-/// whose network hash must be pinned. It must verify.
+/// whose network hash must be pinned. The sender's signature must verify; a second signature is
+/// not checked (see [`SignedTransaction::deserialize`]).
 pub fn signed_deserialize(bytes: &[u8], profile: &Profile) -> Result<SignedTransaction> {
     Ok(SignedTransaction::deserialize(bytes, profile)?)
 }

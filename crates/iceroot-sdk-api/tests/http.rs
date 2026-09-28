@@ -299,3 +299,93 @@ async fn never_follows_a_redirect_and_skips_the_relay_that_answers_one() {
     }
     assert!(reached.lock().unwrap().is_empty());
 }
+
+/// A relay that answers every request with a node status padded to `size` bytes, with a
+/// `content-length` header or, when `chunked`, in chunks of 64 KiB without one, and counts the
+/// requests.
+async fn padded_relay(size: usize, chunked: bool) -> (String, Arc<Mutex<usize>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/api", listener.local_addr().unwrap());
+    let asked = Arc::new(Mutex::new(0));
+    let count = Arc::clone(&asked);
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            *count.lock().unwrap() += 1;
+            tokio::spawn(async move {
+                let mut buffer = [0u8; 4096];
+                let _ = socket.read(&mut buffer).await;
+                let head =
+                    r#"{"data":{"synced":true,"now":7,"blocksCount":0,"timestamp":330},"pad":""#;
+                let tail = r#""}"#;
+                let pad = size.saturating_sub(head.len() + tail.len());
+                let body = format!("{head}{}{tail}", "x".repeat(pad));
+                let header = if chunked {
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n".to_owned()
+                } else {
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                        body.len()
+                    )
+                };
+                if socket.write_all(header.as_bytes()).await.is_err() {
+                    return;
+                }
+                if chunked {
+                    for chunk in body.as_bytes().chunks(64 * 1024) {
+                        let framed =
+                            [format!("{:x}\r\n", chunk.len()).as_bytes(), chunk, b"\r\n"].concat();
+                        if socket.write_all(&framed).await.is_err() {
+                            return;
+                        }
+                    }
+                    let _ = socket.write_all(b"0\r\n\r\n").await;
+                } else if socket.write_all(body.as_bytes()).await.is_err() {
+                    return;
+                }
+                socket.shutdown().await.ok();
+            });
+        }
+    });
+    (url, asked)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_answer_larger_than_the_limit_is_refused_and_the_next_relay_asked() {
+    use iceroot_sdk_api::MAX_RESPONSE_BYTES;
+
+    // Within the limit, the padded answer is read.
+    let (small, _) = padded_relay(64 * 1024, false).await;
+    let client = HttpClient::with_options(vec![Relay::parse(&small).unwrap()], options(0)).unwrap();
+    let status = client
+        .send(&SolarCompat::new(53).node_status())
+        .await
+        .unwrap();
+    assert_eq!(status.height, 7);
+
+    for chunked in [false, true] {
+        let (large, asked) = padded_relay(MAX_RESPONSE_BYTES + 1, chunked).await;
+        let (live, served) = server(vec![(200, STATUS)]).await;
+        let relays = vec![Relay::parse(&large).unwrap(), Relay::parse(&live).unwrap()];
+        let client = HttpClient::with_options(relays, options(0)).unwrap();
+        let status = client
+            .send(&SolarCompat::new(53).node_status())
+            .await
+            .unwrap();
+        assert_eq!(status.height, 42, "chunked: {chunked}");
+        assert_eq!(*asked.lock().unwrap(), 1);
+        assert_eq!(served.lock().unwrap().len(), 1);
+
+        // A relay that only answers so is unavailable.
+        let only =
+            HttpClient::with_options(vec![Relay::parse(&large).unwrap()], options(0)).unwrap();
+        let error = only
+            .send(&SolarCompat::new(53).node_status())
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "NodeUnavailable", "chunked: {chunked}");
+        assert!(error.to_string().contains("bytes"), "{error}");
+    }
+}

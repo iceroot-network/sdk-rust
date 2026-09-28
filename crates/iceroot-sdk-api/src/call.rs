@@ -3,7 +3,7 @@
 use std::fmt;
 
 use crate::error::ApiError;
-use crate::request::{Request, Response};
+use crate::request::{MAX_RESPONSE_BYTES, Request, Response};
 
 /// What a decoder may need besides the response: the account a history belongs to, the seat
 /// count that separates active validators from standby ones, the page asked for, the ids of a
@@ -67,10 +67,24 @@ impl<T> Call<T> {
     ///
     /// [`ApiError::RateLimited`] for HTTP 429, [`ApiError::NotFound`] for a 404 where the call
     /// expects the resource to exist, [`ApiError::Refused`] for other error statuses and
-    /// [`ApiError::BadResponse`] when the body does not have the documented shape.
+    /// [`ApiError::BadResponse`] when the body does not have the documented shape or is longer
+    /// than [`MAX_RESPONSE_BYTES`] (checked before it is parsed).
     pub fn decode(&self, response: &Response) -> Result<T, ApiError> {
+        check_size(response)?;
         (self.decode)(response, &self.context)
     }
+}
+
+/// [`ApiError::BadResponse`] for a body longer than [`MAX_RESPONSE_BYTES`].
+pub(crate) fn check_size(response: &Response) -> Result<(), ApiError> {
+    let length = response.body().len();
+    if length > MAX_RESPONSE_BYTES {
+        return Err(ApiError::BadResponse {
+            status: response.status(),
+            detail: format!("the answer is {length} bytes; at most {MAX_RESPONSE_BYTES} are read"),
+        });
+    }
+    Ok(())
 }
 
 impl<T> Clone for Call<T> {
@@ -88,5 +102,39 @@ impl<T> fmt::Debug for Call<T> {
         f.debug_struct("Call")
             .field("request", &self.request)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::solar_compat::SolarCompat;
+
+    use super::*;
+
+    #[test]
+    fn a_body_longer_than_the_limit_is_refused_before_it_is_parsed() {
+        let call = SolarCompat::new(53).node_status();
+        let head = r#"{"data":{"synced":true,"now":42,"blocksCount":0,"timestamp":330},"pad":""#;
+        let fits = format!(
+            "{head}{}\"}}",
+            "x".repeat(MAX_RESPONSE_BYTES - head.len() - 2)
+        );
+        assert_eq!(fits.len(), MAX_RESPONSE_BYTES);
+        assert_eq!(call.decode(&Response::new(200, fits)).unwrap().height, 42);
+        let long = format!(
+            "{head}{}\"}}",
+            "x".repeat(MAX_RESPONSE_BYTES - head.len() - 1)
+        );
+        let error = call.decode(&Response::new(200, long)).unwrap_err();
+        assert_eq!(
+            error,
+            ApiError::BadResponse {
+                status: 200,
+                detail: format!(
+                    "the answer is {} bytes; at most {MAX_RESPONSE_BYTES} are read",
+                    MAX_RESPONSE_BYTES + 1
+                ),
+            }
+        );
     }
 }

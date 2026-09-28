@@ -241,6 +241,14 @@ impl Request {
     }
 }
 
+/// The largest answer body the client reads, in bytes: 8 MiB. The largest answers of the node API
+/// (pages of 100 records, the crypto configuration) are far smaller. [`Call::decode`] refuses a
+/// longer body with [`ApiError::BadResponse`] before parsing it, and a transport reads no further:
+/// the `http` feature's client stops at the limit and tries the next relay.
+///
+/// [`Call::decode`]: crate::Call::decode
+pub const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+
 /// An HTTP response as the host's transport received it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response {

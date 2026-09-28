@@ -7,7 +7,9 @@
 //!
 //! Requests go to the relays and nowhere else: the client never follows a redirect (the node API
 //! does not redirect), and a relay that answers with one is skipped like a relay that cannot be
-//! reached. A proxy named in the process's environment (`HTTP_PROXY`, `HTTPS_PROXY` or
+//! reached. An answer is read up to [`MAX_RESPONSE_BYTES`] and never decompressed: a relay that
+//! declares or sends a longer body is skipped the same way, so no relay can make the client hold
+//! more than that. A proxy named in the process's environment (`HTTP_PROXY`, `HTTPS_PROXY` or
 //! `ALL_PROXY`, with `NO_PROXY` for exceptions) is used, as curl uses it: a plain-HTTP request,
 //! its headers included, then passes through that proxy, and an HTTPS request passes through it
 //! encrypted.
@@ -30,7 +32,7 @@ use std::time::{Duration, Instant};
 use crate::call::Call;
 use crate::error::ApiError;
 use crate::limits::{Backoff, RateLimit, RequestBudget};
-use crate::request::{Method, Relay, Request, Response};
+use crate::request::{MAX_RESPONSE_BYTES, Method, Relay, Request, Response};
 use crate::solar_compat::{SolarCompat, SubmitPlan};
 use crate::types::{SubmitReport, TxRecord};
 
@@ -142,7 +144,13 @@ impl HttpClient {
             .default_headers(headers)
             // A redirect would take the request, its headers and its body to a host the relay
             // list does not name; `fetch` skips a relay that answers with one.
-            .redirect(reqwest::redirect::Policy::none());
+            .redirect(reqwest::redirect::Policy::none())
+            // Answers are read as sent, so their size limit holds for what is held in memory,
+            // even where another dependency turns reqwest's decompression features on.
+            .no_gzip()
+            .no_brotli()
+            .no_deflate()
+            .no_zstd();
         #[cfg(target_os = "android")]
         let builder = builder.tls_certs_only(bundled_roots());
         let http = builder.build().map_err(|e| ApiError::NodeUnavailable {
@@ -202,7 +210,7 @@ impl HttpClient {
         if let Some(body) = call_request.body() {
             builder = builder.body(body.to_owned());
         }
-        let answer = builder.send().await.map_err(|e| transport_error(&e))?;
+        let mut answer = builder.send().await.map_err(|e| transport_error(&e))?;
         let status = answer.status().as_u16();
         if answer.status().is_redirection() {
             return Err(ApiError::NodeUnavailable {
@@ -218,8 +226,26 @@ impl HttpClient {
                 Some((name, value.to_owned()))
             })
             .collect();
-        let body = answer.bytes().await.map_err(|e| transport_error(&e))?;
-        let mut response = Response::new(status, body.to_vec());
+        let too_long = |length: u64| ApiError::NodeUnavailable {
+            detail: format!(
+                "{url} answered with a body of {length} bytes or more; at most {MAX_RESPONSE_BYTES} are read"
+            ),
+        };
+        let limit = u64::try_from(MAX_RESPONSE_BYTES).unwrap_or(u64::MAX);
+        let declared = answer.content_length();
+        if let Some(length) = declared.filter(|length| *length > limit) {
+            return Err(too_long(length));
+        }
+        let expected = declared.map_or(0, |length| usize::try_from(length).unwrap_or(0));
+        let mut body = Vec::with_capacity(expected);
+        while let Some(chunk) = answer.chunk().await.map_err(|e| transport_error(&e))? {
+            if body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+                let read = body.len().saturating_add(chunk.len());
+                return Err(too_long(u64::try_from(read).unwrap_or(u64::MAX)));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        let mut response = Response::new(status, body);
         for (name, value) in headers {
             response = response.with_header(name, value);
         }

@@ -410,6 +410,18 @@ pub(crate) fn to_text<T: Serialize>(value: &T) -> Result<String> {
 /// A response from its status, its headers (a JSON array of `[name, value]` pairs, or empty) and
 /// its body.
 pub(crate) fn response(status: u16, headers: &str, body: &[u8]) -> Result<Response> {
+    // A body longer than the client reads is refused before it is copied.
+    if body.len() > iceroot_sdk::api::MAX_RESPONSE_BYTES {
+        return Err(Error::from(ApiError::BadResponse {
+            status,
+            detail: format!(
+                "the answer is {} bytes; at most {} are read",
+                body.len(),
+                iceroot_sdk::api::MAX_RESPONSE_BYTES
+            ),
+        })
+        .into());
+    }
     let mut response = Response::new(status, body.to_vec());
     if headers.trim().is_empty() {
         return Ok(response);
@@ -674,6 +686,12 @@ mod tests {
         assert_eq!(refused.details()["status"], 503);
         assert_eq!(
             call.decode(200, "[]", b"{").unwrap_err().code(),
+            "BadResponse"
+        );
+        // A body longer than the client reads is refused before it is copied or parsed.
+        let long = vec![b' '; iceroot_sdk::api::MAX_RESPONSE_BYTES + 1];
+        assert_eq!(
+            call.decode(200, "[]", &long).unwrap_err().code(),
             "BadResponse"
         );
         for headers in ["{", "[[1,2]]", r#"[["a"]]"#, "{}"] {

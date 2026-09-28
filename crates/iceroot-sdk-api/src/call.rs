@@ -6,14 +6,16 @@ use crate::error::ApiError;
 use crate::request::{MAX_RESPONSE_BYTES, Request, Response};
 
 /// What a decoder may need besides the response: the account a history belongs to, the seat
-/// count that separates active validators from standby ones, the page asked for, the ids of a
-/// submission.
+/// count that separates active validators from standby ones, the page and page size asked for,
+/// the ids of a submission.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Context {
     pub account: Option<String>,
     pub name: Option<String>,
     pub seats: u32,
     pub page: u32,
+    /// The page size asked for; a page with more items is refused.
+    pub limit: u32,
     pub ids: Vec<String>,
 }
 

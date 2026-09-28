@@ -92,6 +92,16 @@ fn page<W: FromJson, T>(
 ) -> Result<Page<T>, ApiError> {
     let status = response.status();
     let paged: wire::Paged<Value> = body(response)?;
+    let count = paged.data.len();
+    if context.limit > 0 && count > usize::try_from(context.limit).unwrap_or(usize::MAX) {
+        return Err(ApiError::bad(
+            status,
+            format!(
+                "the page has {count} items; {} were asked for",
+                context.limit
+            ),
+        ));
+    }
     let mut items = Vec::with_capacity(paged.data.len());
     for item in &paged.data {
         let item = wire::read::<W>(item)

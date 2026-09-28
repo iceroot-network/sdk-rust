@@ -868,6 +868,15 @@ fn validators() {
     assert_eq!(e.total, e.rewards + e.fees - e.burned_fees - e.donations);
     assert_eq!(top.version.as_deref(), Some("4.3.1"));
 
+    // A page with more items than were asked for is refused: no relay makes a listing longer
+    // than the pages it was asked for.
+    let refused = API
+        .validators(PageRequest::first(50))
+        .decode(&fixture("delegates-page"))
+        .unwrap_err();
+    assert_eq!(refused.code(), "BadResponse");
+    assert!(refused.to_string().contains("56 items"), "{refused}");
+
     let second_page = API
         .validators(PageRequest::new(2, 50).unwrap())
         .decode(&fixture("delegates-page-2"))

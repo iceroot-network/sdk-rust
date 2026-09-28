@@ -385,8 +385,10 @@ fn blocks_validators_and_rounds() {
         check(&API.missed_slots(page()).decode(&fixture(name)).unwrap());
     }
 
+    // The recorded listings hold up to 100 validators, the page size they were read with.
     for name in ["delegates-page", "delegates-page-2"] {
-        let page = check(&API.validators(page()).decode(&fixture(name)).unwrap());
+        let listing = API.validators(PageRequest::first(100));
+        let page = check(&listing.decode(&fixture(name)).unwrap());
         for validator in page["items"].as_array().unwrap() {
             assert!(validator["voteWeight"].is_string());
             assert!(validator["production"]["produced"].is_string());

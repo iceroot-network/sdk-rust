@@ -233,6 +233,10 @@ pub struct VoteSnapshot {
     pub records: Vec<ValidatorRecord>,
 }
 
+/// The most records a snapshot may have: far more validators than any network registers, and few
+/// enough that a selection stays quick where it runs on a page's own thread.
+pub const MAX_RECORDS: usize = 10_000;
+
 /// Why a snapshot cannot be used. Its code is `InvalidSnapshot` ([`SnapshotError::code`]).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -268,6 +272,13 @@ pub enum SnapshotError {
         /// What is wrong.
         field: &'static str,
     },
+    /// The snapshot has more records than [`MAX_RECORDS`].
+    TooManyRecords {
+        /// The records given.
+        count: usize,
+        /// The most records accepted.
+        maximum: usize,
+    },
 }
 
 impl fmt::Display for SnapshotError {
@@ -288,6 +299,12 @@ impl fmt::Display for SnapshotError {
             SnapshotError::Inconsistent { name, field } => {
                 write!(f, "the record of {name} has an inconsistent {field}")
             }
+            SnapshotError::TooManyRecords { count, maximum } => {
+                write!(
+                    f,
+                    "the snapshot has {count} records; at most {maximum} are accepted"
+                )
+            }
         }
     }
 }
@@ -302,7 +319,7 @@ impl SnapshotError {
     }
 
     /// A stable string for the problem: `window`, `no-seats`, `no-block-time`, `name`,
-    /// `duplicate-name`, `duplicate-address` or `inconsistent`.
+    /// `duplicate-name`, `duplicate-address`, `inconsistent` or `too-many-records`.
     pub const fn as_str(&self) -> &'static str {
         match self {
             SnapshotError::Window { .. } => "window",
@@ -312,12 +329,13 @@ impl SnapshotError {
             SnapshotError::DuplicateName { .. } => "duplicate-name",
             SnapshotError::DuplicateAddress { .. } => "duplicate-address",
             SnapshotError::Inconsistent { .. } => "inconsistent",
+            SnapshotError::TooManyRecords { .. } => "too-many-records",
         }
     }
 
     /// The structured details of the error, as a JSON object: `reason` ([`SnapshotError::as_str`])
-    /// and the problem's values, `days`, `name`, `address`, or `name` and `field` for an
-    /// inconsistent record, where `field` is the record's field as the TypeScript SDK names it
+    /// and the problem's values, `days`, `name`, `address`, `count` and `maximum` for too many
+    /// records, or `name` and `field` for an inconsistent record, where `field` is the record's field as the TypeScript SDK names it
     /// (`production`, `seatedDaysInWindow`, `registeredHeight`, `selfFundedWeightBp` or
     /// `status`). The keys of each reason are part of the API.
     pub fn details(&self) -> Value {
@@ -340,16 +358,25 @@ impl SnapshotError {
                 };
                 json!({ "reason": reason, "name": name, "field": field })
             }
+            SnapshotError::TooManyRecords { count, maximum } => {
+                json!({ "reason": reason, "count": count, "maximum": maximum })
+            }
         }
     }
 }
 
 impl VoteSnapshot {
-    /// Check that the snapshot can be used: a 30-day window, seats and a block time, unique valid
-    /// names and unique addresses, and consistent records (forged at most assigned, seated days
-    /// within the window, registration not after the snapshot, shares at most 10,000 basis
-    /// points, resigned validators without a seat).
+    /// Check that the snapshot can be used: a 30-day window, seats and a block time, at most
+    /// [`MAX_RECORDS`] records, unique valid names and unique addresses, and consistent records
+    /// (forged at most assigned, seated days within the window, registration not after the
+    /// snapshot, shares at most 10,000 basis points, resigned validators without a seat).
     pub fn validate(&self) -> Result<(), SnapshotError> {
+        if self.records.len() > MAX_RECORDS {
+            return Err(SnapshotError::TooManyRecords {
+                count: self.records.len(),
+                maximum: MAX_RECORDS,
+            });
+        }
         if self.window_days != WINDOW_DAYS {
             return Err(SnapshotError::Window {
                 days: self.window_days,
@@ -458,6 +485,9 @@ impl VoteSnapshot {
     /// election interval would otherwise count as a whole window of seated days, and its perfect
     /// lifetime counters would lead Reliability. There are no declarations, payouts, penalties or
     /// self-funded shares.
+    ///
+    /// A validator listed more than once, as a list read page by page while ranks shift can list
+    /// it, is kept once, as first listed.
     pub fn from_relay(relay: RelaySnapshot) -> VoteSnapshot {
         let RelaySnapshot {
             height,
@@ -473,7 +503,11 @@ impl VoteSnapshot {
             source: SnapshotSource::RelayApproximate,
             records: Vec::with_capacity(validators.len()),
         };
+        let mut listed = std::collections::BTreeSet::new();
         for validator in validators {
+            if !listed.insert(validator.name.clone()) {
+                continue;
+            }
             let status = match validator.resignation {
                 Some(Resignation::Temporary) => ValidatorStatus::ResignedTemporary,
                 Some(Resignation::Permanent) => ValidatorStatus::ResignedPermanent,
@@ -652,6 +686,42 @@ mod tests {
             Err(SnapshotError::InvalidName { .. })
         ));
         bad.records[0].name = "a".to_owned();
+        bad.records[0].production = Some(Production {
+            forged: 11,
+            assigned: 10,
+        });
+        assert!(matches!(
+            bad.validate(),
+            Err(SnapshotError::Inconsistent { .. })
+        ));
+        // No network has more registered validators than MAX_RECORDS.
+        let names: Vec<String> = (0..=MAX_RECORDS)
+            .map(|i| {
+                let letter =
+                    |shift: usize| char::from(b'a' + u8::try_from(i / shift % 26).unwrap());
+                format!("v{}{}{}", letter(676), letter(26), letter(1))
+            })
+            .collect();
+        let many = snapshot(names.iter().map(|name| record(name)).collect());
+        assert_eq!(
+            many.validate(),
+            Err(SnapshotError::TooManyRecords {
+                count: MAX_RECORDS + 1,
+                maximum: MAX_RECORDS
+            })
+        );
+        assert_eq!(
+            many.validate().unwrap_err().details(),
+            json!({ "reason": "too-many-records", "count": MAX_RECORDS + 1, "maximum": MAX_RECORDS })
+        );
+        let most = snapshot(
+            names[..MAX_RECORDS]
+                .iter()
+                .map(|name| record(name))
+                .collect(),
+        );
+        assert_eq!(most.validate(), Ok(()));
+        let mut bad = snapshot(vec![record("a")]);
         bad.records[0].production = Some(Production {
             forged: 11,
             assigned: 10,

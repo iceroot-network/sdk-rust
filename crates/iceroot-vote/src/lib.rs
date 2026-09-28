@@ -112,7 +112,7 @@ pub use select::{
     SelectRequest, Selection, select,
 };
 pub use snapshot::{
-    Declarations, ELECTION_INTERVAL_ROUNDS, Payouts, Penalties, Production, RelaySnapshot,
-    RelayValidator, Resignation, SnapshotError, SnapshotSource, ValidatorRecord, ValidatorStatus,
-    VoteSnapshot, Voter, WINDOW_DAYS,
+    Declarations, ELECTION_INTERVAL_ROUNDS, MAX_RECORDS, Payouts, Penalties, Production,
+    RelaySnapshot, RelayValidator, Resignation, SnapshotError, SnapshotSource, ValidatorRecord,
+    ValidatorStatus, VoteSnapshot, Voter, WINDOW_DAYS,
 };

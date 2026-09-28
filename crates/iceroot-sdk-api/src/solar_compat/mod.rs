@@ -292,6 +292,7 @@ impl SolarCompat {
     fn paged(&self, page: PageRequest) -> Context {
         Context {
             page: page.page,
+            limit: page.limit,
             ..self.context()
         }
     }

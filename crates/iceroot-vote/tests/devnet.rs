@@ -94,6 +94,21 @@ fn relay_data_becomes_an_approximate_snapshot() {
 }
 
 #[test]
+fn a_validator_read_twice_from_shifting_pages_is_kept_once() {
+    // A validator list read page by page while ranks shift can list a validator twice: the first
+    // reading is kept, and the snapshot is usable.
+    let mut relay = devnet_relay();
+    let again = relay.validators[3].clone();
+    let mut moved = again.clone();
+    moved.rank = moved.rank.map(|rank| rank + 1);
+    relay.validators.push(moved);
+    let s = VoteSnapshot::from_relay(relay);
+    assert_eq!(s.records.len(), 56);
+    assert_eq!(s.validate(), Ok(()));
+    assert_eq!(s.record(&again.name).unwrap().rank, again.rank);
+}
+
+#[test]
 fn diversity_works_on_rank_bands() {
     let s = devnet();
     // Every validator that has not resigned, except one at 90 % over its lifetime.

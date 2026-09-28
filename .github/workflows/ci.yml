@@ -171,6 +171,50 @@ jobs:
           echo "$kind"
           [[ "$kind" == "ELF 64-bit LSB shared object, ARM aarch64"* ]]
 
+  # The Tauri plugin for macOS and iOS, on a macOS runner: Xcode supplies both SDKs, the linker
+  # and, for iOS, the Swift compiler Tauri's build script builds its Swift library with. Nothing
+  # runs on a device or in a simulator.
+  tauri-plugin-apple:
+    needs: production-merge
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || needs.production-merge.result == 'success') }}
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: crates/tauri-plugin-iceroot
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: '1.98.0'
+          targets: aarch64-apple-darwin,aarch64-apple-ios
+      - name: Read access to heartwood-core
+        working-directory: .
+        env:
+          HEARTWOOD_TOKEN: ${{ secrets.HEARTWOOD_TOKEN }}
+        run: tools/ci/heartwood-access.sh
+      # The library alone is only compiled; linking it as a shared library also runs Apple's
+      # linker, which refuses a symbol that nothing defines. rustc and the C builds find each
+      # target's SDK through xcrun, so SDKROOT stays unset: set to the iOS SDK, it would also
+      # reach the build scripts, which are built for macOS.
+      - name: Build and link for macOS and iOS
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+          xcrun --sdk iphoneos --show-sdk-version
+          for target in aarch64-apple-darwin aarch64-apple-ios; do
+            cargo build --locked --release --target "$target"
+            cargo rustc --locked --release --target "$target" --lib --crate-type cdylib
+            dylib="target/$target/release/libtauri_plugin_iceroot.dylib"
+            test -s "$dylib"
+            kind=$(file -b "$dylib")
+            echo "$kind"
+            [[ "$kind" == "Mach-O 64-bit dynamically linked shared library arm64"* ]]
+          done
+
   # Heartwood Core's dev branch, where the next heartwood-crypto tag is prepared. A failure here
   # warns before the next tag; it does not block a merge.
   heartwood-canary:

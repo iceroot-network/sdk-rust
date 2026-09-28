@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
 
 concurrency:
   group: sdk-rust-${{ github.event_name }}-${{ github.ref }}
@@ -22,6 +21,9 @@ env:
 
 jobs:
   production-merge:
+    permissions:
+      contents: read
+      pull-requests: read
     if: github.event_name == 'push' && github.event.created == false
     runs-on: ubuntu-latest
     timeout-minutes: 3
@@ -64,7 +66,7 @@ jobs:
             (sudo apt-get update && sudo apt-get install -y --no-install-recommends clang-18 llvm-18)
       - name: Read access to heartwood-core
         env:
-          HEARTWOOD_DEPLOY_KEY: ${{ secrets.HEARTWOOD_DEPLOY_KEY }}
+          HEARTWOOD_TOKEN: ${{ secrets.HEARTWOOD_TOKEN }}
         run: tools/ci/heartwood-access.sh
       # The cache holds Cargo's git database, which is heartwood-core's history while that
       # repository is private. A pull request from a fork can restore the caches of this
@@ -119,7 +121,7 @@ jobs:
       - name: Read access to heartwood-core
         working-directory: .
         env:
-          HEARTWOOD_DEPLOY_KEY: ${{ secrets.HEARTWOOD_DEPLOY_KEY }}
+          HEARTWOOD_TOKEN: ${{ secrets.HEARTWOOD_TOKEN }}
         run: tools/ci/heartwood-access.sh
       # As in the checks job, only pull request runs save the cache.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -187,14 +189,14 @@ jobs:
           repository: iceroot-network/heartwood-core
           ref: dev
           path: heartwood-core
-          ssh-key: ${{ secrets.HEARTWOOD_DEPLOY_KEY }}
+          token: ${{ secrets.HEARTWOOD_TOKEN }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
           toolchain: '1.98.0'
       - name: Read access to heartwood-core
         env:
-          HEARTWOOD_DEPLOY_KEY: ${{ secrets.HEARTWOOD_DEPLOY_KEY }}
+          HEARTWOOD_TOKEN: ${{ secrets.HEARTWOOD_TOKEN }}
         run: sdk-rust/tools/ci/heartwood-access.sh
       - name: Tests against heartwood-core dev
         working-directory: sdk-rust

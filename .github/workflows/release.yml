@@ -7,7 +7,7 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: sdk-rust-release-${{ github.ref }}
@@ -20,6 +20,8 @@ env:
 
 jobs:
   release:
+    permissions:
+      contents: write
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -41,7 +43,7 @@ jobs:
             (sudo apt-get update && sudo apt-get install -y --no-install-recommends clang-18 llvm-18)
       - name: Read access to heartwood-core
         env:
-          HEARTWOOD_DEPLOY_KEY: ${{ secrets.HEARTWOOD_DEPLOY_KEY }}
+          HEARTWOOD_TOKEN: ${{ secrets.HEARTWOOD_TOKEN }}
         run: tools/ci/heartwood-access.sh
       - name: Lints, native, with every feature
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings

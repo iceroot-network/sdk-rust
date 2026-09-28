@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-key-release"
+description = "Enables the key_release command without any pre-configured scope."
+commands.allow = ["key_release"]
+
+[[permission]]
+identifier = "deny-key-release"
+description = "Denies the key_release command without any pre-configured scope."
+commands.deny = ["key_release"]

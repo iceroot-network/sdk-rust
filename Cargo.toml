@@ -1,6 +1,10 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# The Tauri plugin builds against Tauri and the platform's webview libraries (WebKitGTK on Linux),
+# which no other crate needs, so it is a workspace of its own: see
+# crates/tauri-plugin-iceroot/README.md.
+exclude = ["crates/tauri-plugin-iceroot"]
 
 [workspace.package]
 version = "0.1.0"

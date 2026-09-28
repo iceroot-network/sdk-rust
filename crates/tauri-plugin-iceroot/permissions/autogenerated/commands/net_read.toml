@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-net-read"
+description = "Enables the net_read command without any pre-configured scope."
+commands.allow = ["net_read"]
+
+[[permission]]
+identifier = "deny-net-read"
+description = "Denies the net_read command without any pre-configured scope."
+commands.deny = ["net_read"]

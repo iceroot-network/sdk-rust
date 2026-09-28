@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-address-from-public-key"
+description = "Enables the address_from_public_key command without any pre-configured scope."
+commands.allow = ["address_from_public_key"]
+
+[[permission]]
+identifier = "deny-address-from-public-key"
+description = "Denies the address_from_public_key command without any pre-configured scope."
+commands.deny = ["address_from_public_key"]

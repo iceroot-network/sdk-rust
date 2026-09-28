@@ -1,0 +1,23 @@
+"$schema" = "schemas/schema.json"
+
+[[permission]]
+identifier = "test-seams"
+description = """
+The commands of the plugin's test build (the feature `test-seams`), for the SDK's own tests: \
+signatures and ownership proofs with fixed auxiliary randomness, keystores with given salts and \
+nonces under lowered bounds, and the constants of the vote library and the keystore. A build \
+without the feature has none of these commands, so this permission allows nothing there. Never \
+grant it in an application.
+"""
+commands.allow = [
+    "seam_sha256",
+    "seam_key_sign_message_with_aux",
+    "seam_draft_sign_with_aux",
+    "seam_proof_key_sign_with_aux",
+    "seam_vote_library",
+    "seam_vote_snapshot_from_relay",
+    "seam_keystore_constants",
+    "seam_keystore_encrypt_with_salt_and_nonce",
+    "seam_keystore_decrypt_with_bounds",
+    "seam_keystore_check_params_with_bounds",
+]

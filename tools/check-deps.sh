@@ -14,6 +14,10 @@
 #     caller's salt and nonce) on a normal or build edge;
 #   - tokio, reqwest or hyper is in the build for wasm32-unknown-unknown.
 #
+# The Tauri plugin (crates/tauri-plugin-iceroot) is a workspace of its own; the first three checks
+# apply to its tree as well, with its default features (its feature `test-seams` is the test
+# build's, which no application enables).
+#
 # Runs from any directory; needs cargo on PATH.
 set -euo pipefail
 
@@ -25,9 +29,16 @@ tree() {
     cargo tree --manifest-path "$root/Cargo.toml" --workspace --prefix none "$@"
 }
 
-# Each tree is read into a variable first, so that a failing cargo fails the guard.
+plugin_tree() {
+    cargo tree --manifest-path "$root/crates/tauri-plugin-iceroot/Cargo.toml" --prefix none "$@"
+}
+
+# Each tree is read into a variable first, so that a failing cargo fails the guard. The plugin's
+# edges are checked with the workspace's.
 all_edges=$(tree --target all -e all --format '{p}')
+all_edges+=$'\n'$(plugin_tree --target all -e all --format '{p}')
 normal_edges=$(tree --target all -e normal,build --format '{p}|{f}')
+normal_edges+=$'\n'$(plugin_tree --target all -e normal,build --format '{p}|{f}')
 wasm_edges=$(tree --target wasm32-unknown-unknown -e normal,build --format '{p}')
 
 # 1. No consensus or node crate of heartwood-core, anywhere.

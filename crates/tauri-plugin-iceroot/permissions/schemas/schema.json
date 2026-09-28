@@ -1,0 +1,936 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PermissionFile",
+  "description": "Permission file that can define a default permission, a set of permissions or a list of inlined permissions.",
+  "type": "object",
+  "properties": {
+    "default": {
+      "description": "The default permission set for the plugin",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/DefaultPermission"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "set": {
+      "description": "A list of permissions sets defined",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/PermissionSet"
+      }
+    },
+    "permission": {
+      "description": "A list of inlined permissions",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Permission"
+      }
+    }
+  },
+  "definitions": {
+    "DefaultPermission": {
+      "description": "The default permission set of the plugin.\n\nWorks similarly to a permission with the \"default\" identifier.",
+      "type": "object",
+      "required": [
+        "permissions"
+      ],
+      "properties": {
+        "version": {
+          "description": "The version of the permission.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 1.0
+        },
+        "description": {
+          "description": "Human-readable description of what the permission does. Tauri convention is to use `<h4>` headings in markdown content for Tauri documentation generation purposes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "permissions": {
+          "description": "All permissions this set contains.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "PermissionSet": {
+      "description": "A set of direct permissions grouped together under a new name.",
+      "type": "object",
+      "required": [
+        "description",
+        "identifier",
+        "permissions"
+      ],
+      "properties": {
+        "identifier": {
+          "description": "A unique identifier for the permission.",
+          "type": "string"
+        },
+        "description": {
+          "description": "Human-readable description of what the permission does.",
+          "type": "string"
+        },
+        "permissions": {
+          "description": "All permissions this set contains.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PermissionKind"
+          }
+        }
+      }
+    },
+    "Permission": {
+      "description": "Descriptions of explicit privileges of commands.\n\nIt can enable commands to be accessible in the frontend of the application.\n\nIf the scope is defined it can be used to fine grain control the access of individual or multiple commands.",
+      "type": "object",
+      "required": [
+        "identifier"
+      ],
+      "properties": {
+        "version": {
+          "description": "The version of the permission.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 1.0
+        },
+        "identifier": {
+          "description": "A unique identifier for the permission.",
+          "type": "string"
+        },
+        "description": {
+          "description": "Human-readable description of what the permission does. Tauri internal convention is to use `<h4>` headings in markdown content for Tauri documentation generation purposes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commands": {
+          "description": "Allowed or denied commands when using this permission.",
+          "default": {
+            "allow": [],
+            "deny": []
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/Commands"
+            }
+          ]
+        },
+        "scope": {
+          "description": "Allowed or denied scoped when using this permission.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Scopes"
+            }
+          ]
+        },
+        "platforms": {
+          "description": "Target platforms this permission applies. By default all platforms are affected by this permission.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Target"
+          }
+        }
+      }
+    },
+    "Commands": {
+      "description": "Allowed and denied commands inside a permission.\n\nIf two commands clash inside of `allow` and `deny`, it should be denied by default.",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Allowed command.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny": {
+          "description": "Denied command, which takes priority.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Scopes": {
+      "description": "An argument for fine grained behavior control of Tauri commands.\n\nIt can be of any serde serializable type and is used to allow or prevent certain actions inside a Tauri command. The configured scope is passed to the command and will be enforced by the command implementation.\n\n## Example\n\n```json { \"allow\": [{ \"path\": \"$HOME/**\" }], \"deny\": [{ \"path\": \"$HOME/secret.txt\" }] } ```",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Data that defines what is allowed by the scope.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Value"
+          }
+        },
+        "deny": {
+          "description": "Data that defines what is denied by the scope. This should be prioritized by validation logic.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/Value"
+          }
+        }
+      }
+    },
+    "Value": {
+      "description": "All supported ACL values.",
+      "anyOf": [
+        {
+          "description": "Represents a null JSON value.",
+          "type": "null"
+        },
+        {
+          "description": "Represents a [`bool`].",
+          "type": "boolean"
+        },
+        {
+          "description": "Represents a valid ACL [`Number`].",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Number"
+            }
+          ]
+        },
+        {
+          "description": "Represents a [`String`].",
+          "type": "string"
+        },
+        {
+          "description": "Represents a list of other [`Value`]s.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Value"
+          }
+        },
+        {
+          "description": "Represents a map of [`String`] keys to [`Value`]s.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/Value"
+          }
+        }
+      ]
+    },
+    "Number": {
+      "description": "A valid ACL number.",
+      "anyOf": [
+        {
+          "description": "Represents an [`i64`].",
+          "type": "integer",
+          "format": "int64"
+        },
+        {
+          "description": "Represents a [`f64`].",
+          "type": "number",
+          "format": "double"
+        }
+      ]
+    },
+    "Target": {
+      "description": "Platform target.",
+      "oneOf": [
+        {
+          "description": "MacOS.",
+          "type": "string",
+          "enum": [
+            "macOS"
+          ]
+        },
+        {
+          "description": "Windows.",
+          "type": "string",
+          "enum": [
+            "windows"
+          ]
+        },
+        {
+          "description": "Linux.",
+          "type": "string",
+          "enum": [
+            "linux"
+          ]
+        },
+        {
+          "description": "Android.",
+          "type": "string",
+          "enum": [
+            "android"
+          ]
+        },
+        {
+          "description": "iOS.",
+          "type": "string",
+          "enum": [
+            "iOS"
+          ]
+        }
+      ]
+    },
+    "PermissionKind": {
+      "type": "string",
+      "oneOf": [
+        {
+          "description": "Enables the address_from_public_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-address-from-public-key",
+          "markdownDescription": "Enables the address_from_public_key command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the address_from_public_key command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-address-from-public-key",
+          "markdownDescription": "Denies the address_from_public_key command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the address_parse command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-address-parse",
+          "markdownDescription": "Enables the address_parse command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the address_parse command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-address-parse",
+          "markdownDescription": "Denies the address_parse command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the amount_format command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-amount-format",
+          "markdownDescription": "Enables the amount_format command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the amount_format command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-amount-format",
+          "markdownDescription": "Denies the amount_format command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the amount_parse command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-amount-parse",
+          "markdownDescription": "Enables the amount_parse command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the amount_parse command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-amount-parse",
+          "markdownDescription": "Denies the amount_parse command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the chain_economics command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-chain-economics",
+          "markdownDescription": "Enables the chain_economics command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the chain_economics command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-chain-economics",
+          "markdownDescription": "Denies the chain_economics command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the chain_free command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-chain-free",
+          "markdownDescription": "Enables the chain_free command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the chain_free command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-chain-free",
+          "markdownDescription": "Denies the chain_free command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the chain_load command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-chain-load",
+          "markdownDescription": "Enables the chain_load command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the chain_load command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-chain-load",
+          "markdownDescription": "Denies the chain_load command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the chain_rules command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-chain-rules",
+          "markdownDescription": "Enables the chain_rules command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the chain_rules command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-chain-rules",
+          "markdownDescription": "Denies the chain_rules command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the chain_stage_at command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-chain-stage-at",
+          "markdownDescription": "Enables the chain_stage_at command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the chain_stage_at command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-chain-stage-at",
+          "markdownDescription": "Denies the chain_stage_at command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the draft_build command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-draft-build",
+          "markdownDescription": "Enables the draft_build command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the draft_build command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-draft-build",
+          "markdownDescription": "Denies the draft_build command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the draft_deserialize command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-draft-deserialize",
+          "markdownDescription": "Enables the draft_deserialize command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the draft_deserialize command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-draft-deserialize",
+          "markdownDescription": "Denies the draft_deserialize command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the draft_online_facts command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-draft-online-facts",
+          "markdownDescription": "Enables the draft_online_facts command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the draft_online_facts command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-draft-online-facts",
+          "markdownDescription": "Denies the draft_online_facts command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the draft_sign command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-draft-sign",
+          "markdownDescription": "Enables the draft_sign command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the draft_sign command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-draft-sign",
+          "markdownDescription": "Denies the draft_sign command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the key_from_keystore command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-key-from-keystore",
+          "markdownDescription": "Enables the key_from_keystore command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the key_from_keystore command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-key-from-keystore",
+          "markdownDescription": "Denies the key_from_keystore command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the key_from_legacy_passphrase command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-key-from-legacy-passphrase",
+          "markdownDescription": "Enables the key_from_legacy_passphrase command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the key_from_legacy_passphrase command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-key-from-legacy-passphrase",
+          "markdownDescription": "Denies the key_from_legacy_passphrase command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the key_from_phrase command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-key-from-phrase",
+          "markdownDescription": "Enables the key_from_phrase command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the key_from_phrase command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-key-from-phrase",
+          "markdownDescription": "Denies the key_from_phrase command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the key_release command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-key-release",
+          "markdownDescription": "Enables the key_release command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the key_release command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-key-release",
+          "markdownDescription": "Denies the key_release command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the key_sign_message command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-key-sign-message",
+          "markdownDescription": "Enables the key_sign_message command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the key_sign_message command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-key-sign-message",
+          "markdownDescription": "Denies the key_sign_message command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the keystore_armor command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-keystore-armor",
+          "markdownDescription": "Enables the keystore_armor command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the keystore_armor command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-keystore-armor",
+          "markdownDescription": "Denies the keystore_armor command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the keystore_change_password command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-keystore-change-password",
+          "markdownDescription": "Enables the keystore_change_password command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the keystore_change_password command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-keystore-change-password",
+          "markdownDescription": "Denies the keystore_change_password command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the keystore_check_params command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-keystore-check-params",
+          "markdownDescription": "Enables the keystore_check_params command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the keystore_check_params command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-keystore-check-params",
+          "markdownDescription": "Denies the keystore_check_params command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the keystore_dearmor command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-keystore-dearmor",
+          "markdownDescription": "Enables the keystore_dearmor command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the keystore_dearmor command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-keystore-dearmor",
+          "markdownDescription": "Denies the keystore_dearmor command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the keystore_decrypt command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-keystore-decrypt",
+          "markdownDescription": "Enables the keystore_decrypt command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the keystore_decrypt command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-keystore-decrypt",
+          "markdownDescription": "Denies the keystore_decrypt command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the keystore_encrypt command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-keystore-encrypt",
+          "markdownDescription": "Enables the keystore_encrypt command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the keystore_encrypt command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-keystore-encrypt",
+          "markdownDescription": "Denies the keystore_encrypt command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the keystore_inspect command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-keystore-inspect",
+          "markdownDescription": "Enables the keystore_inspect command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the keystore_inspect command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-keystore-inspect",
+          "markdownDescription": "Denies the keystore_inspect command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the keystore_is_weaker command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-keystore-is-weaker",
+          "markdownDescription": "Enables the keystore_is_weaker command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the keystore_is_weaker command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-keystore-is-weaker",
+          "markdownDescription": "Denies the keystore_is_weaker command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the keystore_reencrypt command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-keystore-reencrypt",
+          "markdownDescription": "Enables the keystore_reencrypt command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the keystore_reencrypt command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-keystore-reencrypt",
+          "markdownDescription": "Denies the keystore_reencrypt command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the message_verify command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-message-verify",
+          "markdownDescription": "Enables the message_verify command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the message_verify command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-message-verify",
+          "markdownDescription": "Denies the message_verify command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the net_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-net-close",
+          "markdownDescription": "Enables the net_close command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the net_close command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-net-close",
+          "markdownDescription": "Denies the net_close command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the net_connect command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-net-connect",
+          "markdownDescription": "Enables the net_connect command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the net_connect command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-net-connect",
+          "markdownDescription": "Denies the net_connect command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the net_node_configuration command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-net-node-configuration",
+          "markdownDescription": "Enables the net_node_configuration command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the net_node_configuration command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-net-node-configuration",
+          "markdownDescription": "Denies the net_node_configuration command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the net_read command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-net-read",
+          "markdownDescription": "Enables the net_read command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the net_read command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-net-read",
+          "markdownDescription": "Denies the net_read command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the net_submit command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-net-submit",
+          "markdownDescription": "Enables the net_submit command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the net_submit command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-net-submit",
+          "markdownDescription": "Denies the net_submit command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ownership_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ownership-call",
+          "markdownDescription": "Enables the ownership_call command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ownership_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ownership-call",
+          "markdownDescription": "Denies the ownership_call command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the phrase_check command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-phrase-check",
+          "markdownDescription": "Enables the phrase_check command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the phrase_check command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-phrase-check",
+          "markdownDescription": "Denies the phrase_check command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the phrase_generate command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-phrase-generate",
+          "markdownDescription": "Enables the phrase_generate command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the phrase_generate command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-phrase-generate",
+          "markdownDescription": "Denies the phrase_generate command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the profile_capabilities command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-profile-capabilities",
+          "markdownDescription": "Enables the profile_capabilities command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the profile_capabilities command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-profile-capabilities",
+          "markdownDescription": "Denies the profile_capabilities command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the profile_message_algorithm command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-profile-message-algorithm",
+          "markdownDescription": "Enables the profile_message_algorithm command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the profile_message_algorithm command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-profile-message-algorithm",
+          "markdownDescription": "Denies the profile_message_algorithm command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the profile_message_network command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-profile-message-network",
+          "markdownDescription": "Enables the profile_message_network command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the profile_message_network command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-profile-message-network",
+          "markdownDescription": "Denies the profile_message_network command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the proof_key_from_passphrase command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-proof-key-from-passphrase",
+          "markdownDescription": "Enables the proof_key_from_passphrase command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the proof_key_from_passphrase command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-proof-key-from-passphrase",
+          "markdownDescription": "Denies the proof_key_from_passphrase command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the proof_key_release command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-proof-key-release",
+          "markdownDescription": "Enables the proof_key_release command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the proof_key_release command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-proof-key-release",
+          "markdownDescription": "Denies the proof_key_release command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the proof_key_sign command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-proof-key-sign",
+          "markdownDescription": "Enables the proof_key_sign command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the proof_key_sign command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-proof-key-sign",
+          "markdownDescription": "Denies the proof_key_sign command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the signed_decode command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-signed-decode",
+          "markdownDescription": "Enables the signed_decode command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the signed_decode command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-signed-decode",
+          "markdownDescription": "Denies the signed_decode command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the signed_deserialize command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-signed-deserialize",
+          "markdownDescription": "Enables the signed_deserialize command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the signed_deserialize command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-signed-deserialize",
+          "markdownDescription": "Denies the signed_deserialize command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the signed_from_json command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-signed-from-json",
+          "markdownDescription": "Enables the signed_from_json command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the signed_from_json command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-signed-from-json",
+          "markdownDescription": "Denies the signed_from_json command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the signed_verify_second_signature command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-signed-verify-second-signature",
+          "markdownDescription": "Enables the signed_verify_second_signature command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the signed_verify_second_signature command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-signed-verify-second-signature",
+          "markdownDescription": "Denies the signed_verify_second_signature command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the signin_build command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-signin-build",
+          "markdownDescription": "Enables the signin_build command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the signin_build command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-signin-build",
+          "markdownDescription": "Denies the signin_build command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the signin_parse command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-signin-parse",
+          "markdownDescription": "Enables the signin_parse command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the signin_parse command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-signin-parse",
+          "markdownDescription": "Denies the signin_parse command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the version command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-version",
+          "markdownDescription": "Enables the version command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the version command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-version",
+          "markdownDescription": "Denies the version command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the vote_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-vote-call",
+          "markdownDescription": "Enables the vote_call command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the vote_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-vote-call",
+          "markdownDescription": "Denies the vote_call command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the vote_rules_at command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-vote-rules-at",
+          "markdownDescription": "Enables the vote_rules_at command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the vote_rules_at command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-vote-rules-at",
+          "markdownDescription": "Denies the vote_rules_at command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the vote_snapshot_from_validators command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-vote-snapshot-from-validators",
+          "markdownDescription": "Enables the vote_snapshot_from_validators command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the vote_snapshot_from_validators command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-vote-snapshot-from-validators",
+          "markdownDescription": "Denies the vote_snapshot_from_validators command without any pre-configured scope."
+        },
+        {
+          "description": "Every command of the SDK: keys, signing, drafts, the node API client, the vote library, the\nkeystore and ownership proofs. Connecting to a network also needs the relays it may reach, as the\n`allow` scope of `allow-net-connect`: no relay is reachable by default.\n\n#### This default permission set includes:\n\n- `allow-version`\n- `allow-profile-capabilities`\n- `allow-profile-message-network`\n- `allow-profile-message-algorithm`\n- `allow-phrase-generate`\n- `allow-phrase-check`\n- `allow-address-parse`\n- `allow-address-from-public-key`\n- `allow-amount-parse`\n- `allow-amount-format`\n- `allow-message-verify`\n- `allow-signin-build`\n- `allow-signin-parse`\n- `allow-key-from-phrase`\n- `allow-key-from-legacy-passphrase`\n- `allow-key-from-keystore`\n- `allow-key-sign-message`\n- `allow-key-release`\n- `allow-chain-load`\n- `allow-chain-stage-at`\n- `allow-chain-rules`\n- `allow-chain-economics`\n- `allow-chain-free`\n- `allow-draft-build`\n- `allow-draft-deserialize`\n- `allow-draft-online-facts`\n- `allow-draft-sign`\n- `allow-signed-deserialize`\n- `allow-signed-from-json`\n- `allow-signed-decode`\n- `allow-signed-verify-second-signature`\n- `allow-net-read`\n- `allow-net-node-configuration`\n- `allow-net-submit`\n- `allow-net-close`\n- `allow-vote-call`\n- `allow-vote-rules-at`\n- `allow-vote-snapshot-from-validators`\n- `allow-keystore-encrypt`\n- `allow-keystore-decrypt`\n- `allow-keystore-inspect`\n- `allow-keystore-change-password`\n- `allow-keystore-reencrypt`\n- `allow-keystore-armor`\n- `allow-keystore-dearmor`\n- `allow-keystore-check-params`\n- `allow-keystore-is-weaker`\n- `allow-ownership-call`\n- `allow-proof-key-from-passphrase`\n- `allow-proof-key-sign`\n- `allow-proof-key-release`",
+          "type": "string",
+          "const": "default",
+          "markdownDescription": "Every command of the SDK: keys, signing, drafts, the node API client, the vote library, the\nkeystore and ownership proofs. Connecting to a network also needs the relays it may reach, as the\n`allow` scope of `allow-net-connect`: no relay is reachable by default.\n\n#### This default permission set includes:\n\n- `allow-version`\n- `allow-profile-capabilities`\n- `allow-profile-message-network`\n- `allow-profile-message-algorithm`\n- `allow-phrase-generate`\n- `allow-phrase-check`\n- `allow-address-parse`\n- `allow-address-from-public-key`\n- `allow-amount-parse`\n- `allow-amount-format`\n- `allow-message-verify`\n- `allow-signin-build`\n- `allow-signin-parse`\n- `allow-key-from-phrase`\n- `allow-key-from-legacy-passphrase`\n- `allow-key-from-keystore`\n- `allow-key-sign-message`\n- `allow-key-release`\n- `allow-chain-load`\n- `allow-chain-stage-at`\n- `allow-chain-rules`\n- `allow-chain-economics`\n- `allow-chain-free`\n- `allow-draft-build`\n- `allow-draft-deserialize`\n- `allow-draft-online-facts`\n- `allow-draft-sign`\n- `allow-signed-deserialize`\n- `allow-signed-from-json`\n- `allow-signed-decode`\n- `allow-signed-verify-second-signature`\n- `allow-net-read`\n- `allow-net-node-configuration`\n- `allow-net-submit`\n- `allow-net-close`\n- `allow-vote-call`\n- `allow-vote-rules-at`\n- `allow-vote-snapshot-from-validators`\n- `allow-keystore-encrypt`\n- `allow-keystore-decrypt`\n- `allow-keystore-inspect`\n- `allow-keystore-change-password`\n- `allow-keystore-reencrypt`\n- `allow-keystore-armor`\n- `allow-keystore-dearmor`\n- `allow-keystore-check-params`\n- `allow-keystore-is-weaker`\n- `allow-ownership-call`\n- `allow-proof-key-from-passphrase`\n- `allow-proof-key-sign`\n- `allow-proof-key-release`"
+        },
+        {
+          "description": "The commands of the plugin's test build (the feature `test-seams`), for the SDK's own tests: signatures and ownership proofs with fixed auxiliary randomness, keystores with given salts and nonces under lowered bounds, and the constants of the vote library and the keystore. A build without the feature has none of these commands, so this permission allows nothing there. Never grant it in an application.\n",
+          "type": "string",
+          "const": "test-seams",
+          "markdownDescription": "The commands of the plugin's test build (the feature `test-seams`), for the SDK's own tests: signatures and ownership proofs with fixed auxiliary randomness, keystores with given salts and nonces under lowered bounds, and the constants of the vote library and the keystore. A build without the feature has none of these commands, so this permission allows nothing there. Never grant it in an application.\n"
+        }
+      ]
+    }
+  }
+}

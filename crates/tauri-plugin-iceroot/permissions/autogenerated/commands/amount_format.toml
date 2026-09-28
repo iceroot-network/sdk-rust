@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-amount-format"
+description = "Enables the amount_format command without any pre-configured scope."
+commands.allow = ["amount_format"]
+
+[[permission]]
+identifier = "deny-amount-format"
+description = "Denies the amount_format command without any pre-configured scope."
+commands.deny = ["amount_format"]

@@ -56,6 +56,9 @@ pub enum ErrorCode {
     InvalidRequest,
     /// A network profile is incomplete or malformed.
     InvalidProfile,
+    /// An argument is refused: its value can never be valid for the call, such as a message to
+    /// sign that is not UTF-8 text.
+    InvalidArgument,
     /// No node could be reached.
     NodeUnavailable,
     /// The node refused the request for its rate limit.
@@ -111,6 +114,7 @@ impl ErrorCode {
             ErrorCode::InvalidProof => "InvalidProof",
             ErrorCode::InvalidRequest => "InvalidRequest",
             ErrorCode::InvalidProfile => "InvalidProfile",
+            ErrorCode::InvalidArgument => "InvalidArgument",
             ErrorCode::NodeUnavailable => "NodeUnavailable",
             ErrorCode::RateLimited => "RateLimited",
             ErrorCode::Timeout => "Timeout",
@@ -149,7 +153,8 @@ impl ErrorCode {
             | ErrorCode::InvalidSignIn
             | ErrorCode::InvalidProof
             | ErrorCode::InvalidRequest
-            | ErrorCode::InvalidProfile => ErrorGroup::Input,
+            | ErrorCode::InvalidProfile
+            | ErrorCode::InvalidArgument => ErrorGroup::Input,
             ErrorCode::NodeUnavailable
             | ErrorCode::RateLimited
             | ErrorCode::Timeout
@@ -320,6 +325,13 @@ pub enum Error {
         /// What is wrong.
         reason: &'static str,
     },
+    /// An argument is refused: its value can never be valid for the call, such as a message to
+    /// sign that is not UTF-8 text.
+    #[error("invalid argument: {reason}")]
+    InvalidArgument {
+        /// What is wrong.
+        reason: &'static str,
+    },
     /// No node could be reached.
     #[error("no node is available: {reason}")]
     NodeUnavailable {
@@ -433,6 +445,7 @@ impl Error {
             Error::InvalidProof { .. } => ErrorCode::InvalidProof,
             Error::InvalidRequest { .. } => ErrorCode::InvalidRequest,
             Error::InvalidProfile { .. } => ErrorCode::InvalidProfile,
+            Error::InvalidArgument { .. } => ErrorCode::InvalidArgument,
             Error::NodeUnavailable { .. } => ErrorCode::NodeUnavailable,
             Error::RateLimited { .. } => ErrorCode::RateLimited,
             Error::Timeout => ErrorCode::Timeout,
@@ -474,7 +487,9 @@ impl Error {
             }
             Error::InvalidVote { problem } => problem.details(),
             Error::InvalidName { name, reason } => json!({ "name": name, "reason": reason }),
-            Error::InvalidFee { reason } | Error::InvalidProfile { reason } => {
+            Error::InvalidFee { reason }
+            | Error::InvalidProfile { reason }
+            | Error::InvalidArgument { reason } => {
                 json!({ "reason": reason })
             }
             Error::FeeUnavailable { operation } => json!({ "operation": operation.as_str() }),

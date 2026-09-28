@@ -163,7 +163,9 @@ impl Key {
 
     /// The message signature of `message`'s bytes on the account's network: BIP340 over their
     /// SHA-256, with fresh auxiliary randomness. JSON: `{ publicKey, signature, algorithm,
-    /// network }`.
+    /// network }`. The bytes must be UTF-8 text; any other bytes are refused with
+    /// `InvalidArgument`, since they may be a transaction's, whose signature a message signature
+    /// would be.
     pub fn sign_message(&self, message: &[u8]) -> Result<String> {
         self.sign_message_with(message, Aux::random())
     }
@@ -332,6 +334,13 @@ mod tests {
             signed["signature"].as_str().unwrap(),
             "secp256k1-bip340-sha256"
         ));
+        // Bytes that are not text, such as a transaction's (header byte 0xff), are refused.
+        let refused = key.sign_message(&[0xff, 0x03, 0x5a, 0x01]).unwrap_err();
+        assert_eq!(refused.code(), "InvalidArgument");
+        assert_eq!(
+            refused.details(),
+            &serde_json::json!({ "reason": "a message is signed only as UTF-8 text" })
+        );
 
         key.release();
         assert!(key.released());

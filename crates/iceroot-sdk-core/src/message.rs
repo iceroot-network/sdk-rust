@@ -7,8 +7,15 @@
 //! passing the message itself would silently differ from the reference for any message of exactly
 //! 32 bytes.)
 //!
-//! Only messages are signed here: no public function signs a digest the caller chooses, which
-//! could be the signing digest of a transaction.
+//! Only text is signed here. In today's format the message domain changes no bytes, so a message
+//! signature is exactly a transaction signature over the same bytes: a message made of a
+//! transaction's unsigned bytes would sign that transaction. Every transaction of today's formats
+//! starts with the header byte 0xff, which UTF-8 text never contains, so a message is signed and
+//! verified only when it is UTF-8 text ([`sign_bytes`] refuses anything else with
+//! [`Error::InvalidArgument`], and [`verify_bytes`] fails it), and no public function signs a
+//! digest the caller chooses. The reference implementation signs only text, so nothing it signs is
+//! lost. A wallet still shows the holder the text it signs; from the post-quantum formats on the
+//! message domain carries its own tag, so that the separation holds whatever the bytes are.
 
 use heartwood_crypto::crypto::hash::sha256;
 use heartwood_crypto::crypto::sig::{self, SchemeId, Signature, SigningDomain};
@@ -30,6 +37,12 @@ pub const ALGORITHM: &str = "secp256k1-bip340-sha256";
 const MESSAGE_DOMAIN: SigningDomain = SigningDomain::Message;
 
 /// A signed message's signature, in the form wallets and websites exchange.
+///
+/// Only the signature covers the message; the other fields are labels. [`verify`] checks the
+/// algorithm name and the signature under the public key, and the network is the caller's to
+/// compare. Every devnet with the same network byte has the same network name, so a protocol that
+/// must bind a signature to one chain names the chain inside the signed text itself, as the
+/// sign-in message does ([`crate::signin`]).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MessageSignature {
     /// The signer's public key, lowercase hex (33 bytes, compressed).
@@ -62,7 +75,14 @@ pub fn sign_with(
 }
 
 /// [`sign`] for a message given as bytes: the signature covers the SHA-256 of exactly these
-/// bytes. A text message is signed as its UTF-8 bytes, so for text both functions agree.
+/// bytes. The bytes must be UTF-8 text, which a text message is signed as, so for text both
+/// functions agree.
+///
+/// # Errors
+///
+/// [`Error::InvalidArgument`] when the bytes are not UTF-8 text: such bytes may be a transaction's
+/// (see the module documentation). [`Error::UnsupportedOnNetwork`] without message signing, and
+/// [`Error::NetworkMismatch`] for an account of another profile.
 pub fn sign_bytes(
     profile: &Profile,
     account: &Account,
@@ -87,6 +107,9 @@ pub fn sign_bytes_with(
             },
         });
     }
+    if !is_text(message) {
+        return Err(Error::InvalidArgument { reason: NOT_TEXT });
+    }
     let signature = sign_digest(account, &sha256(message), aux)?;
     Ok(MessageSignature {
         public_key: account.public_key().to_hex(),
@@ -94,6 +117,15 @@ pub fn sign_bytes_with(
         algorithm: ALGORITHM.to_owned(),
         network: profile.message_network()?,
     })
+}
+
+/// Why a message given as bytes is refused.
+const NOT_TEXT: &str = "a message is signed only as UTF-8 text";
+
+/// Whether a message's bytes are UTF-8 text. A transaction's bytes never are: they start with the
+/// header byte 0xff.
+fn is_text(message: &[u8]) -> bool {
+    std::str::from_utf8(message).is_ok()
 }
 
 /// The BIP340 signature of the 32-byte `digest` by `account`, signed as it is, in the message
@@ -156,9 +188,10 @@ pub fn verify(message: &str, signature: &MessageSignature) -> bool {
     verify_bytes(message.as_bytes(), signature)
 }
 
-/// [`verify`] for a message given as bytes.
+/// [`verify`] for a message given as bytes. Bytes that are not UTF-8 text fail the check, since
+/// they may be a transaction's, whose signature is not a message signature.
 pub fn verify_bytes(message: &[u8], signature: &MessageSignature) -> bool {
-    if signature.algorithm != ALGORITHM {
+    if signature.algorithm != ALGORITHM || !is_text(message) {
         return false;
     }
     let Ok(public_key) = hex::decode(&signature.public_key) else {
@@ -254,9 +287,22 @@ mod tests {
         }
         let random = sign(&profile, &account, "fresh").unwrap();
         assert!(verify("fresh", &random));
-        let bytes = sign_bytes(&profile, &account, &[0xff, 0x00]).unwrap();
-        assert!(verify_bytes(&[0xff, 0x00], &bytes));
-        assert!(!verify_bytes(&[0xff], &bytes));
+        let bytes = sign_bytes(&profile, &account, b"bytes of text").unwrap();
+        assert!(verify_bytes(b"bytes of text", &bytes));
+        assert!(!verify_bytes(b"bytes of tex", &bytes));
+        // Bytes that are not UTF-8 text are refused, and never verify: a transaction starts with
+        // the header byte 0xff.
+        assert_eq!(
+            sign_bytes(&profile, &account, &[0xff, 0x00]).unwrap_err(),
+            Error::InvalidArgument { reason: NOT_TEXT }
+        );
+        let over_digest = MessageSignature {
+            signature: sign_digest(&account, &sha256(&[0xff, 0x00]), Aux::fixed([0x42; 32]))
+                .unwrap()
+                .to_hex(),
+            ..bytes
+        };
+        assert!(!verify_bytes(&[0xff, 0x00], &over_digest));
     }
 
     #[test]

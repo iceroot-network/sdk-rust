@@ -4,9 +4,9 @@
 //! to its host as the host's own error: the WebAssembly module as a JavaScript `Error` whose
 //! `name` is the code and whose `details` object carries the fields, the Tauri plugin as the
 //! rejection of the call. Errors of the core, the vote library and the keystore keep their crate's
-//! code and details exactly; the bindings add only `InvalidArgument`, for a call whose arguments do
-//! not have the documented shape, and raise the core's `InvalidProfile` for a profile they cannot
-//! read. The TypeScript wrappers map every code to their own error classes, so the codes are part
+//! code and details exactly; the bindings add only `InvalidArgument` (a code the core also raises,
+//! for an argument whose value it refuses), for a call whose arguments do not have the documented
+//! shape, and raise the core's `InvalidProfile` for a profile they cannot read. The TypeScript wrappers map every code to their own error classes, so the codes are part
 //! of the contract between the two halves.
 
 use iceroot_sdk::Error;

@@ -812,3 +812,38 @@ fn votes_in_the_relay_form() {
         })
     ));
 }
+
+/// In today's format a message signature and a transaction signature are the same BIP340
+/// signature over the SHA-256 of the bytes, so a message made of a draft's unsigned bytes would
+/// sign the transaction. Such bytes start with the transaction header 0xff, which UTF-8 text never
+/// does: signing refuses a message that is not text, and a transaction's signature never verifies
+/// as the signature of a message made of its bytes.
+#[test]
+fn a_message_signature_never_signs_a_transaction() {
+    use iceroot_sdk_core::message::{self, ALGORITHM, MessageSignature};
+
+    let sender = phrase_account(0);
+    let recipient = phrase_account(1);
+    let draft = build(&sender, transfer(&recipient, 10_000_000_000)).unwrap();
+    let unsigned = draft.unsigned_bytes();
+    assert_eq!(unsigned.first(), Some(&0xff));
+
+    let refused = message::sign_bytes(chain().profile(), &sender, unsigned).unwrap_err();
+    assert_eq!(refused.code().as_str(), "InvalidArgument");
+    assert!(message::sign_bytes(chain().profile(), &sender, &[0xff, 0x00]).is_err());
+
+    let signed = draft.sign_with(&sender, None, AUX).unwrap();
+    let signature = &signed.bytes()[unsigned.len()..unsigned.len() + 64];
+    let claimed = MessageSignature {
+        public_key: sender.public_key().to_hex(),
+        signature: hex::encode(signature),
+        algorithm: ALGORITHM.to_owned(),
+        network: chain().profile().message_network().unwrap(),
+    };
+    assert!(!message::verify_bytes(unsigned, &claimed));
+
+    // Text is signed and verified as before, given as text or as its UTF-8 bytes.
+    let text = message::sign_bytes(chain().profile(), &sender, "ünïcödé ✓".as_bytes()).unwrap();
+    assert!(message::verify("ünïcödé ✓", &text));
+    assert!(message::verify_bytes("ünïcödé ✓".as_bytes(), &text));
+}

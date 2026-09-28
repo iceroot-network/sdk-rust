@@ -28,7 +28,7 @@ use serde_json::{Map, Value, json};
 use crate::error::{BindingError, Result};
 use crate::json;
 
-type Decoder = Box<dyn Fn(&Response) -> std::result::Result<String, ApiError>>;
+type Decoder = Box<dyn Fn(&Response) -> std::result::Result<String, ApiError> + Send + Sync>;
 
 /// One prepared call: the request to send and the decoder of its answer.
 pub struct PreparedCall {
@@ -176,7 +176,18 @@ impl PreparedCall {
     /// Decodes a response a native host received for [`PreparedCall::raw_request`], as
     /// [`PreparedCall::decode`] does.
     pub fn decode_response(&self, response: &Response) -> Result<String> {
-        Ok((self.decode)(response).map_err(Error::from)?)
+        Ok(self.decode_api(response).map_err(Error::from)?)
+    }
+
+    /// As [`PreparedCall::decode_response`], with the node API client's own error, which tells a
+    /// native transport such as `iceroot_sdk_api::HttpClient::exchange` when to retry or to try
+    /// the next relay.
+    ///
+    /// # Errors
+    ///
+    /// The client's refusals: `RateLimited`, `NotFound`, `Refused`, `BadResponse`.
+    pub fn decode_api(&self, response: &Response) -> std::result::Result<String, ApiError> {
+        (self.decode)(response)
     }
 }
 
@@ -262,6 +273,42 @@ impl Submission {
     /// [`Submission::decode`] does.
     pub fn decode_response(&mut self, index: u32, response: &Response) -> Result<String> {
         let report = self.call(index)?.decode(response).map_err(Error::from)?;
+        self.keep(index, report)
+    }
+
+    /// Decodes the answer a native host received for request number `index`, without keeping it,
+    /// with the node API client's own error, which tells a native transport such as
+    /// `iceroot_sdk_api::HttpClient::exchange` when to retry or to try the next relay. Keep the
+    /// report with [`Submission::keep`].
+    ///
+    /// # Errors
+    ///
+    /// `InvalidRequest` for an index the plan does not have, and the client's refusals.
+    pub fn decode_report(
+        &self,
+        index: u32,
+        response: &Response,
+    ) -> std::result::Result<SubmitReport, ApiError> {
+        let calls =
+            self.plan
+                .as_ref()
+                .map(SubmitPlan::calls)
+                .ok_or_else(|| ApiError::InvalidRequest {
+                    reason: "the submission is not planned yet".to_owned(),
+                })?;
+        usize::try_from(index)
+            .ok()
+            .and_then(|index| calls.get(index))
+            .ok_or_else(|| ApiError::InvalidRequest {
+                reason: format!("the plan has no request {index}"),
+            })?
+            .decode(response)
+    }
+
+    /// Keeps the report of request number `index` and returns it in JSON, as
+    /// [`Submission::decode`] does.
+    pub fn keep(&mut self, index: u32, report: SubmitReport) -> Result<String> {
+        self.call(index)?;
         let text = to_text(&report)?;
         if let Some(slot) = usize::try_from(index)
             .ok()

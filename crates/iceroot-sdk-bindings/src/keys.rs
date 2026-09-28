@@ -57,6 +57,26 @@ impl Key {
         result
     }
 
+    /// The account at `account` and `index` of the recovery phrase the keystore `keystore` holds,
+    /// opened with `password` (UTF-8 bytes, overwritten with zeros whatever the outcome), with the
+    /// optional BIP39 `passphrase`, whose owned copy is wiped. The phrase is decrypted and the key
+    /// derived here: the phrase never reaches the host. `max_memory_kib` lowers the memory the
+    /// keystore may ask for, as [`crate::keystore::keystore_decrypt`] does.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_keystore(
+        profile: &Profile,
+        keystore: &[u8],
+        password: &mut [u8],
+        account: u32,
+        index: u32,
+        passphrase: String,
+        max_memory_kib: Option<u32>,
+    ) -> Result<Key> {
+        let passphrase = Zeroizing::new(passphrase);
+        let mnemonic = crate::keystore::keystore_decrypt(keystore, password, max_memory_kib)?;
+        Key::from_mnemonic(profile, &mnemonic, account, index, &passphrase)
+    }
+
     /// The account at `account` and `index` of a phrase the caller already holds as a
     /// [`Mnemonic`] (for example one a keystore opened), with the optional BIP39 `passphrase`.
     pub fn from_mnemonic(
@@ -251,6 +271,49 @@ mod tests {
         assert_eq!(error.code(), "PhraseTooShort");
         let error =
             Key::from_phrase(&devnet(), PHRASE.to_owned(), 1 << 31, 0, String::new()).unwrap_err();
+        assert_eq!(error.code(), "InvalidPath");
+    }
+
+    #[test]
+    fn keystores_open_to_the_phrase_s_accounts() {
+        // The format's floor, so the test stays quick.
+        let params = r#"{"memoryKib":19456,"iterations":2,"parallelism":1}"#;
+        let mut phrase = PHRASE.as_bytes().to_vec();
+        let mut password = b"correct horse".to_vec();
+        let stored = crate::keystore::keystore_encrypt(&mut phrase, &mut password, params).unwrap();
+        let direct = Key::from_phrase(&devnet(), PHRASE.to_owned(), 0, 3, "x".to_owned()).unwrap();
+
+        let mut password = b"correct horse".to_vec();
+        let opened = Key::from_keystore(
+            &devnet(),
+            &stored,
+            &mut password,
+            0,
+            3,
+            "x".to_owned(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(opened.address().unwrap(), direct.address().unwrap());
+        assert_eq!(opened.path().as_deref(), Some("m/44'/1'/0'/0'/3'"));
+        assert!(password.iter().all(|&byte| byte == 0));
+
+        let mut wrong = b"wrong horse".to_vec();
+        let error = Key::from_keystore(&devnet(), &stored, &mut wrong, 0, 0, String::new(), None)
+            .unwrap_err();
+        assert_eq!(error.code(), "WrongPasswordOrCorrupt");
+        assert!(wrong.iter().all(|&byte| byte == 0));
+        let mut password = b"correct horse".to_vec();
+        let error = Key::from_keystore(
+            &devnet(),
+            &stored,
+            &mut password,
+            1 << 31,
+            0,
+            String::new(),
+            None,
+        )
+        .unwrap_err();
         assert_eq!(error.code(), "InvalidPath");
     }
 

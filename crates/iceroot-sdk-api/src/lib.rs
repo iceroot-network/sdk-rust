@@ -95,7 +95,7 @@ pub mod types;
 mod http;
 
 pub use call::Call;
-pub use error::ApiError;
+pub use error::{ApiError, MAX_NODE_TEXT_CHARS};
 pub use limits::{Backoff, RateLimit, RequestBudget};
 pub use request::{MAX_RESPONSE_BYTES, Method, Relay, Request, Response};
 pub use solar_compat::{MAX_PAGE_LIMIT, PageRequest, SolarCompat, SubmitPlan, SubmitTx, TxFilter};

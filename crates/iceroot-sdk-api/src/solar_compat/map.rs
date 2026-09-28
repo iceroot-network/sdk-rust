@@ -5,7 +5,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use crate::call::Context;
-use crate::error::ApiError;
+use crate::error::{ApiError, node_text};
 use crate::request::Response;
 use crate::types::{
     AccountInfo, AssetId, Balance, BlockInfo, Burned, CryptoConfiguration, Donation, Earnings,
@@ -33,7 +33,12 @@ fn error_for(response: &Response) -> ApiError {
         .ok()
         .and_then(|value| wire::read::<wire::ErrorBody>(&value).ok());
     let (error, message) = body
-        .map(|b| (b.error.unwrap_or_default(), b.message.unwrap_or_default()))
+        .map(|b| {
+            (
+                node_text(&b.error.unwrap_or_default()),
+                node_text(&b.message.unwrap_or_default()),
+            )
+        })
         .unwrap_or_default();
     match status {
         429 => ApiError::RateLimited {
@@ -625,8 +630,8 @@ pub(crate) fn submit_report(
     let rejection = |key: &str| match errors.iter().find(|(k, _)| k == key) {
         Some((_, e)) => SubmitStatus::Rejected {
             reason: reject_reason(&e.code, &e.message),
-            node_code: e.code.clone(),
-            message: e.message.clone(),
+            node_code: node_text(&e.code),
+            message: node_text(&e.message),
         },
         None => SubmitStatus::Rejected {
             reason: RejectReason::Other,

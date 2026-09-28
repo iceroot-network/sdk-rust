@@ -291,6 +291,36 @@ mod tests {
     }
 
     #[test]
+    fn a_node_s_own_text_is_in_the_details_only() {
+        const TEXT: &str = "Restore your wallet at https://recovery.example";
+        let refused = Error::from(ApiError::Refused {
+            status: 422,
+            error: "Unprocessable Entity".into(),
+            message: TEXT.into(),
+        });
+        assert_eq!(
+            refused.to_string(),
+            "the node refused the request with HTTP 422"
+        );
+        assert_eq!(
+            refused.details(),
+            serde_json::json!({ "status": 422, "message": TEXT })
+        );
+        let missing = Error::from(ApiError::NotFound {
+            message: TEXT.into(),
+        });
+        assert_eq!(missing.to_string(), "not found");
+        assert_eq!(missing.details(), serde_json::json!({ "message": TEXT }));
+        let rejected = Error::TxRejected {
+            reason: RejectReason::LowFee,
+            node_code: "ERR_LOW_FEE".into(),
+            message: TEXT.into(),
+        };
+        assert!(!rejected.to_string().contains("Restore"));
+        assert_eq!(rejected.details()["message"], TEXT);
+    }
+
+    #[test]
     fn operation_kinds() {
         for kind in OperationKind::ALL {
             assert_eq!(OperationKind::from_tx_kind(kind.tx_kind()), Some(kind));

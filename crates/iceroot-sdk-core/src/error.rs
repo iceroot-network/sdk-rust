@@ -355,18 +355,20 @@ pub enum Error {
     },
     /// The node has no such resource, where the request needs one (a lookup that may find nothing
     /// returns `None` instead).
-    #[error("not found: {message}")]
+    #[error("not found")]
     NotFound {
-        /// The node's message.
+        /// The node's message, at most 200 characters and escaped. Text a node chose: it is in
+        /// the details, never in the error's message.
         message: String,
     },
     /// The node refused the request with an error status, such as 422 for an argument it does not
     /// accept.
-    #[error("the node refused the request with HTTP {status}: {message}")]
+    #[error("the node refused the request with HTTP {status}")]
     Refused {
         /// The HTTP status.
         status: u16,
-        /// The node's message.
+        /// The node's message, at most 200 characters and escaped. Text a node chose: it is in
+        /// the details, never in the error's message.
         message: String,
     },
     /// The node or the data belongs to another network than the profile.
@@ -376,13 +378,14 @@ pub enum Error {
         problem: MismatchProblem,
     },
     /// The node refused a submitted transaction.
-    #[error("the node refused the transaction ({reason}, {node_code}): {message}")]
+    #[error("the node refused the transaction ({reason})")]
     TxRejected {
         /// The normalized reason.
         reason: RejectReason,
-        /// The node's own error code.
+        /// The node's own error code, at most 200 characters and escaped.
         node_code: String,
-        /// The node's message.
+        /// The node's message, at most 200 characters and escaped. Text a node chose: it is in
+        /// the details, never in the error's message.
         message: String,
     },
     /// The nonce, fee or milestone changed since the draft was built.

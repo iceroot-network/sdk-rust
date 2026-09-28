@@ -2,10 +2,23 @@
 
 use std::time::Duration;
 
+/// The most characters of a node's own text, such as an error message or code, that the client
+/// keeps. Longer text is cut and ends with `…`.
+pub const MAX_NODE_TEXT_CHARS: usize = 200;
+
+/// The most characters of a decoder's explanation of an answer it refuses.
+const MAX_DETAIL_CHARS: usize = 300;
+
 /// An error from building a request, from the node's answer, or (with the `http` feature) from the
 /// transport.
 ///
 /// Every variant has a stable [`code`](ApiError::code) that the SDK's error model keeps.
+///
+/// Text a node chose (the message and name of an error status, the value a decoder refuses) is
+/// kept to [`MAX_NODE_TEXT_CHARS`] characters (a decoder's explanation to 300), with control
+/// characters and characters that hide or reorder text written as escapes such as `\u{202e}`,
+/// and a node's own message is never part of the `Display` text: an application that shows an
+/// error's message shows no text a node wrote.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ApiError {
@@ -25,21 +38,22 @@ pub enum ApiError {
     },
 
     /// The resource does not exist on the node (HTTP 404 where the call expects it to exist).
-    #[error("not found: {message}")]
+    #[error("not found")]
     NotFound {
-        /// The node's message.
+        /// The node's message, bounded and escaped.
         message: String,
     },
 
     /// The node refused the request with a client or server error status other than 404 and 429,
     /// for example 422 for an argument it considers invalid.
-    #[error("node refused the request with HTTP {status}: {message}")]
+    #[error("node refused the request with HTTP {status}")]
     Refused {
         /// HTTP status code.
         status: u16,
-        /// The node's error name (for example `Unprocessable Entity`), empty when absent.
+        /// The node's error name (for example `Unprocessable Entity`), empty when absent; bounded
+        /// and escaped.
         error: String,
-        /// The node's message, empty when absent.
+        /// The node's message, empty when absent; bounded and escaped.
         message: String,
     },
 
@@ -103,7 +117,7 @@ impl ApiError {
     pub(crate) fn bad(status: u16, detail: impl Into<String>) -> Self {
         ApiError::BadResponse {
             status,
-            detail: detail.into(),
+            detail: bounded(&detail.into(), MAX_DETAIL_CHARS),
         }
     }
 
@@ -114,9 +128,65 @@ impl ApiError {
     }
 }
 
+/// Text a node chose, as the client keeps it: at most [`MAX_NODE_TEXT_CHARS`] characters,
+/// escaped as [`ApiError`] describes.
+pub(crate) fn node_text(text: &str) -> String {
+    bounded(text, MAX_NODE_TEXT_CHARS)
+}
+
+/// `text` with control characters and characters that hide or reorder text written as escapes
+/// (`\u{202e}`), cut to at most `max` characters, the escapes included, and then ending with `…`.
+fn bounded(text: &str, max: usize) -> String {
+    let mut out = String::with_capacity(text.len().min(max.saturating_mul(4)));
+    let mut count = 0usize;
+    for c in text.chars() {
+        let escaped = c.is_control() || hides_or_reorders(c);
+        let width = if escaped {
+            c.escape_unicode().count()
+        } else {
+            1
+        };
+        if count.saturating_add(width) > max {
+            out.push('…');
+            break;
+        }
+        count += width;
+        if escaped {
+            out.extend(c.escape_unicode());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Whether `c` is invisible or changes the order text is shown in: the Unicode bidirectional
+/// controls, zero-width characters and the line and paragraph separators.
+fn hides_or_reorders(c: char) -> bool {
+    matches!(
+        c,
+        '\u{061c}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{2028}'..='\u{202e}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{feff}'
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn node_text_is_bounded_and_escaped() {
+        assert_eq!(node_text("plain text"), "plain text");
+        assert_eq!(node_text("a\u{202e}b\nc"), "a\\u{202e}b\\u{a}c");
+        let long = node_text(&"é".repeat(500));
+        assert_eq!(long.chars().count(), MAX_NODE_TEXT_CHARS + 1);
+        assert!(long.ends_with('…'));
+        assert_eq!(node_text(""), "");
+    }
 
     #[test]
     fn codes_and_retry() {
@@ -136,6 +206,11 @@ mod tests {
         };
         assert!(!refused.is_retryable());
         assert_eq!(refused.code(), "Refused");
+        // The node's own text is not shown.
+        assert_eq!(
+            refused.to_string(),
+            "node refused the request with HTTP 422"
+        );
         assert!(
             ApiError::Refused {
                 status: 503,

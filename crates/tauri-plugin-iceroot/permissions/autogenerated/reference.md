@@ -1,8 +1,10 @@
 ## Default Permission
 
 Every command of the SDK: keys, signing, drafts, the node API client, the vote library, the
-keystore and ownership proofs. Connecting to a network also needs the relays it may reach, as the
-`allow` scope of `allow-net-connect`: no relay is reachable by default.
+keystore and ownership proofs, except two. Connecting to a network also needs the relays it may
+reach, as the `allow` scope of `allow-net-connect`: no relay is reachable by default. Reading the
+recovery phrase out of a keystore, which only a backup screen needs, is `allow-keystore-decrypt`:
+keys open from a keystore without it.
 
 #### This default permission set includes the following:
 
@@ -45,7 +47,6 @@ keystore and ownership proofs. Connecting to a network also needs the relays it 
 - `allow-vote-rules-at`
 - `allow-vote-snapshot-from-validators`
 - `allow-keystore-encrypt`
-- `allow-keystore-decrypt`
 - `allow-keystore-inspect`
 - `allow-keystore-change-password`
 - `allow-keystore-reencrypt`

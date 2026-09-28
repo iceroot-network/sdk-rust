@@ -169,3 +169,15 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         })
         .build()
 }
+
+#[cfg(test)]
+mod tests {
+    /// The default permission set lets a page open keys from a keystore, never read the recovery
+    /// phrase out of one: an application that shows the phrase grants `keystore_decrypt` itself.
+    #[test]
+    fn the_default_permission_set_never_hands_the_page_a_phrase_from_a_keystore() {
+        let default = include_str!("../permissions/default.toml");
+        assert!(default.contains("\"allow-key-from-keystore\""));
+        assert!(!default.contains("\"allow-keystore-decrypt\""));
+    }
+}

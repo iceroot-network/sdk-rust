@@ -149,7 +149,10 @@ jobs:
             exit 1
           fi
       # The library alone is only compiled; linking it as a shared library, as an Android app
-      # loads the application's code, also runs the NDK's linker.
+      # loads the application's code, also runs the NDK's linker. `-z defs` makes a symbol that
+      # nothing defines a link error (a shared library is otherwise allowed to leave it to the
+      # loader). The plugin exports no JNI function; the application's library does, and is
+      # linked in sdk-typescript's Tauri example.
       - name: Build and link for Android (aarch64-linux-android)
         run: |
           set -euo pipefail
@@ -158,10 +161,13 @@ jobs:
           export AR_aarch64_linux_android="$bin/llvm-ar"
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$bin/aarch64-linux-android24-clang"
           cargo build --locked --release --target aarch64-linux-android
-          cargo rustc --locked --release --target aarch64-linux-android --lib --crate-type cdylib
+          cargo rustc --locked --release --target aarch64-linux-android --lib --crate-type cdylib \
+            -- -C link-arg=-Wl,-z,defs
           so=target/aarch64-linux-android/release/libtauri_plugin_iceroot.so
           test -s "$so"
-          file "$so"
+          kind=$(file -b "$so")
+          echo "$kind"
+          [[ "$kind" == "ELF 64-bit LSB shared object, ARM aarch64"* ]]
 
   # Heartwood Core's dev branch, where the next heartwood-crypto tag is prepared. A failure here
   # warns before the next tag; it does not block a merge.

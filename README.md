@@ -98,7 +98,7 @@ The workflows read `heartwood-core` with a read-only deploy key of that reposito
 
 ### Releasing
 
-1. Set the version in `Cargo.toml` (`[workspace.package]`) on `dev`, write what applications must know about it (changed or removed interfaces) in `release-notes/v<version>.md`, and merge `dev` into `prod` through a pull request.
+1. Set the version in `Cargo.toml` (`[workspace.package]`) on `dev`, write what applications must know about it (changed or removed interfaces) in `release-notes/v<version>.md`, and merge `dev` into `prod` through a pull request. Before that, update `webpki-root-certs` to its newest version in both lock files (`cargo update -p webpki-root-certs` here and in `crates/tauri-plugin-iceroot`, then `node tools/notice.mjs`): on Android the node API client trusts the root certificates of that crate, which change only when it is updated.
 2. Tag the merge commit on `prod` with `v` and the version, and push the tag: `git tag -a v0.1.0 -m "IceRoot SDK for Rust 0.1.0"`, then `git push origin v0.1.0`.
 3. `.github/workflows/release.yml` runs the tests again and publishes the release page with `tools/release.mjs`, which refuses a tag that differs from the version or is not on `prod`. The page carries the version's notes from `release-notes/` and the commits since the previous tag. `node tools/release.mjs --tag v0.1.0 --dry-run` shows the notes without publishing.
 

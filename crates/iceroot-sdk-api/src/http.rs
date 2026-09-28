@@ -7,12 +7,22 @@
 //!
 //! Requests go to the relays and nowhere else: the client never follows a redirect (the node API
 //! does not redirect), and a relay that answers with one is skipped like a relay that cannot be
-//! reached.
+//! reached. A proxy named in the process's environment (`HTTP_PROXY`, `HTTPS_PROXY` or
+//! `ALL_PROXY`, with `NO_PROXY` for exceptions) is used, as curl uses it: a plain-HTTP request,
+//! its headers included, then passes through that proxy, and an HTTPS request passes through it
+//! encrypted.
 //!
-//! HTTPS certificates are verified by the platform's verifier on Linux, macOS, Windows and iOS.
-//! On Android, where that verifier needs the application's Java environment, the client trusts the
-//! Mozilla root certificates it was built with (the `webpki-root-certs` crate) instead: a relay
-//! whose certificate chains to a private or user-installed authority is refused there.
+//! HTTPS certificates are verified by the platform's verifier on Linux, macOS, Windows and iOS
+//! (on Linux that verifier has no revocation lists, so it checks no revocation). On Android, where
+//! that verifier needs the application's Java environment, the client trusts the Mozilla root
+//! certificates it was built with (the `webpki-root-certs` crate) instead, with three consequences
+//! there:
+//!
+//! - a relay whose certificate chains to a private or user-installed authority is refused;
+//! - the roots are fixed when the application is built: a root Mozilla adds or distrusts later
+//!   reaches the application only when it is rebuilt with a newer `webpki-root-certs` (the version
+//!   in the application's `Cargo.lock`; `cargo update -p webpki-root-certs` before each release);
+//! - no revocation is checked: a revoked certificate of a relay is accepted until it expires.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -24,8 +34,9 @@ use crate::request::{Method, Relay, Request, Response};
 use crate::solar_compat::{SolarCompat, SubmitPlan};
 use crate::types::{SubmitReport, TxRecord};
 
-/// Settings of an [`HttpClient`].
-#[derive(Debug, Clone)]
+/// Settings of an [`HttpClient`]. Its `Debug` output names the extra headers but never shows
+/// their values, which may be tokens.
+#[derive(Clone)]
 pub struct HttpOptions {
     /// Time allowed for one request, connection included. Default 15 s.
     pub timeout: Duration,
@@ -36,9 +47,10 @@ pub struct HttpOptions {
     /// The `User-Agent` header.
     pub user_agent: String,
     /// Extra headers sent to every relay with every request, as `(name, value)` pairs: for a
-    /// relay behind a proxy that asks for a token. The values are marked sensitive, so the
-    /// client's `Debug` output never shows them. They reach the relays only, since the client
-    /// follows no redirect. Default: none.
+    /// relay behind a proxy that asks for a token. The values never show in the `Debug` output
+    /// of the options or of the client (they are marked sensitive). They reach the relays only,
+    /// since the client follows no redirect, and over plain HTTP a proxy the environment names.
+    /// Default: none.
     ///
     /// ```no_run
     /// use iceroot_sdk_api::{HttpClient, HttpOptions, Relay};
@@ -54,6 +66,19 @@ pub struct HttpOptions {
     /// # }
     /// ```
     pub headers: Vec<(String, String)>,
+}
+
+impl std::fmt::Debug for HttpOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let headers: Vec<&str> = self.headers.iter().map(|(name, _)| name.as_str()).collect();
+        f.debug_struct("HttpOptions")
+            .field("timeout", &self.timeout)
+            .field("rate_limit", &self.rate_limit)
+            .field("backoff", &self.backoff)
+            .field("user_agent", &self.user_agent)
+            .field("headers", &headers)
+            .finish()
+    }
 }
 
 impl Default for HttpOptions {
@@ -307,7 +332,9 @@ fn transport_error(error: &reqwest::Error) -> ApiError {
 
 /// The Mozilla root certificates the crate is built with, which the client trusts on Android.
 /// There the platform's verifier (reqwest's default) must first be given the application's Java
-/// environment, which a library cannot do; without it, the first TLS handshake panics.
+/// environment, which a library cannot do; without it, the first TLS handshake panics. The set is
+/// the one of the `webpki-root-certs` version the application was built with, and no revocation
+/// list is given, so none is checked (see the module documentation).
 #[cfg(any(target_os = "android", test))]
 fn bundled_roots() -> Vec<reqwest::Certificate> {
     webpki_root_certs::TLS_SERVER_ROOT_CERTS
@@ -319,6 +346,23 @@ fn bundled_roots() -> Vec<reqwest::Certificate> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_options_debug_output_names_headers_without_their_values() {
+        let options = HttpOptions {
+            headers: vec![("x-api-key".to_owned(), "s3cret-token".to_owned())],
+            ..HttpOptions::default()
+        };
+        let shown = format!("{options:?}");
+        assert!(shown.contains("x-api-key"), "{shown}");
+        assert!(!shown.contains("s3cret-token"), "{shown}");
+        let client = HttpClient::with_options(
+            vec![Relay::parse("http://127.0.0.1:4003/api").unwrap()],
+            options,
+        )
+        .unwrap();
+        assert!(!format!("{client:?}").contains("s3cret-token"));
+    }
 
     #[test]
     fn the_bundled_roots_make_a_client() {

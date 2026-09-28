@@ -15,7 +15,7 @@ workspace = true
 default = []
 # An async HTTP client over reqwest. Native targets only: on wasm32 the feature compiles to nothing,
 # and the host (fetch in TypeScript) performs the requests instead.
-http = ["dep:reqwest", "dep:tokio"]
+http = ["dep:reqwest", "dep:tokio", "dep:webpki-root-certs"]
 # Serialize and Deserialize on the request values and every answer, in the JSON form the SDK's
 # bindings share (see the crate documentation). Adds no dependency and no I/O.
 serde = []
@@ -29,5 +29,11 @@ thiserror.workspace = true
 reqwest = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 
+# On Android the client trusts these roots: the platform's verifier needs the app's Java
+# environment, which a library cannot set up.
+[target.'cfg(target_os = "android")'.dependencies]
+webpki-root-certs = { workspace = true, optional = true }
+
 [dev-dependencies]
 tokio = { version = "1", default-features = false, features = ["macros", "net", "io-util", "rt"] }
+webpki-root-certs.workspace = true

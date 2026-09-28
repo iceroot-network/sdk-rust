@@ -4,6 +4,15 @@
 //! cannot be reached or answers with a server error is skipped, and HTTP 429 is retried after a
 //! [`Backoff`]. Requests are spent against a [`RequestBudget`] before they leave, so a busy client
 //! waits instead of being refused.
+//!
+//! Requests go to the relays and nowhere else: the client never follows a redirect (the node API
+//! does not redirect), and a relay that answers with one is skipped like a relay that cannot be
+//! reached.
+//!
+//! HTTPS certificates are verified by the platform's verifier on Linux, macOS, Windows and iOS.
+//! On Android, where that verifier needs the application's Java environment, the client trusts the
+//! Mozilla root certificates it was built with (the `webpki-root-certs` crate) instead: a relay
+//! whose certificate chains to a private or user-installed authority is refused there.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -28,8 +37,8 @@ pub struct HttpOptions {
     pub user_agent: String,
     /// Extra headers sent to every relay with every request, as `(name, value)` pairs: for a
     /// relay behind a proxy that asks for a token. The values are marked sensitive, so the
-    /// client's `Debug` output never shows them, and reqwest drops a sensitive header such as
-    /// `Authorization` when a redirect leads to another host. Default: none.
+    /// client's `Debug` output never shows them. They reach the relays only, since the client
+    /// follows no redirect. Default: none.
     ///
     /// ```no_run
     /// use iceroot_sdk_api::{HttpClient, HttpOptions, Relay};
@@ -102,14 +111,18 @@ impl HttpClient {
             value.set_sensitive(true);
             headers.append(name, value);
         }
-        let http = reqwest::Client::builder()
+        let builder = reqwest::Client::builder()
             .timeout(options.timeout)
             .user_agent(options.user_agent)
             .default_headers(headers)
-            .build()
-            .map_err(|e| ApiError::NodeUnavailable {
-                detail: format!("HTTP client: {e}"),
-            })?;
+            // A redirect would take the request, its headers and its body to a host the relay
+            // list does not name; `fetch` skips a relay that answers with one.
+            .redirect(reqwest::redirect::Policy::none());
+        #[cfg(target_os = "android")]
+        let builder = builder.tls_certs_only(bundled_roots());
+        let http = builder.build().map_err(|e| ApiError::NodeUnavailable {
+            detail: format!("HTTP client: {e}"),
+        })?;
         Ok(HttpClient {
             http,
             relays,
@@ -166,6 +179,13 @@ impl HttpClient {
         }
         let answer = builder.send().await.map_err(|e| transport_error(&e))?;
         let status = answer.status().as_u16();
+        if answer.status().is_redirection() {
+            return Err(ApiError::NodeUnavailable {
+                detail: format!(
+                    "{url} answered with a redirect (HTTP {status}), which the client does not follow"
+                ),
+            });
+        }
         let headers: Vec<(&str, String)> = ["Retry-After", "X-Block-Height"]
             .into_iter()
             .filter_map(|name| {
@@ -183,9 +203,9 @@ impl HttpClient {
 
     /// Sends a call and decodes the answer.
     ///
-    /// Relays are tried in order: one that cannot be reached, times out or answers 5xx is skipped.
-    /// A 429 is retried on the same relay after the backoff; when retries are spent the error is
-    /// [`ApiError::RateLimited`].
+    /// Relays are tried in order: one that cannot be reached, times out, answers with a redirect
+    /// or answers 5xx is skipped. A 429 is retried on the same relay after the backoff; when
+    /// retries are spent the error is [`ApiError::RateLimited`].
     ///
     /// # Errors
     ///
@@ -282,5 +302,34 @@ fn transport_error(error: &reqwest::Error) -> ApiError {
         ApiError::NodeUnavailable {
             detail: error.to_string(),
         }
+    }
+}
+
+/// The Mozilla root certificates the crate is built with, which the client trusts on Android.
+/// There the platform's verifier (reqwest's default) must first be given the application's Java
+/// environment, which a library cannot do; without it, the first TLS handshake panics.
+#[cfg(any(target_os = "android", test))]
+fn bundled_roots() -> Vec<reqwest::Certificate> {
+    webpki_root_certs::TLS_SERVER_ROOT_CERTS
+        .iter()
+        .filter_map(|der| reqwest::Certificate::from_der(der).ok())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_bundled_roots_make_a_client() {
+        let roots = bundled_roots();
+        assert_eq!(roots.len(), webpki_root_certs::TLS_SERVER_ROOT_CERTS.len());
+        assert!(roots.len() > 100);
+        // Every root is accepted by rustls: the Android client builds.
+        reqwest::Client::builder()
+            .tls_certs_only(roots)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
     }
 }

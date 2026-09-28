@@ -1,5 +1,5 @@
-//! The reqwest transport against a scripted local server: relay failover, 429 backoff and
-//! submission bodies.
+//! The reqwest transport against a scripted local server: relay failover, 429 backoff,
+//! submission bodies and redirects, which are never followed.
 
 #![cfg(feature = "http")]
 #![allow(
@@ -66,6 +66,32 @@ async fn server(answers: Vec<(u16, &'static str)>) -> (String, Arc<Mutex<Vec<Str
             let answer = format!(
                 "HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\nx-block-height: 42\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                 body.len()
+            );
+            socket.write_all(answer.as_bytes()).await.unwrap();
+            socket.shutdown().await.ok();
+        }
+    });
+    (url, seen)
+}
+
+/// A relay that answers every request with `status` and a `location` header naming `target`, and
+/// records each request line.
+async fn redirecting_relay(status: u16, target: String) -> (String, Arc<Mutex<Vec<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/api", listener.local_addr().unwrap());
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = Arc::clone(&seen);
+    tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = [0u8; 4096];
+            let n = socket.read(&mut buffer).await.unwrap();
+            let text = String::from_utf8_lossy(&buffer[..n]).to_string();
+            log.lock()
+                .unwrap()
+                .push(text.lines().next().unwrap_or("").to_owned());
+            let answer = format!(
+                "HTTP/1.1 {status} Moved\r\nlocation: {target}/node/status\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
             );
             socket.write_all(answer.as_bytes()).await.unwrap();
             socket.shutdown().await.ok();
@@ -226,4 +252,50 @@ async fn sends_the_extra_headers_and_never_shows_their_values() {
         assert_eq!(error.code(), "InvalidRequest", "{name}");
         assert!(!error.to_string().contains("s3cret"), "{error}");
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn never_follows_a_redirect_and_skips_the_relay_that_answers_one() {
+    // A host the relay list does not name, which would answer if it were reached.
+    let (elsewhere, reached) = server(vec![(200, STATUS), (200, STATUS)]).await;
+    for status in [301, 302, 303, 307, 308] {
+        let (redirecting, asked) = redirecting_relay(status, elsewhere.clone()).await;
+        let (live, served) = server(vec![(200, STATUS)]).await;
+        let with_token = HttpOptions {
+            headers: vec![("x-api-key".to_owned(), "s3cret".to_owned())],
+            ..options(0)
+        };
+        let relays = vec![
+            Relay::parse(&redirecting).unwrap(),
+            Relay::parse(&live).unwrap(),
+        ];
+        let client = HttpClient::with_options(relays, with_token).unwrap();
+        // The next relay answers.
+        let answer = client
+            .send(&SolarCompat::new(53).node_status())
+            .await
+            .unwrap();
+        assert_eq!(answer.height, 42, "{status}");
+        assert_eq!(asked.lock().unwrap().len(), 1, "{status}");
+        assert_eq!(served.lock().unwrap().len(), 1, "{status}");
+
+        // A relay that only redirects is unavailable, and a submission's body goes nowhere else.
+        let only = HttpClient::with_options(vec![Relay::parse(&redirecting).unwrap()], options(0))
+            .unwrap();
+        let limits = PoolLimits {
+            max_transactions_in_pool: 15_000,
+            max_transactions_per_sender: 150,
+            max_transactions_per_request: 40,
+            max_transaction_age: 2_700,
+            max_transaction_bytes: 2_000_000,
+        };
+        let tx = SubmitTx::new("aa", r#"{"id":"aa","version":3}"#, 154).unwrap();
+        let plan = SolarCompat::new(53).submit(&[tx], &limits).unwrap();
+        let error = only.submit(&plan).await.unwrap_err();
+        assert_eq!(error.code(), "NodeUnavailable", "{status}");
+        assert!(error.to_string().contains("redirect"), "{error}");
+        let asked = asked.lock().unwrap();
+        assert!(asked[1].starts_with("POST /api/transactions "), "{asked:?}");
+    }
+    assert!(reached.lock().unwrap().is_empty());
 }

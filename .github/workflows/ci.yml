@@ -91,6 +91,10 @@ jobs:
         run: cargo doc --locked --workspace --all-features --no-deps
       - name: Build for wasm32
         run: cargo build --locked --workspace --lib --target wasm32-unknown-unknown --release
+      - name: WASI exports for Go
+        run: |
+          cargo clippy --locked -p iceroot-sdk-ffi --lib --target wasm32-wasip1 -- -D warnings
+          cargo build --locked -p iceroot-sdk-ffi --target wasm32-wasip1 --release
       - name: Dependency guard
         run: tools/check-deps.sh
       - name: NOTICE matches the dependency tree

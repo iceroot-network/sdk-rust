@@ -665,6 +665,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "iceroot-sdk-ffi"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "iceroot-sdk",
+ "iceroot-sdk-bindings",
+ "secp256k1",
+ "serde_json",
+ "zeroize",
+]
+
+[[package]]
 name = "iceroot-vote"
 version = "0.1.0"
 dependencies = [

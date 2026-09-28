@@ -80,7 +80,7 @@ https://github.com/iceroot-network/heartwood-core at 10d0619b3f97639c205353b4412
     THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDERS AND CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS OFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ====================================================================================================
-Third-party Rust code (180)
+Third-party Rust code (181)
 ====================================================================================================
 
 Each crate is listed with its version, its licence as its authors state it and, where they offer
@@ -295,6 +295,12 @@ hashbrown 0.17.1
   Licence: MIT OR Apache-2.0 (used under Apache-2.0)
   Source: https://crates.io/crates/hashbrown/0.17.1, https://github.com/rust-lang/hashbrown
   Copyright (c) 2016 Amanieu d'Antras
+
+hex 0.4.3
+  Licence: MIT OR Apache-2.0 (used under Apache-2.0)
+  Source: https://crates.io/crates/hex/0.4.3, https://github.com/KokaKiwi/rust-hex
+  Copyright (c) 2013-2014 The Rust Project Developers.
+  Copyright (c) 2015-2020 The rust-hex Developers
 
 hmac 0.13.0
   Licence: MIT OR Apache-2.0 (used under Apache-2.0)

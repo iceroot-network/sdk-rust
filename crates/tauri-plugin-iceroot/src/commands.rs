@@ -27,7 +27,7 @@ use tauri::ipc::{CommandScope, GlobalScope};
 use tauri::{Runtime, State, Webview, command};
 use zeroize::Zeroizing;
 
-use crate::codec::{Secret, SecretBytes, from_hex, to_hex};
+use crate::codec::{Secret, SecretBytes, SecretText, from_hex, to_hex};
 use crate::error::{Error, Result};
 use crate::network::{AtNext, ConnectOptions, RelayScope, Session, SignedSource, relay_allowed};
 use crate::state::{Iceroot, Page};
@@ -87,11 +87,12 @@ pub(crate) async fn profile_message_algorithm(profile: String) -> Result<String>
     Ok(profiles::message_algorithm(&self::profile(&profile)?)?)
 }
 
-/// A new 24-word recovery phrase, to show the holder once to write down.
+/// A new 24-word recovery phrase, to show the holder once to write down. The plugin's copy of the
+/// answer is overwritten with zeros once it is written into the IPC message.
 #[command]
-pub(crate) async fn phrase_generate() -> Result<String> {
+pub(crate) async fn phrase_generate() -> Result<SecretText> {
     let mnemonic = phrase::generate_phrase()?;
-    Ok(mnemonic.phrase().to_owned())
+    Ok(SecretText(Zeroizing::new(mnemonic.phrase().to_owned())))
 }
 
 /// What is wrong with `text` as a recovery phrase, in JSON.

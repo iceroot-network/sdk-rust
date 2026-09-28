@@ -226,6 +226,24 @@ impl std::fmt::Debug for SecretBytes {
     }
 }
 
+/// A secret the plugin answers with as text (a new recovery phrase), as the JSON string the guest
+/// code reads. The plugin's copy is overwritten with zeros once it is written into the answer; the
+/// answer itself, like every IPC message, is the webview's and Tauri's.
+pub(crate) struct SecretText(pub(crate) Zeroizing<String>);
+
+impl Serialize for SecretText {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl std::fmt::Debug for SecretText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never shows the secret.
+        f.write_str("SecretText(..)")
+    }
+}
+
 impl std::fmt::Debug for Secret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Never shows the secret.
@@ -292,5 +310,19 @@ mod tests {
         let answer = SecretBytes(Zeroizing::new(b"hi".to_vec()));
         assert_eq!(serde_json::to_string(&answer).unwrap(), "[104,105]");
         assert_eq!(format!("{answer:?}"), "SecretBytes(..)");
+        let answer = SecretText(Zeroizing::new("hi \"there\"".to_owned()));
+        assert_eq!(serde_json::to_string(&answer).unwrap(), r#""hi \"there\"""#);
+        assert_eq!(format!("{answer:?}"), "SecretText(..)");
+    }
+
+    #[test]
+    fn a_new_phrase_is_answered_from_memory_the_plugin_wipes() {
+        // The answer is the string the guest code reads, held in a buffer overwritten with zeros
+        // when it is dropped.
+        let answer: SecretText =
+            tauri::async_runtime::block_on(crate::commands::phrase_generate()).unwrap();
+        let text = serde_json::to_value(&answer).unwrap();
+        assert_eq!(text.as_str().unwrap().split(' ').count(), 24);
+        assert_eq!(format!("{answer:?}"), "SecretText(..)");
     }
 }

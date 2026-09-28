@@ -148,7 +148,9 @@ jobs:
             printf 'Generated but not committed:\n%s\n' "$untracked"
             exit 1
           fi
-      - name: Build for Android (aarch64-linux-android)
+      # The library alone is only compiled; linking it as a shared library, as an Android app
+      # loads the application's code, also runs the NDK's linker.
+      - name: Build and link for Android (aarch64-linux-android)
         run: |
           set -euo pipefail
           bin="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
@@ -156,6 +158,10 @@ jobs:
           export AR_aarch64_linux_android="$bin/llvm-ar"
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$bin/aarch64-linux-android24-clang"
           cargo build --locked --release --target aarch64-linux-android
+          cargo rustc --locked --release --target aarch64-linux-android --lib --crate-type cdylib
+          so=target/aarch64-linux-android/release/libtauri_plugin_iceroot.so
+          test -s "$so"
+          file "$so"
 
   # Heartwood Core's dev branch, where the next heartwood-crypto tag is prepared. A failure here
   # warns before the next tag; it does not block a merge.

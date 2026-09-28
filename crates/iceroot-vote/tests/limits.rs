@@ -294,3 +294,40 @@ fn names_the_rules_refuse_are_never_signed() {
     let solar = select(&s, &request(20, VoteRules::SOLAR_COMPATIBLE)).unwrap();
     assert!(validate_vote(&solar.vote(), &VoteRules::SOLAR_COMPATIBLE, Voter::Ordinary).is_empty());
 }
+
+#[test]
+fn a_huge_manual_vote_is_judged_in_bounded_time_without_overflow() {
+    // 70,000 entries of 65,535 basis points: the total is beyond 32 bits, and a check that
+    // compares every entry with every earlier one would take minutes.
+    let names: Vec<String> = (0..70_000usize)
+        .map(|i| {
+            let letter = |shift: usize| char::from(b'a' + u8::try_from(i / shift % 26).unwrap());
+            format!(
+                "{}{}{}{}",
+                letter(17_576),
+                letter(676),
+                letter(26),
+                letter(1)
+            )
+        })
+        .collect();
+    let mut entries: Vec<iceroot_vote::VoteEntry> = names
+        .iter()
+        .map(|validator| iceroot_vote::VoteEntry {
+            validator: validator.clone(),
+            basis_points: u16::MAX,
+        })
+        .collect();
+    entries.push(entries[0].clone());
+    let started = std::time::Instant::now();
+    let problems = validate_vote(&entries, &VoteRules::ICEROOT, Voter::Ordinary);
+    assert!(started.elapsed() < std::time::Duration::from_secs(20));
+    assert!(problems.contains(&Problem::WrongTotal { total: u32::MAX }));
+    assert_eq!(
+        problems
+            .iter()
+            .filter(|p| matches!(p, Problem::DuplicateValidator { .. }))
+            .count(),
+        1
+    );
+}

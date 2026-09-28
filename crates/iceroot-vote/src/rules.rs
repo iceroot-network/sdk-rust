@@ -273,18 +273,17 @@ pub fn validate_vote(entries: &[VoteEntry], rules: &VoteRules, voter: Voter) -> 
             maximum: rules.max_entries,
         });
     }
-    let mut total: u32 = 0;
-    for (index, entry) in entries.iter().enumerate() {
+    // Summed in 64 bits and checked for repeats with a set, so that any list, however long, is
+    // judged in n log n steps without overflow.
+    let mut total: u64 = 0;
+    let mut named = std::collections::BTreeSet::new();
+    for entry in entries {
         if !rules.names.accepts(&entry.validator) {
             problems.push(Problem::InvalidName {
                 validator: entry.validator.clone(),
             });
         }
-        if entries
-            .iter()
-            .take(index)
-            .any(|earlier| earlier.validator == entry.validator)
-        {
+        if !named.insert(entry.validator.as_str()) {
             problems.push(Problem::DuplicateValidator {
                 validator: entry.validator.clone(),
             });
@@ -300,10 +299,12 @@ pub fn validate_vote(entries: &[VoteEntry], rules: &VoteRules, voter: Voter) -> 
                 maximum: rules.max_entry_basis_points,
             });
         }
-        total += u32::from(entry.basis_points);
+        total = total.saturating_add(u64::from(entry.basis_points));
     }
-    if total != u32::from(TOTAL_BASIS_POINTS) {
-        problems.push(Problem::WrongTotal { total });
+    if total != u64::from(TOTAL_BASIS_POINTS) {
+        problems.push(Problem::WrongTotal {
+            total: u32::try_from(total).unwrap_or(u32::MAX),
+        });
     }
     let bytes = vote_bytes(entries);
     if bytes > usize::from(rules.max_bytes) {

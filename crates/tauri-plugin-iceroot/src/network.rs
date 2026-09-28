@@ -2,8 +2,9 @@
 //!
 //! Requests are built and answers decoded by the same code as in the WebAssembly module (the
 //! bindings' `api` module over `iceroot-sdk-api`); the plugin sends them with the client's reqwest
-//! transport, which tries the relays in order, keeps to the node's request allowance and retries
-//! HTTP 429 with backoff. The webview never reaches a node: its content security policy needs no
+//! transport, trying the relays in order, keeping to each relay's request allowance and retrying
+//! HTTP 429 with backoff. A relay is asked nothing until it is known to serve the session's chain
+//! (see [`Session`]). The webview never reaches a node: its content security policy needs no
 //! node origin.
 //!
 //! A relay is reached only when the application's capabilities allow it: each connection's
@@ -15,11 +16,12 @@
 //! (`HTTP_PROXY`, `HTTPS_PROXY` or `ALL_PROXY`), as curl uses it.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::Duration;
 
 use iceroot_sdk::api::{
-    ApiError, Backoff, HttpClient, HttpOptions, RateLimit, Relay, Response, SolarCompat,
+    ApiError, Backoff, HttpClient, HttpOptions, NodeConfiguration, RateLimit, Relay, Request,
+    Response, SolarCompat,
 };
 use iceroot_sdk::{Chain, Profile, SignedTransaction};
 use iceroot_sdk_bindings::api::{PreparedCall, Submission};
@@ -151,22 +153,59 @@ pub enum Allowance {
     Toggle(bool),
 }
 
-/// A network the plugin connected to: the chain it serves, pinned, and the client that reaches it.
+/// A network the plugin connected to: the chain it serves, pinned, and a client for each of its
+/// relays.
+///
+/// Every relay is checked before its first use: the relay that answers the connection serves the
+/// chain it reads, and any other relay is asked for its node configuration, which must name the
+/// same network hash and byte, before it is asked anything else. A relay of another chain (a
+/// relay of a devnet generated again, say) is never asked again in the session, so no read,
+/// draft fact or submission silently switches chain when a relay fails over. Each relay keeps
+/// its own request allowance, as a node keeps one per client.
 pub struct Session {
     pub(crate) chain: Arc<Chain>,
-    client: HttpClient,
+    relays: Vec<RelayClient>,
     seats: u32,
     max_per_request: u32,
     max_bytes: u32,
-    /// The highest block height the node reported, by an answer's `X-Block-Height` or its status.
+    /// The highest block height a relay of the session's chain reported, by a successful
+    /// answer's `X-Block-Height` or its status.
     height: AtomicU64,
+}
+
+/// One relay of a session, and whether it serves the session's chain.
+struct RelayClient {
+    client: HttpClient,
+    identity: AtomicU8,
+}
+
+/// A relay not checked yet.
+const UNCHECKED: u8 = 0;
+/// A relay that serves the session's chain.
+const SAME_CHAIN: u8 = 1;
+/// A relay that serves another chain: never asked again.
+const OTHER_CHAIN: u8 = 2;
+
+impl RelayClient {
+    fn identity(&self) -> u8 {
+        self.identity.load(Ordering::Relaxed)
+    }
+
+    fn mark(&self, identity: u8) {
+        self.identity.store(identity, Ordering::Relaxed);
+    }
 }
 
 impl std::fmt::Debug for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let relays: Vec<&Relay> = self
+            .relays
+            .iter()
+            .flat_map(|relay| relay.client.relays())
+            .collect();
         f.debug_struct("Session")
             .field("nethash", &self.chain.nethash())
-            .field("relays", &self.client.relays())
+            .field("relays", &relays)
             .field("height", &self.height())
             .finish_non_exhaustive()
     }
@@ -179,44 +218,56 @@ pub(crate) struct Connected {
     pub(crate) status: String,
 }
 
+/// Why a relay cannot be used now.
+enum Unusable {
+    /// It did not answer, or not in time, or refused for its rate limit or a server error:
+    /// another relay may answer.
+    Unavailable(ApiError),
+    /// It answered, and the answer is refused.
+    Refused(Error),
+}
+
 impl Session {
-    /// Connects to the network of `profile`: reads the chain its first answering relay serves and
+    /// Connects to the network of `profile`: reads the chain the first answering relay serves and
     /// checks it against the profile (a devnet profile without a pinned network hash is pinned
-    /// now), then the node's configuration, refusing a node of another chain, and its status.
+    /// now), then that relay's node configuration, refusing a node of another chain, and the
+    /// node's status.
     pub(crate) async fn connect(profile: &Profile, options: ConnectOptions) -> Result<Connected> {
         profile.require(iceroot_sdk::profile::Capability::Connect)?;
-        let relays = relays(profile)?;
-        let client = HttpClient::with_options(relays, http_options(options))?;
+        let options = http_options(options);
+        let relays = relays(profile)?
+            .into_iter()
+            .map(|relay| {
+                Ok(RelayClient {
+                    client: HttpClient::with_options(vec![relay], options.clone())?,
+                    identity: AtomicU8::new(UNCHECKED),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
         let height = AtomicU64::new(0);
-        let note = |response: &Response| {
-            if let Some(seen) = response.block_height() {
-                height.fetch_max(seen, Ordering::Relaxed);
+        let mut last = Error::from(ApiError::NodeUnavailable {
+            detail: "no relay was tried".into(),
+        });
+        let mut found = None;
+        for relay in &relays {
+            match first_contact(profile, &relay.client, &height).await {
+                Ok(contact) => {
+                    relay.mark(SAME_CHAIN);
+                    found = Some(contact);
+                    break;
+                }
+                Err(Unusable::Unavailable(error)) => last = error.into(),
+                Err(Unusable::Refused(error)) => return Err(error),
             }
+        }
+        let Some((chain, node)) = found else {
+            return Err(last);
         };
-
-        let call = SolarCompat::new(0).crypto_configuration();
-        let crypto = client
-            .exchange(call.request(), |response| {
-                note(response);
-                call.decode(response)
-            })
-            .await?;
-        let chain = Arc::new(Chain::from_node(profile, &crypto)?);
-
-        let call = SolarCompat::new(0).node_configuration();
-        let node = client
-            .exchange(call.request(), |response| {
-                note(response);
-                call.decode(response)
-            })
-            .await?;
-        chain.check_node(&node)?;
         let configuration = serde_json::to_string(&node)
             .map_err(|error| Error::argument(format!("the node configuration: {error}")))?;
-
         let session = Session {
-            chain,
-            client,
+            chain: Arc::new(chain),
+            relays,
             seats: node.seats,
             max_per_request: node.pool.max_transactions_per_request,
             max_bytes: node.pool.max_transaction_bytes,
@@ -236,9 +287,67 @@ impl Session {
     }
 
     fn note(&self, response: &Response) {
-        if let Some(seen) = response.block_height() {
-            self.height.fetch_max(seen, Ordering::Relaxed);
+        note_height(&self.height, response);
+    }
+
+    /// Sends `request` to the first relay of the session's chain that answers, and decodes the
+    /// answer with `decode`. A relay not checked yet is checked first; one that serves another
+    /// chain is skipped for the rest of the session.
+    async fn exchange<T>(
+        &self,
+        request: &Request,
+        decode: impl Fn(&Response) -> std::result::Result<T, ApiError>,
+    ) -> Result<T> {
+        let mut last = None;
+        for relay in &self.relays {
+            match relay.identity() {
+                OTHER_CHAIN => continue,
+                SAME_CHAIN => {}
+                _ => match self.check(relay).await {
+                    Ok(()) => relay.mark(SAME_CHAIN),
+                    Err(Unusable::Unavailable(error)) => {
+                        last = Some(Error::from(error));
+                        continue;
+                    }
+                    Err(Unusable::Refused(error)) => {
+                        relay.mark(OTHER_CHAIN);
+                        last = Some(error);
+                        continue;
+                    }
+                },
+            }
+            let answer = relay
+                .client
+                .exchange(request, |response| {
+                    self.note(response);
+                    decode(response)
+                })
+                .await;
+            match answer {
+                Ok(value) => return Ok(value),
+                Err(error) if error.is_retryable() => last = Some(error.into()),
+                Err(error) => return Err(error.into()),
+            }
         }
+        Err(last.unwrap_or_else(|| {
+            ApiError::NodeUnavailable {
+                detail: "no relay of the session serves its chain".into(),
+            }
+            .into()
+        }))
+    }
+
+    /// Whether `relay` serves the session's chain, by its node configuration.
+    async fn check(&self, relay: &RelayClient) -> std::result::Result<(), Unusable> {
+        let call = SolarCompat::new(0).node_configuration();
+        let node = relay
+            .client
+            .exchange(call.request(), |response| call.decode(response))
+            .await
+            .map_err(unusable)?;
+        self.chain
+            .check_node(&node)
+            .map_err(|error| Unusable::Refused(error.into()))
     }
 
     /// Reads `operation` of the node API with its JSON `args`, as the WebAssembly module's
@@ -246,11 +355,7 @@ impl Session {
     pub(crate) async fn read(&self, operation: &str, args: &str) -> Result<String> {
         let call = PreparedCall::prepare(self.seats, operation, args)?;
         let answer = self
-            .client
-            .exchange(call.raw_request(), |response| {
-                self.note(response);
-                call.decode_api(response)
-            })
+            .exchange(call.raw_request(), |response| call.decode_api(response))
             .await?;
         if operation == "nodeStatus"
             && let Some(height) = status_height(&answer)
@@ -264,11 +369,7 @@ impl Session {
     pub(crate) async fn node_configuration(&self) -> Result<String> {
         let call = SolarCompat::new(0).node_configuration();
         let node = self
-            .client
-            .exchange(call.request(), |response| {
-                self.note(response);
-                call.decode(response)
-            })
+            .exchange(call.request(), |response| call.decode(response))
             .await?;
         self.chain.check_node(&node)?;
         serde_json::to_string(&node)
@@ -286,15 +387,62 @@ impl Session {
         for index in 0..count {
             let request = submission.raw_request(index)?.clone();
             let report = self
-                .client
                 .exchange(&request, |response| {
-                    self.note(response);
                     submission.decode_report(index, response)
                 })
                 .await?;
             submission.keep(index, report)?;
         }
         Ok(submission.finish()?)
+    }
+}
+
+/// The chain `client`'s relay serves, loaded for `profile`, and its node configuration, checked
+/// against that chain.
+async fn first_contact(
+    profile: &Profile,
+    client: &HttpClient,
+    height: &AtomicU64,
+) -> std::result::Result<(Chain, NodeConfiguration), Unusable> {
+    let call = SolarCompat::new(0).crypto_configuration();
+    let crypto = client
+        .exchange(call.request(), |response| {
+            note_height(height, response);
+            call.decode(response)
+        })
+        .await
+        .map_err(unusable)?;
+    let chain =
+        Chain::from_node(profile, &crypto).map_err(|error| Unusable::Refused(error.into()))?;
+    let call = SolarCompat::new(0).node_configuration();
+    let node = client
+        .exchange(call.request(), |response| {
+            note_height(height, response);
+            call.decode(response)
+        })
+        .await
+        .map_err(unusable)?;
+    chain
+        .check_node(&node)
+        .map_err(|error| Unusable::Refused(error.into()))?;
+    Ok((chain, node))
+}
+
+/// An error of the node API client, as a reason to try another relay or to stop.
+fn unusable(error: ApiError) -> Unusable {
+    if error.is_retryable() {
+        Unusable::Unavailable(error)
+    } else {
+        Unusable::Refused(error.into())
+    }
+}
+
+/// Keeps the highest `X-Block-Height` of a successful answer.
+fn note_height(height: &AtomicU64, response: &Response) {
+    if (200..300).contains(&response.status())
+        && let Some(seen) = response.block_height()
+    {
+        height.fetch_max(seen, Ordering::Relaxed);
     }
 }
 
@@ -504,7 +652,18 @@ mod tests {
     /// A relay on a local port that answers from the devnet answers recorded in the node API
     /// client's fixtures, by method and path, and records each request's method and path.
     async fn recorded_relay() -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
+        let up = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        recorded_relay_serving(None, up).await
+    }
+
+    /// [`recorded_relay`], serving the chain whose network hash is `nethash` in place of the
+    /// recorded one when given, and closing every connection unanswered while `up` is false.
+    async fn recorded_relay_serving(
+        nethash: Option<String>,
+        up: Arc<std::sync::atomic::AtomicBool>,
+    ) -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        const RECORDED: &str = "c9b03ab996ef3ac216a2ac53eaee71118cbf7995fa44449a7fb7f94bbe18bcca";
         let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../iceroot-sdk-api/tests/fixtures/devnet");
         let index: serde_json::Value =
@@ -517,6 +676,9 @@ mod tests {
         tokio::spawn(async move {
             loop {
                 let (mut socket, _) = listener.accept().await.unwrap();
+                if !up.load(Ordering::Relaxed) {
+                    continue;
+                }
                 let mut request = Vec::new();
                 let mut buffer = [0u8; 8192];
                 // Up to the end of the headers, then the body its length gives.
@@ -553,7 +715,8 @@ mod tests {
                     Some(entry) => (
                         entry["status"].as_u64().unwrap(),
                         std::fs::read_to_string(fixtures.join(entry["file"].as_str().unwrap()))
-                            .unwrap(),
+                            .unwrap()
+                            .replace(RECORDED, nethash.as_deref().unwrap_or(RECORDED)),
                     ),
                     None => (
                         404,
@@ -635,6 +798,43 @@ mod tests {
             requests.iter().all(|request| !request.contains("POST")),
             "{requests:?}"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_relay_is_asked_only_once_it_serves_the_session_s_chain() {
+        use std::sync::atomic::AtomicBool;
+        // The first relay serves the devnet; the second a chain of another network hash, as a
+        // relay of a devnet generated again would.
+        let up = Arc::new(AtomicBool::new(true));
+        let (first, _) = recorded_relay_serving(None, Arc::clone(&up)).await;
+        let (other, asked) =
+            recorded_relay_serving(Some("ab".repeat(32)), Arc::new(AtomicBool::new(true))).await;
+        let profile = iceroot_sdk_bindings::profile::from_json(&format!(
+            r#"{{"id":"devnet","backend":"solar-compat","api":{{"relays":["{first}","{other}"]}},"chain":{{"networkByte":90}},"keyScheme":"bip32-secp256k1"}}"#
+        ))
+        .unwrap();
+        let options: ConnectOptions = serde_json::from_str(r#"{"rateLimit":false}"#).unwrap();
+        let session = Session::connect(&profile, options).await.unwrap().session;
+        assert!(asked.lock().unwrap().is_empty());
+
+        // The first relay goes down: the second is checked before its first use, and refused.
+        up.store(false, Ordering::Relaxed);
+        let error = session.read("nodeStatus", "{}").await.unwrap_err();
+        assert_eq!(error.code(), "NetworkMismatch");
+        let error = session
+            .read(
+                "account",
+                r#"{"address":"dZ1W1GsDCSyhR148oMhuHy3PkhnnSGCqVn"}"#,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "NodeUnavailable");
+        // It was asked for its configuration once, and for nothing else.
+        assert_eq!(*asked.lock().unwrap(), ["GET /node/configuration"]);
+
+        // Back up, the first relay answers again.
+        up.store(true, Ordering::Relaxed);
+        session.read("nodeStatus", "{}").await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

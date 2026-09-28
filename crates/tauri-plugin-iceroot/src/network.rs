@@ -9,7 +9,8 @@
 //! A relay is reached only when the application's capabilities allow it: each connection's
 //! relays must match an `allow` entry (`{ "url": "http://127.0.0.1:6003/api" }`, `*` matching any
 //! run of characters other than `/`, `**` any run) of the `net-connect` command's scope or of the
-//! plugin's global scope, and no `deny` entry.
+//! plugin's global scope, and no `deny` entry. Requests go to those relays and nowhere else: the
+//! client follows no redirect, and a relay that answers with one counts as unavailable.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -104,8 +105,9 @@ pub(crate) fn relay_allowed(
         && !denies.iter().any(|entry| entry.matches(relay))
 }
 
-/// Options of a connection, as `connect` takes them in TypeScript.
-#[derive(Debug, Default, Deserialize)]
+/// Options of a connection, as `connect` takes them in TypeScript. Its `Debug` output names the
+/// headers but never shows their values, which may be tokens.
+#[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConnectOptions {
     /// Extra headers for every request, for a relay behind a proxy that needs a token.
@@ -117,6 +119,17 @@ pub struct ConnectOptions {
     /// Time allowed for one request, in milliseconds; 15,000 by default.
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+}
+
+impl std::fmt::Debug for ConnectOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let headers: Vec<&str> = self.headers.iter().map(|(name, _)| name.as_str()).collect();
+        f.debug_struct("ConnectOptions")
+            .field("headers", &headers)
+            .field("rate_limit", &self.rate_limit)
+            .field("timeout_ms", &self.timeout_ms)
+            .finish()
+    }
 }
 
 /// A request allowance, or none.
@@ -131,8 +144,9 @@ pub enum Allowance {
         #[serde(rename = "windowMs")]
         window_ms: u64,
     },
-    /// `false`: no budget; HTTP 429 is still retried with backoff.
-    Unlimited(bool),
+    /// `false`: no budget; HTTP 429 is still retried with backoff. `true`: the default
+    /// allowance, as when the option is left out.
+    Toggle(bool),
 }
 
 /// A network the plugin connected to: the chain it serves, pinned, and the client that reaches it.
@@ -305,7 +319,7 @@ pub(crate) fn relays(profile: &Profile) -> Result<Vec<Relay>> {
 fn http_options(options: ConnectOptions) -> HttpOptions {
     let defaults = HttpOptions::default();
     let rate_limit = match options.rate_limit {
-        None => defaults.rate_limit,
+        None | Some(Allowance::Toggle(true)) => defaults.rate_limit,
         Some(Allowance::Limit {
             requests,
             window_ms,
@@ -314,7 +328,7 @@ fn http_options(options: ConnectOptions) -> HttpOptions {
             window: Duration::from_millis(window_ms.max(1)),
         },
         // No budget: the allowance is never spent.
-        Some(Allowance::Unlimited(_)) => RateLimit {
+        Some(Allowance::Toggle(false)) => RateLimit {
             requests: u32::MAX,
             window: Duration::from_millis(1),
         },
@@ -362,8 +376,8 @@ impl AtNext {
     }
 }
 
-/// A signed transaction as the guest code holds it: its serialized form, which must verify, or
-/// the transaction's bytes read under a chain the page holds at a height.
+/// A signed transaction as the guest code holds it: its serialized form, whose sender's signature
+/// must verify, or the transaction's bytes read under a chain the page holds at a height.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum SignedSource {
@@ -642,6 +656,46 @@ mod tests {
         assert_eq!(error.code(), "NodeUnavailable");
     }
 
+    /// A relay that answers every request with a 307 to `target`, and counts the requests.
+    async fn redirecting_relay(target: String) -> (String, Arc<std::sync::Mutex<usize>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let relay = format!("http://{}/api", listener.local_addr().unwrap());
+        let asked = Arc::new(std::sync::Mutex::new(0));
+        let count = Arc::clone(&asked);
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut buffer = [0u8; 8192];
+                let _ = socket.read(&mut buffer).await.unwrap();
+                *count.lock().unwrap() += 1;
+                let answer = format!(
+                    "HTTP/1.1 307 Temporary Redirect\r\nlocation: {target}/node/configuration/crypto\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+                );
+                socket.write_all(answer.as_bytes()).await.unwrap();
+            }
+        });
+        (relay, asked)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_redirect_is_never_followed_to_a_host_the_capabilities_did_not_name() {
+        // An allowed relay that redirects to a node the capabilities never named.
+        let (elsewhere, reached) = recorded_relay().await;
+        let (relay, asked) = redirecting_relay(elsewhere).await;
+        assert!(relay_allowed(&relay, &[entry(&relay)], &[]));
+        let options: ConnectOptions =
+            serde_json::from_str(r#"{"headers":[["x-api-key","s3cret"]],"rateLimit":false}"#)
+                .unwrap();
+        let error = Session::connect(&devnet(&relay), options)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.code(), "NodeUnavailable");
+        assert_eq!(*asked.lock().unwrap(), 1);
+        assert!(reached.lock().unwrap().is_empty());
+    }
+
     #[test]
     fn options_read_as_typescript_writes_them() {
         let options: ConnectOptions = serde_json::from_str(
@@ -654,6 +708,19 @@ mod tests {
         assert_eq!(http.headers.len(), 1);
         let unlimited: ConnectOptions = serde_json::from_str(r#"{"rateLimit":false}"#).unwrap();
         assert_eq!(http_options(unlimited).rate_limit.requests, u32::MAX);
+        let default: ConnectOptions = serde_json::from_str(r#"{"rateLimit":true}"#).unwrap();
+        assert_eq!(
+            http_options(default).rate_limit,
+            HttpOptions::default().rate_limit
+        );
+        // The headers' values never show.
+        let with_token: ConnectOptions =
+            serde_json::from_str(r#"{"headers":[["authorization","Bearer s3cret"]]}"#).unwrap();
+        let shown = format!("{with_token:?}");
+        assert!(
+            shown.contains("authorization") && !shown.contains("s3cret"),
+            "{shown}"
+        );
         assert!(serde_json::from_str::<ConnectOptions>(r#"{"transport":1}"#).is_err());
         assert_eq!(status_height(r#"{"height":"80"}"#), Some(80));
         assert_eq!(status_height("{}"), None);

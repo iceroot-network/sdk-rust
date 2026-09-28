@@ -59,9 +59,152 @@ impl Secret {
     }
 }
 
+/// The refusal of anything but an array of bytes where a secret is expected. It is fixed, so no
+/// part of what the page sent (a phrase sent as a string, a word of it in an array) is written
+/// into the refusal the page and its logs receive.
+const NOT_A_SECRET: &str = "a secret is an array of UTF-8 bytes";
+
+/// Reads a secret without ever writing what was sent into an error.
+struct SecretVisitor;
+
+/// Visitor methods that refuse their form with [`NOT_A_SECRET`], never with what was sent.
+macro_rules! refuse {
+    ($value:ty; $($method:ident($($ty:ty)?)),* $(,)?) => {
+        $(
+            fn $method<E: serde::de::Error>(self $(, _: $ty)?) -> std::result::Result<$value, E> {
+                Err(E::custom(NOT_A_SECRET))
+            }
+        )*
+    };
+}
+
+/// Visitor methods of the nested forms (an option's value, a map, an enum), refused the same way.
+macro_rules! refuse_nested {
+    ($value:ty, $de:lifetime) => {
+        fn visit_some<D: Deserializer<$de>>(self, _: D) -> std::result::Result<$value, D::Error> {
+            Err(serde::de::Error::custom(NOT_A_SECRET))
+        }
+
+        fn visit_newtype_struct<D: Deserializer<$de>>(
+            self,
+            _: D,
+        ) -> std::result::Result<$value, D::Error> {
+            Err(serde::de::Error::custom(NOT_A_SECRET))
+        }
+
+        fn visit_map<A: serde::de::MapAccess<$de>>(
+            self,
+            _: A,
+        ) -> std::result::Result<$value, A::Error> {
+            Err(serde::de::Error::custom(NOT_A_SECRET))
+        }
+
+        fn visit_enum<A: serde::de::EnumAccess<$de>>(
+            self,
+            _: A,
+        ) -> std::result::Result<$value, A::Error> {
+            Err(serde::de::Error::custom(NOT_A_SECRET))
+        }
+    };
+}
+
+impl<'de> serde::de::Visitor<'de> for SecretVisitor {
+    type Value = Secret;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(NOT_A_SECRET)
+    }
+
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(
+        self,
+        mut seq: A,
+    ) -> std::result::Result<Secret, A::Error> {
+        // Wiped on every path, including a refusal half way.
+        let mut bytes = Zeroizing::new(Vec::with_capacity(seq.size_hint().unwrap_or(0).min(4096)));
+        while let Some(SecretByte(byte)) = seq.next_element()? {
+            bytes.push(byte);
+        }
+        Ok(Secret(bytes))
+    }
+
+    refuse!(
+        Secret;
+        visit_bool(bool),
+        visit_i64(i64),
+        visit_i128(i128),
+        visit_u64(u64),
+        visit_u128(u128),
+        visit_f64(f64),
+        visit_char(char),
+        visit_str(&str),
+        visit_bytes(&[u8]),
+        visit_none(),
+        visit_unit(),
+    );
+    refuse_nested!(Secret, 'de);
+}
+
+/// One byte of a secret: a whole number from 0 to 255, refused without saying what it was.
+struct SecretByte(u8);
+
+/// Reads one byte of a secret without ever writing what was sent into an error.
+struct SecretByteVisitor;
+
+impl<'de> serde::de::Visitor<'de> for SecretByteVisitor {
+    type Value = SecretByte;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(NOT_A_SECRET)
+    }
+
+    fn visit_u64<E: serde::de::Error>(self, value: u64) -> std::result::Result<SecretByte, E> {
+        u8::try_from(value)
+            .map(SecretByte)
+            .map_err(|_| E::custom(NOT_A_SECRET))
+    }
+
+    fn visit_i64<E: serde::de::Error>(self, value: i64) -> std::result::Result<SecretByte, E> {
+        u8::try_from(value)
+            .map(SecretByte)
+            .map_err(|_| E::custom(NOT_A_SECRET))
+    }
+
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(
+        self,
+        _: A,
+    ) -> std::result::Result<SecretByte, A::Error> {
+        Err(serde::de::Error::custom(NOT_A_SECRET))
+    }
+
+    refuse!(
+        SecretByte;
+        visit_bool(bool),
+        visit_i128(i128),
+        visit_u128(u128),
+        visit_f64(f64),
+        visit_char(char),
+        visit_str(&str),
+        visit_bytes(&[u8]),
+        visit_none(),
+        visit_unit(),
+    );
+    refuse_nested!(SecretByte, 'de);
+}
+
+impl<'de> Deserialize<'de> for SecretByte {
+    fn deserialize<D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<SecretByte, D::Error> {
+        deserializer.deserialize_any(SecretByteVisitor)
+    }
+}
+
 impl<'de> Deserialize<'de> for Secret {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Secret, D::Error> {
-        Vec::<u8>::deserialize(deserializer).map(|bytes| Secret(Zeroizing::new(bytes)))
+        // `deserialize_any`, not `deserialize_seq`: a JSON value that is not an array is handed
+        // to the visitor, which refuses it without the value, instead of being described in the
+        // deserializer's own error.
+        deserializer.deserialize_any(SecretVisitor)
     }
 }
 
@@ -112,6 +255,40 @@ mod tests {
         assert_eq!(secret.text("s").unwrap(), "\0\0");
         let invalid: Secret = serde_json::from_str("[255]").unwrap();
         assert_eq!(invalid.text("s").unwrap_err().code(), "InvalidArgument");
+        // A secret sent in another form is refused without a trace of it, whatever the form,
+        // through a JSON text or a JSON value (Tauri's command arguments).
+        for sent in [
+            r#""correct horse battery staple""#,
+            r#"["correct", "horse"]"#,
+            r#"[104, 1234567]"#,
+            r#"[104, -7777777]"#,
+            r#"[104, 1.5]"#,
+            r#"[[104, 105]]"#,
+            r#"{"phrase": "correct horse"}"#,
+            "123456789",
+            "true",
+            "null",
+        ] {
+            let error = serde_json::from_str::<Secret>(sent)
+                .unwrap_err()
+                .to_string();
+            assert!(error.starts_with(NOT_A_SECRET), "{sent}: {error}");
+            for trace in ["correct", "horse", "1234567", "7777777", "1.5", "123456789"] {
+                assert!(!error.contains(trace), "{sent}: {error}");
+            }
+            let value: serde_json::Value = serde_json::from_str(sent).unwrap();
+            let error = serde_json::from_value::<Secret>(value)
+                .unwrap_err()
+                .to_string();
+            assert!(error.starts_with(NOT_A_SECRET), "{sent}: {error}");
+            assert!(
+                !error.contains("correct") && !error.contains("7777"),
+                "{error}"
+            );
+        }
+        let value = serde_json::json!([104, 105]);
+        let mut secret = serde_json::from_value::<Secret>(value).unwrap();
+        assert_eq!(secret.bytes_mut(), b"hi");
         let answer = SecretBytes(Zeroizing::new(b"hi".to_vec()));
         assert_eq!(serde_json::to_string(&answer).unwrap(), "[104,105]");
         assert_eq!(format!("{answer:?}"), "SecretBytes(..)");

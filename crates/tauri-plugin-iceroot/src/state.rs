@@ -10,7 +10,9 @@
 //! (Tauri's multi-webview windows) has webviews with labels of their own: each webview's values
 //! record the window it was in when it last held one, and a destroyed window drops the values of
 //! every webview recorded in it. Tauri reports no event when one webview of such a window closes
-//! on its own, so its page should release its keys first.
+//! on its own, so its page should release its keys first. The window is recorded only by a
+//! command that holds a value, so a webview moved to another window goes with its old window
+//! until it next holds one.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

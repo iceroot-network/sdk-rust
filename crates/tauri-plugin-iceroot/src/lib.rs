@@ -8,13 +8,14 @@
 //!   Solar keys of ownership proofs, are held by the plugin; the webview holds opaque numbers and
 //!   receives public keys, addresses and signatures only. Keys are held for the webview that
 //!   opened them, and wiped when it releases them, when it loads another page and when its window
-//!   closes.
+//!   closes (the window it was in when it last opened a key, loaded a chain or connected).
 //! - **Drafts cross as serialized bytes.** A draft is built by the core, and signing reads its
 //!   serialized form again under the network's pinned profile, so what is signed is what the plugin
 //!   read, never what the webview said it was.
 //! - **Node requests leave from Rust.** The SDK's node API client, the same request builders and
 //!   answer decoders as in WebAssembly, over reqwest, to the relays the application's
-//!   capabilities allow and nowhere else: a redirect is never followed ([`network`]). The
+//!   capabilities allow and nowhere else: a redirect is never followed ([`network`]); a proxy is
+//!   used only when the application's environment names one (`HTTP_PROXY` and the like). The
 //!   webview's content security policy needs no node origin and no `'wasm-unsafe-eval'`.
 //! - **One implementation.** Arguments are read and answers written by `iceroot-sdk-bindings`,
 //!   the code the WebAssembly module uses, and every key, address, signature, transaction, vote

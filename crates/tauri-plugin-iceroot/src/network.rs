@@ -10,7 +10,9 @@
 //! relays must match an `allow` entry (`{ "url": "http://127.0.0.1:6003/api" }`, `*` matching any
 //! run of characters other than `/`, `**` any run) of the `net-connect` command's scope or of the
 //! plugin's global scope, and no `deny` entry. Requests go to those relays and nowhere else: the
-//! client follows no redirect, and a relay that answers with one counts as unavailable.
+//! client follows no redirect, and a relay that answers with one counts as unavailable. The only
+//! other host a request passes through is a proxy the application's environment names
+//! (`HTTP_PROXY`, `HTTPS_PROXY` or `ALL_PROXY`), as curl uses it.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

@@ -19,8 +19,10 @@ pub const SEED_TAG: &[u8] = b"iceroot/vote-select/v1";
 /// with every integer big-endian. The election height is the snapshot's height rounded down to a
 /// multiple of the election interval, 24 rounds of the snapshot's seats (see
 /// [`VoteSnapshot::election_height`](crate::VoteSnapshot::election_height)): every snapshot
-/// within one interval gives an account the same seed, so whoever supplies the snapshot cannot
-/// steer the picks by choosing among recent heights. Anyone with the same account, mode, snapshot,
+/// within one interval gives an account the same seed, so whoever supplies the snapshot can choose
+/// between whole intervals only. The supplier is still trusted for the snapshot's height and seats,
+/// as for the rest of its data: an older interval or another seat count seeds another draw.
+/// Anyone with the same account, mode, snapshot,
 /// draw number and library version draws the same selection.
 pub fn seed(account: &str, mode: Mode, election_height: u64, draw: u32) -> [u8; 32] {
     let mut hasher = Sha256::new();

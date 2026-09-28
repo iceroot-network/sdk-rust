@@ -433,8 +433,9 @@ impl VoteSnapshot {
     /// The height a selection's seed uses: the snapshot's height rounded down to a multiple of the
     /// election interval, [`ELECTION_INTERVAL_ROUNDS`] rounds of `seats` blocks (1,272 blocks with
     /// 53 seats). Every snapshot within one interval seeds the same draw, so whoever supplies the
-    /// snapshot cannot steer an account's picks by choosing among recent heights. The height itself
-    /// when the snapshot has no seats.
+    /// snapshot can choose between whole intervals only, not among every recent height. The
+    /// supplier is still trusted for the height and the seats, as for the rest of the snapshot's
+    /// data. The height itself when the snapshot has no seats.
     pub fn election_height(&self) -> u64 {
         let interval = u64::from(ELECTION_INTERVAL_ROUNDS) * u64::from(self.seats);
         self.height - self.height.checked_rem(interval).unwrap_or(0)

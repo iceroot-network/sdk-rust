@@ -809,9 +809,9 @@ fn maximum_rewards_top_ups_keep_the_operator_cap() {
 
 #[test]
 fn heights_within_an_election_interval_draw_the_same_picks() {
-    // Whoever supplies the snapshot cannot steer an account's picks by choosing among recent
-    // heights: every height of an election interval (24 rounds of 53 blocks, 1,272 blocks) seeds
-    // the same draw. Diversity's criteria do not depend on the height, so the picks are the same.
+    // Whoever supplies the snapshot can choose between whole election intervals only: every height
+    // of an interval (24 rounds of 53 blocks, 1,272 blocks) seeds the same draw. Diversity's
+    // criteria do not depend on the height, so the picks are the same.
     let s = synthetic();
     let at = |height: u64, account: &str| {
         let snapshot = VoteSnapshot {

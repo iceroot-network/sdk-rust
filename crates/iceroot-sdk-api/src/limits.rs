@@ -5,6 +5,11 @@
 //! header. [`RequestBudget`] spends requests against that allowance before they are sent, and
 //! [`Backoff`] spaces retries after a 429. Both are sans-IO: the caller passes the time, as
 //! milliseconds on any monotonic clock.
+//!
+//! A `Retry-After` is honoured up to [`Backoff::MAX_RETRY_AFTER`] (one minute, the reference
+//! implementation's window). A longer one, which a proxy or a hostile relay may send, is not
+//! waited for: the retries of that relay end there, and the HTTP client tries the next relay or
+//! reports [`crate::ApiError::RateLimited`] with the wait the node asked for.
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -100,8 +105,10 @@ impl RequestBudget {
         Ok(())
     }
 
-    /// Records a 429 at `now_ms`: no request is allowed for `wait`.
+    /// Records a 429 at `now_ms`: no request is allowed for `wait`, at most
+    /// [`Backoff::MAX_RETRY_AFTER`].
     pub fn block_for(&mut self, now_ms: u64, wait: Duration) {
+        let wait = wait.min(Backoff::MAX_RETRY_AFTER);
         let wait_ms = u64::try_from(wait.as_millis()).unwrap_or(u64::MAX);
         self.blocked_until = self.blocked_until.max(now_ms.saturating_add(wait_ms));
     }
@@ -130,18 +137,24 @@ impl Default for Backoff {
 }
 
 impl Backoff {
-    /// The wait before retry number `attempt` (from 0), or `None` when retries are spent. A
-    /// `Retry-After` from the node wins when it is longer.
+    /// The longest `Retry-After` a client waits for: one minute, the reference implementation's
+    /// rate limit window.
+    pub const MAX_RETRY_AFTER: Duration = Duration::from_secs(60);
+
+    /// The wait before retry number `attempt` (from 0), or `None` when retries are spent or the
+    /// node asked for a wait longer than [`Backoff::MAX_RETRY_AFTER`]. A `Retry-After` from the
+    /// node wins when it is longer than the schedule's wait.
     pub fn delay(&self, attempt: u32, retry_after: Option<Duration>) -> Option<Duration> {
         if attempt >= self.max_retries {
             return None;
         }
         let factor = 2u32.checked_pow(attempt).unwrap_or(u32::MAX);
         let exponential = self.initial.saturating_mul(factor).min(self.max);
-        Some(match retry_after {
-            Some(asked) if asked > exponential => asked,
-            _ => exponential,
-        })
+        match retry_after {
+            Some(asked) if asked > Backoff::MAX_RETRY_AFTER => None,
+            Some(asked) if asked > exponential => Some(asked),
+            _ => Some(exponential),
+        }
     }
 }
 
@@ -189,5 +202,24 @@ mod tests {
             ..b
         };
         assert_eq!(long.delay(39, None), Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn a_retry_after_beyond_a_minute_is_not_waited_for() {
+        let b = Backoff::default();
+        let minute = Duration::from_secs(60);
+        assert_eq!(b.delay(0, Some(minute)), Some(minute));
+        for asked in [61, 3_600, 3_000_000_000, u64::MAX] {
+            assert_eq!(
+                b.delay(0, Some(Duration::from_secs(asked))),
+                None,
+                "{asked}"
+            );
+        }
+        // Nothing blocks a budget for longer than a minute.
+        let mut budget = RequestBudget::new(RateLimit::REFERENCE_DEFAULT);
+        budget.block_for(1_000, Duration::from_secs(u64::MAX));
+        assert_eq!(budget.acquire(1_000), Err(minute));
+        assert!(budget.acquire(61_000).is_ok());
     }
 }

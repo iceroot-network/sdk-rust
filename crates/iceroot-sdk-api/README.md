@@ -35,11 +35,11 @@ Submissions are split into requests of at most the pool's `maxTransactionsPerReq
 
 ## Rate limit
 
-The reference implementation allows 100 requests per 60 seconds per client address and answers HTTP 429 beyond that. `RequestBudget` spends requests against a `RateLimit` before they are sent, and `Backoff` spaces retries after a 429. Both take the time as an argument, so they work in WebAssembly as well.
+The reference implementation allows 100 requests per 60 seconds per client address and answers HTTP 429 beyond that. `RequestBudget` spends requests against a `RateLimit` before they are sent, and `Backoff` spaces retries after a 429. A `Retry-After` is honoured up to `Backoff::MAX_RETRY_AFTER` (one minute); a longer one ends the retries instead of blocking the client. Both take the time as an argument, so they work in WebAssembly as well.
 
 ## Feature `http`
 
-`HttpClient` sends calls with reqwest (rustls) to a list of relays: reads go to the first relay that answers, 429 is retried after the backoff, and requests keep to the request budget. An answer is read up to `MAX_RESPONSE_BYTES` (8 MiB) and never decompressed; a relay that declares or sends more is skipped like one that cannot be reached. Every decoder also refuses a longer body with `BadResponse` before parsing it, whatever transport received it. `HttpOptions::headers` adds headers to every request, for a relay behind a proxy that asks for a token; their values never appear in the client's `Debug` output. It is available on native targets only; a WebAssembly build never contains reqwest, hyper or tokio.
+`HttpClient` sends calls with reqwest (rustls) to a list of relays: reads go to the first relay that answers, 429 is retried after the backoff (a relay whose retries are spent, or that asks for more than a minute, is skipped), and requests keep to the request budget. An answer is read up to `MAX_RESPONSE_BYTES` (8 MiB) and never decompressed; a relay that declares or sends more is skipped like one that cannot be reached. Every decoder also refuses a longer body with `BadResponse` before parsing it, whatever transport received it. `HttpOptions::headers` adds headers to every request, for a relay behind a proxy that asks for a token; their values never appear in the client's `Debug` output. It is available on native targets only; a WebAssembly build never contains reqwest, hyper or tokio.
 
 ```rust,no_run
 use iceroot_sdk_api::{HttpClient, Relay, SolarCompat};

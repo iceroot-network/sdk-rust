@@ -2,7 +2,8 @@
 //!
 //! It sends [`Call`]s to a list of relays: reads go to the first relay that answers, a relay that
 //! cannot be reached or answers with a server error is skipped, and HTTP 429 is retried after a
-//! [`Backoff`]. Requests are spent against a [`RequestBudget`] before they leave, so a busy client
+//! [`Backoff`]; a relay whose retries are spent, or that asks for a wait longer than
+//! [`Backoff::MAX_RETRY_AFTER`], is skipped too. Requests are spent against a [`RequestBudget`] before they leave, so a busy client
 //! waits instead of being refused.
 //!
 //! Requests go to the relays and nowhere else: the client never follows a redirect (the node API
@@ -256,7 +257,8 @@ impl HttpClient {
     ///
     /// Relays are tried in order: one that cannot be reached, times out, answers with a redirect
     /// or answers 5xx is skipped. A 429 is retried on the same relay after the backoff; when
-    /// retries are spent the error is [`ApiError::RateLimited`].
+    /// retries are spent, or the relay asks for a wait longer than [`Backoff::MAX_RETRY_AFTER`],
+    /// the next relay is tried, and after the last one the error is [`ApiError::RateLimited`].
     ///
     /// # Errors
     ///
@@ -301,7 +303,12 @@ impl HttpClient {
                                 self.block(wait);
                                 attempt = attempt.saturating_add(1);
                             }
-                            None => return Err(ApiError::RateLimited { retry_after }),
+                            // Retries spent, or a wait longer than the client keeps: another
+                            // relay may answer, and none is blocked for this one.
+                            None => {
+                                last = ApiError::RateLimited { retry_after };
+                                break;
+                            }
                         }
                     }
                     Err(error @ ApiError::Refused { status, .. }) if status >= 500 => {

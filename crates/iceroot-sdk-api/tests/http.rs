@@ -389,3 +389,78 @@ async fn an_answer_larger_than_the_limit_is_refused_and_the_next_relay_asked() {
         assert!(error.to_string().contains("bytes"), "{error}");
     }
 }
+
+/// A relay that answers every request with HTTP 429 and `retry-after: <seconds>`, and counts the
+/// requests.
+async fn limiting_relay(seconds: u64) -> (String, Arc<Mutex<usize>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/api", listener.local_addr().unwrap());
+    let asked = Arc::new(Mutex::new(0));
+    let count = Arc::clone(&asked);
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            *count.lock().unwrap() += 1;
+            let mut buffer = [0u8; 4096];
+            let _ = socket.read(&mut buffer).await;
+            let answer = format!(
+                "HTTP/1.1 429 Too Many Requests\r\ncontent-type: application/json\r\nretry-after: {seconds}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{TOO_MANY}",
+                TOO_MANY.len()
+            );
+            let _ = socket.write_all(answer.as_bytes()).await;
+            socket.shutdown().await.ok();
+        }
+    });
+    (url, asked)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_long_retry_after_moves_on_to_the_next_relay_and_blocks_nothing() {
+    for seconds in [3_000_000_000u64, 86_400, 61] {
+        let (limiting, limited) = limiting_relay(seconds).await;
+        let (live, served) = server(vec![(200, STATUS), (200, STATUS)]).await;
+        let relays = vec![
+            Relay::parse(&limiting).unwrap(),
+            Relay::parse(&live).unwrap(),
+        ];
+        let client = HttpClient::with_options(relays, options(3)).unwrap();
+        let first = tokio::time::timeout(
+            Duration::from_secs(5),
+            client.send(&SolarCompat::new(53).node_status()),
+        )
+        .await
+        .expect("the next relay answers at once")
+        .unwrap();
+        assert_eq!(first.height, 42, "{seconds}");
+        assert_eq!(*limited.lock().unwrap(), 1, "{seconds}");
+        // The client is not blocked for later requests either.
+        let second = tokio::time::timeout(
+            Duration::from_secs(5),
+            client.send(&SolarCompat::new(53).node_status()),
+        )
+        .await
+        .expect("a later request is not blocked")
+        .unwrap();
+        assert_eq!(second.height, 42);
+        assert_eq!(served.lock().unwrap().len(), 2);
+
+        // With that relay alone, the rate limit is reported at once, with the wait asked for.
+        let only =
+            HttpClient::with_options(vec![Relay::parse(&limiting).unwrap()], options(3)).unwrap();
+        let error = tokio::time::timeout(
+            Duration::from_secs(5),
+            only.send(&SolarCompat::new(53).node_status()),
+        )
+        .await
+        .expect("reported at once")
+        .unwrap_err();
+        assert_eq!(
+            error,
+            ApiError::RateLimited {
+                retry_after: Some(Duration::from_secs(seconds))
+            }
+        );
+    }
+}

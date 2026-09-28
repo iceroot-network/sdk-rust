@@ -385,8 +385,9 @@ impl Budget {
 }
 
 /// The wait in milliseconds before retry number `attempt` (from 0) after HTTP 429, or `undefined`
-/// when the retries are spent: 2 s doubling up to 30 s, three retries, or the node's own
-/// `Retry-After` when that is longer.
+/// when the retries are spent or the node's `Retry-After` is longer than a minute (the host then
+/// reports the rate limit, or tries another relay, instead of waiting): 2 s doubling up to 30 s,
+/// three retries, or the node's own `Retry-After` when that is longer.
 pub fn backoff_delay(attempt: u32, retry_after_ms: Option<f64>) -> Option<f64> {
     Backoff::default()
         .delay(
@@ -789,6 +790,12 @@ mod tests {
         assert_eq!(backoff_delay(0, None), Some(2_000.0));
         assert_eq!(backoff_delay(1, Some(9_000.0)), Some(9_000.0));
         assert_eq!(backoff_delay(3, None), None);
+        // A wait beyond a minute is not waited for, and never blocks a budget longer.
+        assert_eq!(backoff_delay(0, Some(60_000.0)), Some(60_000.0));
+        assert_eq!(backoff_delay(0, Some(60_001.0)), None);
+        assert_eq!(backoff_delay(0, Some(3e12)), None);
+        budget.block_for(20_000.0, 3e12);
+        assert_eq!(budget.acquire(20_000.0), 60_000.0);
         assert_eq!(
             check_relay("http://127.0.0.1:4003/api/").unwrap(),
             "http://127.0.0.1:4003/api"

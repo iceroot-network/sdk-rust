@@ -75,6 +75,17 @@ fn the_devnet_s_vote_rules_are_the_solar_compatible_ones() {
 }
 
 #[test]
+fn from_the_iceroot_genesis_the_vote_rules_are_iceroot_s() {
+    // The IceRoot formats have vote rules of their own (20 to 53 entries of at most 500 basis
+    // points, 1,280 bytes), whatever the milestone's seats and today's limits say.
+    let mut rules = chain().rules(2);
+    rules.stage = iceroot_sdk::Stage::Id;
+    assert_eq!(vote_rules(&rules), VoteRules::ICEROOT);
+    rules.vote.max_entries = 101;
+    assert_eq!(vote_rules(&rules), VoteRules::ICEROOT);
+}
+
+#[test]
 fn a_snapshot_of_the_validator_list() {
     let chain = chain();
     let (height, snapshot) = snapshot(&chain);

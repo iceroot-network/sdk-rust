@@ -24,25 +24,24 @@ use iceroot_vote::{NameRule, RelaySnapshot, RelayValidator, Resignation, VoteRul
 /// The vote rules of `rules` (the core's rules at a height, [`Chain::rules`]), for
 /// [`select`](crate::vote::select) and [`validate_vote`](crate::vote::validate_vote).
 ///
-/// The limits come from `rules.vote`. The name rule and whether a validator's account may vote
-/// follow the format stage: today's formats (and the post-quantum ones, which keep them) accept
-/// the names `rules.name` describes and let validators vote; the IceRoot formats accept
-/// lowercase letters only and refuse a vote from a validator's account. On today's devnet this is
-/// [`VoteRules::SOLAR_COMPATIBLE`] with the devnet's seats as the most entries.
+/// Today's formats (and the post-quantum ones, which keep them) take the limits from
+/// `rules.vote`, accept the names `rules.name` describes and let validators vote: on today's
+/// devnet this is [`VoteRules::SOLAR_COMPATIBLE`] with the devnet's seats as the most entries. The
+/// IceRoot formats have rules of their own from their genesis, [`VoteRules::ICEROOT`]: 20 to 53
+/// entries of at most 500 basis points, 1,280 bytes, lowercase names, and no vote from a
+/// validator's account.
 pub fn vote_rules(rules: &Rules) -> VoteRules {
-    let solar = matches!(rules.stage, Stage::S1 | Stage::Pq);
+    if rules.stage == Stage::Id {
+        return VoteRules::ICEROOT;
+    }
     VoteRules {
         min_entries: u8::try_from(rules.vote.min_entries).unwrap_or(u8::MAX),
         max_entries: u8::try_from(rules.vote.max_entries).unwrap_or(u8::MAX),
         max_entry_basis_points: u16::try_from(rules.vote.max_basis_points_per_entry)
             .unwrap_or(u16::MAX),
         max_bytes: u16::try_from(rules.vote.max_bytes).unwrap_or(u16::MAX),
-        names: if solar {
-            NameRule::SolarCompatible
-        } else {
-            NameRule::LowercaseLetters
-        },
-        validators_may_vote: solar,
+        names: NameRule::SolarCompatible,
+        validators_may_vote: true,
     }
 }
 

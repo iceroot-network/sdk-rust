@@ -24,8 +24,9 @@ pub enum SnapshotSource {
     /// An indexer that keeps windowed production, penalties, declarations and measured payouts.
     Indexer,
     /// A node's relay API, which has only lifetime counters: production comes from the lifetime
-    /// produced and missed block counts and seated days from the first forged block, and there
-    /// are no declarations, payouts or penalties. Every selection made from it records this.
+    /// produced and missed block counts and, for a validator seated now, seated days from the
+    /// first forged block (unknown for any other validator that forged), and there are no
+    /// declarations, payouts or penalties. Every selection made from it records this.
     RelayApproximate,
 }
 
@@ -448,10 +449,14 @@ impl VoteSnapshot {
 
     /// Build a snapshot from a node's relay data, marked [`SnapshotSource::RelayApproximate`].
     ///
-    /// Production is the lifetime produced blocks against produced plus missed; seated days are
-    /// the days since the first forged block, at most the window; the status follows the
-    /// resignation and the rank against the seats. There are no declarations, payouts, penalties
-    /// or self-funded shares.
+    /// Production is the lifetime produced blocks against produced plus missed; the status follows
+    /// the resignation and the rank against the seats. Seated days are known only for a validator
+    /// seated now, as the days since its first forged block, at most the window, and zero for a
+    /// validator that never forged. A validator not seated now that forged at some time has
+    /// unknown seated days, since relay data keeps no seat history: one seat held for a single
+    /// election interval would otherwise count as a whole window of seated days, and its perfect
+    /// lifetime counters would lead Reliability. There are no declarations, payouts, penalties or
+    /// self-funded shares.
     pub fn from_relay(relay: RelaySnapshot) -> VoteSnapshot {
         let RelaySnapshot {
             height,
@@ -486,12 +491,17 @@ impl VoteSnapshot {
                     assigned,
                 })
             });
+            let never_forged =
+                validator.produced_blocks == 0 && validator.first_forged_height.is_none();
             let seated_days_in_window = match validator.first_forged_height {
+                _ if never_forged => Some(0),
+                // No seat history: the days since a first forged block count only for a
+                // validator that holds a seat now.
+                _ if status != ValidatorStatus::Active => None,
                 Some(first) => {
                     let days = snapshot.days_between(first, height);
                     Some(u32::try_from(days).unwrap_or(u32::MAX).min(WINDOW_DAYS))
                 }
-                None if validator.produced_blocks == 0 => Some(0),
                 None => None,
             };
             snapshot.records.push(ValidatorRecord {

@@ -651,3 +651,67 @@ fn bounded_top_ups_can_run_short_in_a_capped_mode() {
         }
     }
 }
+
+/// A relay snapshot of a 90-day chain at 8 s blocks: 53 seated validators forging since the
+/// first block at 99.5 %, and `sybils` validators ranked from 54 down that were each seated once,
+/// ten days ago, for one election interval of 24 blocks, all forged.
+fn seated_once_relay(sybils: usize) -> VoteSnapshot {
+    use iceroot_vote::{RelaySnapshot, RelayValidator};
+
+    let height = 90 * 86_400 / 8;
+    let relay = |i: usize, rank: u32, produced: u64, missed: u64, first: u64| RelayValidator {
+        name: name(i),
+        address: format!("addr-{}", name(i)),
+        rank: Some(rank),
+        resignation: None,
+        vote_weight: if rank <= 53 { 1_000_000 } else { 0 },
+        voters: 3,
+        produced_blocks: produced,
+        missed_blocks: Some(missed),
+        registered_height: Some(1),
+        first_forged_height: Some(first),
+    };
+    let mut validators: Vec<RelayValidator> = (0..53)
+        .map(|i| relay(i, u32::try_from(i + 1).unwrap(), 18_236, 92, 1))
+        .collect();
+    validators.extend((0..sybils).map(|k| {
+        let i = 53 + k;
+        relay(
+            i,
+            u32::try_from(i + 1).unwrap(),
+            24,
+            0,
+            height - 10 * 86_400 / 8,
+        )
+    }));
+    VoteSnapshot::from_relay(RelaySnapshot {
+        height,
+        seats: 53,
+        block_time_seconds: 8,
+        validators,
+    })
+}
+
+#[test]
+fn validators_seated_once_do_not_crowd_reliability_on_a_relay_snapshot() {
+    let s = seated_once_relay(100);
+    assert_eq!(s.validate(), Ok(()));
+    // A validator not seated now has no seat history in relay data: its seated days are unknown,
+    // so Reliability does not pick it, whatever its lifetime counters.
+    let candidates = evaluate(&s, Mode::Reliability).unwrap();
+    for candidate in &candidates {
+        let record = s.record(&candidate.validator).unwrap();
+        if record.seated {
+            assert!(candidate.eligible, "{}", candidate.validator);
+        } else {
+            assert!(!candidate.eligible, "{}", candidate.validator);
+            assert!(candidate.shortfalls.contains(&Shortfall::TooFewSeatedDays {
+                days: None,
+                minimum: 7
+            }));
+        }
+    }
+    assert_eq!(eligible_below_the_seats(&s, Mode::Reliability), 0);
+    let (below, _) = below_the_seats_picked(&s, &selections(&s, Mode::Reliability));
+    assert_eq!(below, 0.0);
+}

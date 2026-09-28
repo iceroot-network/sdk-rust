@@ -7,7 +7,8 @@
 //! first load ([`Chain::profile`] returns the pinned profile, for the application to keep); a
 //! later load of another chain is refused with [`Error::NetworkMismatch`].
 //!
-//! The configuration's labels are checked too, since a review screen shows them and the network
+//! The seats of every milestone must be at most [`MAX_SEATS`]. The configuration's labels are
+//! checked too, since a review screen shows them and the network
 //! hash does not cover them: the token's symbol is 1 to 10 ASCII letters and digits, and its name
 //! 1 to 32 ASCII letters, digits, `-`, `.` and single inner spaces. Anything else is refused with
 //! [`Error::BadResponse`], so no configuration, from a node or inside a serialized draft, can
@@ -32,6 +33,11 @@ use crate::transaction::OperationKind;
 
 /// The decimals of ROOT in today's formats.
 pub const S1_DECIMALS: u8 = 8;
+
+/// The most validator seats a milestone may have. No network comes near it (IceRoot and the
+/// reference implementation's networks have 53), and the economics list a reward for every seat,
+/// so a configuration beyond it is refused.
+pub const MAX_SEATS: u64 = 1_000;
 
 /// The longest token symbol a configuration may give, in ASCII characters.
 pub const MAX_SYMBOL_LENGTH: usize = 10;
@@ -148,6 +154,19 @@ impl Chain {
         }
         let milestones = Milestones::load(milestones_json, &network)
             .map_err(|error| bad("milestones", &error))?;
+        if let Some(params) = milestones
+            .all()
+            .iter()
+            .find(|params| params.active_delegates() > MAX_SEATS)
+        {
+            return Err(Error::BadResponse {
+                reason: format!(
+                    "the milestone at height {} has {} seats; at most {MAX_SEATS} are accepted",
+                    params.height(),
+                    params.active_delegates()
+                ),
+            });
+        }
         Ok(Chain {
             inner: Arc::new(Inner {
                 profile: profile.pinned(&nethash),
@@ -417,6 +436,17 @@ pub(crate) mod tests {
                 "{key} {text:?}"
             );
         }
+        // Seats beyond any network's: the economics would list a reward for each of them.
+        let mut value: Value = serde_json::from_str(&milestones).unwrap();
+        value[0]["activeDelegates"] = Value::from(4_000_000_000u64);
+        value[0].as_object_mut().unwrap().remove("dynamicReward");
+        assert!(matches!(
+            Chain::from_parts(&profile, &network, &value.to_string()),
+            Err(Error::BadResponse { .. })
+        ));
+        value[0]["activeDelegates"] = Value::from(1_000);
+        let most = Chain::from_parts(&profile, &network, &value.to_string()).unwrap();
+        assert_eq!(most.economics(1).rewards_by_rank().len(), 1_000);
         let declared = Profile::devnet_pq(DevnetOptions::default());
         assert!(matches!(
             Chain::from_parts(&declared, &network, &milestones),

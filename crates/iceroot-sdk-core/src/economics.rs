@@ -71,9 +71,10 @@ impl Economics {
             .map(Amount::from)
     }
 
-    /// The block reward of every seat, first seat first.
+    /// The block reward of every seat, first seat first. A loaded chain has at most
+    /// [`MAX_SEATS`](crate::chain::MAX_SEATS) seats, and the list never has more entries.
     pub fn rewards_by_rank(&self) -> Vec<(u32, Option<Amount>)> {
-        let seats = u32::try_from(self.seats()).unwrap_or(u32::MAX);
+        let seats = u32::try_from(self.seats().min(crate::chain::MAX_SEATS)).unwrap_or(u32::MAX);
         (1..=seats)
             .map(|rank| (rank, self.reward_for_rank(rank)))
             .collect()

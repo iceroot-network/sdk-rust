@@ -29,6 +29,7 @@ use heartwood_crypto::utils::{hex, js};
 use heartwood_crypto::{Aux, Signature};
 use iceroot_sdk_core::address::Address;
 use iceroot_sdk_core::amount::Amount;
+use iceroot_sdk_core::chain::MAX_SEATS;
 use iceroot_sdk_core::error::{AddressProblem, TransactionProblem, VoteProblem};
 use iceroot_sdk_core::fee::FeeChoice;
 use iceroot_sdk_core::keys::Account;
@@ -1225,6 +1226,20 @@ fn v12_milestone_config() {
                 // heartwood-crypto's own tests check that each refusal names the reference's
                 // height; here the SDK must pass the refusal on.
                 (Err(_), Err(Error::BadResponse { .. })) => Outcome::Matched,
+                // The SDK refuses more seats than any network has, where the economics would
+                // list a reward for each of them.
+                (Ok(expected), Err(Error::BadResponse { reason }))
+                    if reason.contains("seats")
+                        && expected["milestones"].as_array().is_some_and(|milestones| {
+                            milestones.iter().any(|milestone| {
+                                milestone["activeDelegates"]
+                                    .as_u64()
+                                    .is_some_and(|seats| seats > MAX_SEATS)
+                            })
+                        }) =>
+                {
+                    Outcome::Divergent("the SDK refuses more seats than MAX_SEATS")
+                }
                 (expected, actual) => Outcome::Failed(format!(
                     "expected {expected:?}, got {:?}",
                     actual.map(|_| "a loaded chain")
@@ -1237,8 +1252,8 @@ fn v12_milestone_config() {
     assert_eq!(
         tally,
         Tally {
-            matched: 80,
-            divergent: 0,
+            matched: 79,
+            divergent: 1,
             skipped: 2
         }
     );

@@ -26,6 +26,7 @@ use serde_json::{Value, json};
 #[derive(Debug, serde::Deserialize)]
 struct Entry {
     name: String,
+    path: String,
     status: u16,
     #[serde(default)]
     headers: BTreeMap<String, String>,
@@ -55,6 +56,13 @@ fn fixture(name: &str) -> Response {
         .fold(Response::new(e.status, body), |r, (k, v)| {
             r.with_header(k.clone(), v.clone())
         })
+}
+
+/// The account or transaction a recorded lookup asked for: the last segment of its path.
+fn looked_up(name: &str) -> String {
+    let path = entry(name).path;
+    let path = path.split('?').next().unwrap_or_default();
+    path.rsplit('/').next().unwrap_or_default().to_owned()
 }
 
 const API: SolarCompat = SolarCompat::new(53);
@@ -195,26 +203,31 @@ fn accounts_and_histories() {
         "wallet-second-key",
         "wallet-cold",
     ] {
-        let account = check(&API.account("dA").unwrap().decode(&fixture(name)).unwrap());
+        let account = check(
+            &API.account(&looked_up(name))
+                .unwrap()
+                .decode(&fixture(name))
+                .unwrap(),
+        );
         assert_eq!(account["balances"][0]["asset"], "ROOT", "{name}");
         assert!(account["nonce"].is_string());
     }
     let voter = check(
-        &API.account("dA")
+        &API.account(&looked_up("wallet-voter"))
             .unwrap()
             .decode(&fixture("wallet-voter"))
             .unwrap(),
     );
     assert!(voter["vote"][0]["basisPoints"].is_number());
     let second = check(
-        &API.account("dA")
+        &API.account(&looked_up("wallet-second-key"))
             .unwrap()
             .decode(&fixture("wallet-second-key"))
             .unwrap(),
     );
     assert!(second["secondPublicKey"].is_string());
     let cold = check(
-        &API.account("dA")
+        &API.account(&looked_up("wallet-cold"))
             .unwrap()
             .decode(&fixture("wallet-cold"))
             .unwrap(),
@@ -276,7 +289,7 @@ fn transactions() {
         "vote-by-id",
     ] {
         let record = check(
-            &API.transaction("ab")
+            &API.transaction(&looked_up(name))
                 .unwrap()
                 .decode(&fixture(name))
                 .unwrap(),

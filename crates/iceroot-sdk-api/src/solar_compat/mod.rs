@@ -289,6 +289,14 @@ impl SolarCompat {
         }
     }
 
+    /// The context of a lookup of the transaction `id`, whose answer must be that transaction.
+    fn looked_up(&self, id: &str) -> Context {
+        Context {
+            ids: vec![id.to_owned()],
+            ..self.context()
+        }
+    }
+
     fn paged(&self, page: PageRequest) -> Context {
         Context {
             page: page.page,
@@ -365,18 +373,19 @@ impl SolarCompat {
     // Accounts
 
     /// `GET /wallets/{address}`: balance, nonce, vote, second key and validator name. An address the
-    /// chain has never seen is a fresh account with nothing in it.
+    /// chain has never seen is a fresh account with nothing in it. An answer about another account
+    /// is refused with [`ApiError::BadResponse`].
     ///
     /// # Errors
     ///
     /// [`ApiError::InvalidRequest`] for an empty address.
     pub fn account(&self, address: &str) -> Result<Call<AccountInfo>, ApiError> {
         let path = format!("/wallets/{}", segment(address)?);
-        Ok(Call::new(
-            Request::get(path),
-            self.context(),
-            map::account_info,
-        ))
+        let context = Context {
+            account: Some(address.to_owned()),
+            ..self.context()
+        };
+        Ok(Call::new(Request::get(path), context, map::account_info))
     }
 
     /// `GET /wallets/{address}/transactions` (or `/sent`, `/received`): an account's history,
@@ -434,7 +443,8 @@ impl SolarCompat {
     // Transactions
 
     /// `GET /transactions/{id}`: a confirmed transaction, or `None` when no block holds it. Look in
-    /// the pool with [`unconfirmed_transaction`](SolarCompat::unconfirmed_transaction) next.
+    /// the pool with [`unconfirmed_transaction`](SolarCompat::unconfirmed_transaction) next. An
+    /// answer about another transaction is refused with [`ApiError::BadResponse`].
     ///
     /// # Errors
     ///
@@ -444,12 +454,14 @@ impl SolarCompat {
         let request = Request::get(path).with_query("transform", "true");
         Ok(Call::new(
             request,
-            self.context(),
+            self.looked_up(id),
             map::transaction_optional,
         ))
     }
 
     /// `GET /transactions/unconfirmed/{id}`: a transaction waiting in the node's pool, or `None`.
+    /// An answer about another transaction is refused, as by
+    /// [`transaction`](SolarCompat::transaction).
     ///
     /// # Errors
     ///
@@ -458,7 +470,7 @@ impl SolarCompat {
         let path = format!("/transactions/unconfirmed/{}", segment(id)?);
         Ok(Call::new(
             Request::get(path),
-            self.context(),
+            self.looked_up(id),
             map::transaction_optional,
         ))
     }
@@ -507,7 +519,8 @@ impl SolarCompat {
         Call::new(request, self.paged(page), map::transaction_page)
     }
 
-    /// `GET /votes/{id}`: one vote transaction, or `None`.
+    /// `GET /votes/{id}`: one vote transaction, or `None`. An answer about another transaction is
+    /// refused, as by [`transaction`](SolarCompat::transaction).
     ///
     /// # Errors
     ///
@@ -517,7 +530,7 @@ impl SolarCompat {
         let request = Request::get(path).with_query("transform", "true");
         Ok(Call::new(
             request,
-            self.context(),
+            self.looked_up(id),
             map::transaction_optional,
         ))
     }

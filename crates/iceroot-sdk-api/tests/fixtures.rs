@@ -21,6 +21,7 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 struct Entry {
     name: String,
+    path: String,
     status: u16,
     #[serde(default)]
     headers: std::collections::BTreeMap<String, String>,
@@ -54,6 +55,13 @@ fn fixture(name: &str) -> Response {
         .fold(Response::new(e.status, body), |r, (k, v)| {
             r.with_header(k.clone(), v.clone())
         })
+}
+
+/// The account or transaction a recorded lookup asked for: the last segment of its path.
+fn looked_up(name: &str) -> String {
+    let path = entry(name).path;
+    let path = path.split('?').next().unwrap_or_default();
+    path.rsplit('/').next().unwrap_or_default().to_owned()
 }
 
 const API: SolarCompat = SolarCompat::new(53);
@@ -263,8 +271,12 @@ fn fee_statistics() {
 
 #[test]
 fn accounts() {
-    let call = API.account(GENESIS_1).unwrap();
-    let genesis = call.decode(&fixture("wallet-genesis")).unwrap();
+    let decode = |name: &str| {
+        API.account(&looked_up(name))
+            .unwrap()
+            .decode(&fixture(name))
+    };
+    let genesis = decode("wallet-genesis").unwrap();
     assert_eq!(genesis.address, GENESIS_1);
     assert_eq!(genesis.balance(AssetId::ROOT), 3_200_001_050_000_000);
     assert_eq!(genesis.balances.len(), 1);
@@ -272,7 +284,7 @@ fn accounts() {
     assert!(genesis.vote.is_empty());
     assert!(genesis.second_public_key.is_none() && genesis.validator_name.is_none());
 
-    let voter = call.decode(&fixture("wallet-voter")).unwrap();
+    let voter = decode("wallet-voter").unwrap();
     let vote: Vec<(&str, u16)> = voter
         .vote
         .iter()
@@ -280,19 +292,19 @@ fn accounts() {
         .collect();
     assert_eq!(vote, [("genesis_15", 5_000), ("genesis_2", 5_000)]);
 
-    let second = call.decode(&fixture("wallet-second-key")).unwrap();
+    let second = decode("wallet-second-key").unwrap();
     assert_eq!(
         second.second_public_key.as_deref(),
         Some("0318b677beadb87f35e29150a9bfdb20e1bb934bd70f1208383f4bff7ad6be5d67")
     );
     assert_eq!(second.vote[0].basis_points, 10_000);
 
-    let cold = call.decode(&fixture("wallet-cold")).unwrap();
+    let cold = decode("wallet-cold").unwrap();
     assert_eq!((cold.balance(AssetId::ROOT), cold.nonce), (0, 0));
     assert!(cold.public_key.is_none());
 
     for name in ["wallet-invalid", "wallet-bad-id"] {
-        match call.decode(&fixture(name)) {
+        match decode(name) {
             Err(ApiError::Refused {
                 status: 422, error, ..
             }) => assert_eq!(error, "Unprocessable Entity"),
@@ -468,6 +480,41 @@ fn pending_transactions() {
 }
 
 #[test]
+fn an_answer_about_another_account_or_transaction_is_refused() {
+    // A relay that answers a lookup with another account or transaction than the one asked for:
+    // its answer is refused, not taken for the one asked for.
+    let error = API
+        .account(GENESIS_2)
+        .unwrap()
+        .decode(&fixture("wallet-genesis"))
+        .unwrap_err();
+    assert_eq!(error.code(), "BadResponse");
+    assert!(error.to_string().contains("another account"), "{error}");
+    let other = "ab".repeat(32);
+    for call in [
+        API.transaction(&other).unwrap(),
+        API.unconfirmed_transaction(&other).unwrap(),
+        API.vote(&other).unwrap(),
+    ] {
+        let error = call
+            .decode(&fixture("transaction-transfer-two-recipients"))
+            .unwrap_err();
+        assert_eq!(error.code(), "BadResponse");
+        assert!(error.to_string().contains("another transaction"), "{error}");
+    }
+    // Hex digits in either case name the same transaction.
+    let upper = API
+        .transaction(&TWO_RECIPIENTS.to_ascii_uppercase())
+        .unwrap();
+    assert!(
+        upper
+            .decode(&fixture("transaction-transfer-two-recipients"))
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
 fn missing_transaction_is_none() {
     let call = API.transaction(&"0".repeat(64)).unwrap();
     assert!(
@@ -480,7 +527,7 @@ fn missing_transaction_is_none() {
 #[test]
 fn every_kind_maps() {
     let one = |name: &str| {
-        API.transaction("x")
+        API.transaction(&looked_up(name))
             .unwrap()
             .decode(&fixture(name))
             .unwrap()
@@ -629,7 +676,7 @@ fn votes_listing_and_lookup() {
     assert_eq!((votes.items.len(), votes.total), (5, 65));
     assert!(votes.items.iter().all(|t| t.kind() == TxKind::Vote));
     let one = API
-        .vote("x")
+        .vote(&looked_up("vote-by-id"))
         .unwrap()
         .decode(&fixture("vote-by-id"))
         .unwrap()

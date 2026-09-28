@@ -432,9 +432,23 @@ fn account(w: wire::Wallet) -> Result<AccountInfo, String> {
     })
 }
 
-pub(crate) fn account_info(response: &Response, _: &Context) -> Result<AccountInfo, ApiError> {
+pub(crate) fn account_info(
+    response: &Response,
+    context: &Context,
+) -> Result<AccountInfo, ApiError> {
     let w: wire::Wallet = data(response)?;
-    mapped(response, w, account)
+    let info = mapped(response, w, account)?;
+    if context
+        .account
+        .as_deref()
+        .is_some_and(|asked| asked != info.address)
+    {
+        return Err(ApiError::bad(
+            response.status(),
+            "the node answered about another account than the one asked for",
+        ));
+    }
+    Ok(info)
 }
 
 pub(crate) fn account_page(
@@ -579,10 +593,18 @@ pub(crate) fn transaction_optional(
     response: &Response,
     context: &Context,
 ) -> Result<Option<TxRecord>, ApiError> {
-    match optional_data::<wire::Transaction>(response)? {
-        Some(t) => mapped(response, t, |t| transaction(t, context)).map(Some),
-        None => Ok(None),
+    let Some(t) = optional_data::<wire::Transaction>(response)? else {
+        return Ok(None);
+    };
+    if let [asked] = context.ids.as_slice()
+        && !asked.eq_ignore_ascii_case(&t.id)
+    {
+        return Err(ApiError::bad(
+            response.status(),
+            "the node answered about another transaction than the one asked for",
+        ));
     }
+    mapped(response, t, |t| transaction(t, context)).map(Some)
 }
 
 pub(crate) fn transaction_page(

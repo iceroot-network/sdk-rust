@@ -96,7 +96,38 @@
 //! #     }"#.to_owned()
 //! # }
 //! ```
-
+//!
+//! # Connecting
+//!
+//! With the feature `http`, [`api::HttpClient`] reads from a list of relays and holds them to one
+//! chain: each relay is checked before its first use, against the chain the profile pins or else
+//! the one the first relay that answers names, so a failover never reaches a relay of another
+//! chain.
+//!
+#![cfg_attr(feature = "http", doc = "```no_run")]
+#![cfg_attr(not(feature = "http"), doc = "```ignore")]
+//! use iceroot_sdk::api::{HttpClient, Relay, SolarCompat};
+//! use iceroot_sdk::{Chain, Error, Profile};
+//!
+//! async fn connect(profile: &Profile) -> Result<(Chain, SolarCompat, HttpClient), Error> {
+//!     let relays = profile
+//!         .endpoints()
+//!         .relays
+//!         .iter()
+//!         .map(|relay| Relay::parse(relay))
+//!         .collect::<Result<Vec<_>, _>>()?;
+//!     let client = match profile.relay_identity() {
+//!         Some(identity) => HttpClient::for_chain(relays, identity)?,
+//!         None => HttpClient::new(relays)?,
+//!     };
+//!     let configuration = client.send(&SolarCompat::new(0).node_configuration()).await?;
+//!     let api = SolarCompat::for_configuration(&configuration);
+//!     let chain = Chain::from_node(profile, &client.send(&api.crypto_configuration()).await?)?;
+//!     chain.check_node(&configuration)?;
+//!     // Keep chain.profile(), which pins the network hash, for the next connection.
+//!     Ok((chain, api, client))
+//! }
+//! ```
 //!
 //! # Ownership proofs
 //!

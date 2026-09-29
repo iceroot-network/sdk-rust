@@ -124,7 +124,13 @@ fn options(retries: u32) -> HttpOptions {
 #[tokio::test(flavor = "current_thread")]
 async fn fails_over_and_retries_after_429() {
     let dead = dead_relay().await;
-    let (live, seen) = server(vec![(429, TOO_MANY), (200, STATUS)]).await;
+    // A client of two relays checks the live relay's chain before its first use.
+    let (live, seen) = server(vec![
+        (200, configuration(RECORDED_NETHASH)),
+        (429, TOO_MANY),
+        (200, STATUS),
+    ])
+    .await;
     let relays = vec![Relay::parse(&dead).unwrap(), Relay::parse(&live).unwrap()];
     let client = HttpClient::with_options(relays, options(2)).unwrap();
     let status = client
@@ -133,10 +139,11 @@ async fn fails_over_and_retries_after_429() {
         .unwrap();
     assert_eq!(status.height, 42);
     let seen = seen.lock().unwrap();
-    assert_eq!(seen.len(), 2);
-    assert!(seen[0].starts_with("GET /api/node/status HTTP/1.1"));
+    assert_eq!(seen.len(), 3);
+    assert!(seen[0].starts_with("GET /api/node/configuration HTTP/1.1"));
+    assert!(seen[1].starts_with("GET /api/node/status HTTP/1.1"));
     assert!(
-        seen[0]
+        seen[1]
             .to_ascii_lowercase()
             .contains("accept: application/json")
     );
@@ -147,7 +154,12 @@ async fn exchanges_a_request_with_the_host_s_own_decoder() {
     // A host that keeps its calls in another form (the SDK's bindings write each answer as
     // JSON) gets the same failover and backoff; its decoder sees every answer, the 429 included.
     let dead = dead_relay().await;
-    let (live, seen) = server(vec![(429, TOO_MANY), (200, STATUS)]).await;
+    let (live, seen) = server(vec![
+        (200, configuration(RECORDED_NETHASH)),
+        (429, TOO_MANY),
+        (200, STATUS),
+    ])
+    .await;
     let relays = vec![Relay::parse(&dead).unwrap(), Relay::parse(&live).unwrap()];
     let client = HttpClient::with_options(relays, options(2)).unwrap();
     let call = SolarCompat::new(53).node_status();
@@ -165,7 +177,8 @@ async fn exchanges_a_request_with_the_host_s_own_decoder() {
         .unwrap();
     assert_eq!(height, "42");
     assert_eq!(*answers.lock().unwrap(), [(429, Some(42)), (200, Some(42))]);
-    assert_eq!(seen.lock().unwrap().len(), 2);
+    // The live relay's chain was checked first, with the client's own decoder.
+    assert_eq!(seen.lock().unwrap().len(), 3);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -260,7 +273,8 @@ async fn never_follows_a_redirect_and_skips_the_relay_that_answers_one() {
     let (elsewhere, reached) = server(vec![(200, STATUS), (200, STATUS)]).await;
     for status in [301, 302, 303, 307, 308] {
         let (redirecting, asked) = redirecting_relay(status, elsewhere.clone()).await;
-        let (live, served) = server(vec![(200, STATUS)]).await;
+        let (live, served) =
+            server(vec![(200, configuration(RECORDED_NETHASH)), (200, STATUS)]).await;
         let with_token = HttpOptions {
             headers: vec![("x-api-key".to_owned(), "s3cret".to_owned())],
             ..options(0)
@@ -276,8 +290,9 @@ async fn never_follows_a_redirect_and_skips_the_relay_that_answers_one() {
             .await
             .unwrap();
         assert_eq!(answer.height, 42, "{status}");
+        // The redirecting relay was asked for its configuration, the live one for it and the read.
         assert_eq!(asked.lock().unwrap().len(), 1, "{status}");
-        assert_eq!(served.lock().unwrap().len(), 1, "{status}");
+        assert_eq!(served.lock().unwrap().len(), 2, "{status}");
 
         // A relay that only redirects is unavailable, and a submission's body goes nowhere else.
         let only = HttpClient::with_options(vec![Relay::parse(&redirecting).unwrap()], options(0))
@@ -367,7 +382,8 @@ async fn an_answer_larger_than_the_limit_is_refused_and_the_next_relay_asked() {
 
     for chunked in [false, true] {
         let (large, asked) = padded_relay(MAX_RESPONSE_BYTES + 1, chunked).await;
-        let (live, served) = server(vec![(200, STATUS)]).await;
+        let (live, served) =
+            server(vec![(200, configuration(RECORDED_NETHASH)), (200, STATUS)]).await;
         let relays = vec![Relay::parse(&large).unwrap(), Relay::parse(&live).unwrap()];
         let client = HttpClient::with_options(relays, options(0)).unwrap();
         let status = client
@@ -376,7 +392,7 @@ async fn an_answer_larger_than_the_limit_is_refused_and_the_next_relay_asked() {
             .unwrap();
         assert_eq!(status.height, 42, "chunked: {chunked}");
         assert_eq!(*asked.lock().unwrap(), 1);
-        assert_eq!(served.lock().unwrap().len(), 1);
+        assert_eq!(served.lock().unwrap().len(), 2);
 
         // A relay that only answers so is unavailable.
         let only =
@@ -420,7 +436,12 @@ async fn limiting_relay(seconds: u64) -> (String, Arc<Mutex<usize>>) {
 async fn a_long_retry_after_moves_on_to_the_next_relay_and_blocks_nothing() {
     for seconds in [3_000_000_000u64, 86_400, 61] {
         let (limiting, limited) = limiting_relay(seconds).await;
-        let (live, served) = server(vec![(200, STATUS), (200, STATUS)]).await;
+        let (live, served) = server(vec![
+            (200, configuration(RECORDED_NETHASH)),
+            (200, STATUS),
+            (200, STATUS),
+        ])
+        .await;
         let relays = vec![
             Relay::parse(&limiting).unwrap(),
             Relay::parse(&live).unwrap(),
@@ -444,7 +465,8 @@ async fn a_long_retry_after_moves_on_to_the_next_relay_and_blocks_nothing() {
         .expect("a later request is not blocked")
         .unwrap();
         assert_eq!(second.height, 42);
-        assert_eq!(served.lock().unwrap().len(), 2);
+        // The live relay's chain was checked once, before its first read.
+        assert_eq!(served.lock().unwrap().len(), 3);
 
         // With that relay alone, the rate limit is reported at once, with the wait asked for.
         let only =
@@ -554,7 +576,7 @@ async fn with_an_identity_a_relay_is_used_only_once_it_serves_the_chain() {
     }
     assert_eq!(lines(&asked), ["GET /api/node/configuration HTTP/1.1"]);
 
-    // Without an identity, the client asks relays in order, as before.
+    // A client of one relay without an identity checks nothing: it has no relay to fail over to.
     let (unchecked, asked) = server(vec![(200, STATUS)]).await;
     let client =
         HttpClient::with_options(vec![Relay::parse(&unchecked).unwrap()], options(0)).unwrap();
@@ -597,4 +619,168 @@ async fn a_relay_whose_check_fails_otherwise_is_checked_again() {
             "GET /api/node/status HTTP/1.1"
         ]
     );
+}
+
+const SERVER_ERROR: &str =
+    r#"{"statusCode":503,"error":"Service Unavailable","message":"Service Unavailable"}"#;
+
+/// A relay of the chain `nethash`: it answers `/node/configuration` with the recorded
+/// configuration naming that chain and every other request with `answer`, and records each
+/// request line.
+async fn chain_relay(
+    nethash: &str,
+    answer: (u16, &'static str),
+) -> (String, Arc<Mutex<Vec<String>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/api", listener.local_addr().unwrap());
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = Arc::clone(&seen);
+    let configuration = configuration(nethash);
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            let mut buffer = [0u8; 4096];
+            let n = socket.read(&mut buffer).await.unwrap_or(0);
+            let line = String::from_utf8_lossy(&buffer[..n])
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_owned();
+            let (status, body) = if line.starts_with("GET /api/node/configuration ") {
+                (200, configuration)
+            } else {
+                answer
+            };
+            log.lock().unwrap().push(line);
+            let reply = format!(
+                "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(reply.as_bytes()).await;
+            socket.shutdown().await.ok();
+        }
+    });
+    (url, seen)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_client_of_more_than_one_relay_keeps_to_the_chain_of_the_first_relay_it_checks() {
+    let other_chain = "ab".repeat(32);
+    // The first relay serves the chain and fails the read; the next one serves another chain.
+    let (first, first_asked) = chain_relay(RECORDED_NETHASH, (503, SERVER_ERROR)).await;
+    let (other, other_asked) = chain_relay(&other_chain, (200, STATUS)).await;
+    let relays = vec![Relay::parse(&first).unwrap(), Relay::parse(&other).unwrap()];
+    let client = HttpClient::with_options(relays, options(0)).unwrap();
+    for _ in 0..2 {
+        let error = client
+            .send(&SolarCompat::new(53).node_status())
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "NodeUnavailable", "{error}");
+        assert!(error.to_string().contains("another chain"), "{error}");
+    }
+    // The relay of another chain was asked for its configuration once, and for nothing else; the
+    // first relay was checked once, before its first use.
+    assert_eq!(
+        lines(&other_asked),
+        ["GET /api/node/configuration HTTP/1.1"]
+    );
+    assert_eq!(
+        lines(&first_asked),
+        [
+            "GET /api/node/configuration HTTP/1.1",
+            "GET /api/node/status HTTP/1.1",
+            "GET /api/node/status HTTP/1.1"
+        ]
+    );
+
+    // A relay of the same chain takes over.
+    let (first, _) = chain_relay(RECORDED_NETHASH, (503, SERVER_ERROR)).await;
+    let (same, same_asked) = chain_relay(RECORDED_NETHASH, (200, STATUS)).await;
+    let relays = vec![Relay::parse(&first).unwrap(), Relay::parse(&same).unwrap()];
+    let client = HttpClient::with_options(relays, options(0)).unwrap();
+    let status = client
+        .send(&SolarCompat::new(53).node_status())
+        .await
+        .unwrap();
+    assert_eq!(status.height, 42);
+    assert_eq!(
+        lines(&same_asked),
+        [
+            "GET /api/node/configuration HTTP/1.1",
+            "GET /api/node/status HTTP/1.1"
+        ]
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_client_learns_the_chain_from_the_first_relay_that_answers_unless_given_it() {
+    let dead = dead_relay().await;
+    let other_chain = "ab".repeat(32);
+    let (first, first_asked) = chain_relay(RECORDED_NETHASH, (200, STATUS)).await;
+    let (other, other_asked) = chain_relay(&other_chain, (200, STATUS)).await;
+    let relays = vec![
+        Relay::parse(&dead).unwrap(),
+        Relay::parse(&first).unwrap(),
+        Relay::parse(&other).unwrap(),
+    ];
+    let client = HttpClient::new(relays).unwrap();
+    assert_eq!(client.identity(), None);
+    // A first contact reads the node configuration of the first relay that answers, whose chain
+    // the client learns.
+    let configuration = client
+        .send(&SolarCompat::new(0).node_configuration())
+        .await
+        .unwrap();
+    assert_eq!(configuration.network.nethash, RECORDED_NETHASH);
+    assert_eq!(
+        client.identity(),
+        Some(RelayIdentity {
+            nethash: RECORDED_NETHASH.to_owned(),
+            network_byte: 90
+        })
+    );
+    assert!(lines(&other_asked).is_empty());
+    assert_eq!(
+        lines(&first_asked),
+        [
+            "GET /api/node/configuration HTTP/1.1",
+            "GET /api/node/configuration HTTP/1.1"
+        ]
+    );
+
+    // Given the chain, the client holds the first relay to it too.
+    let relays = vec![Relay::parse(&other).unwrap(), Relay::parse(&first).unwrap()];
+    let client = HttpClient::for_chain(relays, recorded_chain()).unwrap();
+    assert_eq!(client.identity(), Some(recorded_chain()));
+    let status = client
+        .send(&SolarCompat::new(53).node_status())
+        .await
+        .unwrap();
+    assert_eq!(status.height, 42);
+    assert_eq!(
+        lines(&other_asked),
+        ["GET /api/node/configuration HTTP/1.1"]
+    );
+
+    // Learned the other way round, the chain is the other relay's, and the first is refused.
+    let relays = vec![Relay::parse(&other).unwrap(), Relay::parse(&first).unwrap()];
+    let client = HttpClient::new(relays).unwrap();
+    client
+        .send(&SolarCompat::new(53).node_status())
+        .await
+        .unwrap();
+    assert_eq!(client.identity().unwrap().nethash, other_chain);
+
+    // A client of one relay without an identity checks nothing and learns nothing.
+    let (single, single_asked) = chain_relay(RECORDED_NETHASH, (200, STATUS)).await;
+    let client = HttpClient::new(vec![Relay::parse(&single).unwrap()]).unwrap();
+    client
+        .send(&SolarCompat::new(53).node_status())
+        .await
+        .unwrap();
+    assert_eq!(client.identity(), None);
+    assert_eq!(lines(&single_asked), ["GET /api/node/status HTTP/1.1"]);
 }

@@ -6,16 +6,17 @@
 //! [`Backoff::MAX_RETRY_AFTER`], is skipped too. Requests are spent against a [`RequestBudget`]
 //! before they leave, so a busy client waits instead of being refused.
 //!
-//! The relays are not assumed to serve one chain. Without [`HttpOptions::identity`], a request
-//! goes to whichever relay answers first, so when a relay fails over, reads, draft facts and
-//! submissions may reach a relay of another chain (a devnet generated again, say). With it, each
-//! relay is asked for its node configuration before its first use, and a relay whose
-//! configuration names another network hash or byte is never asked anything else by that client:
-//! load the chain from a relay first, then send through a client with the chain's identity
-//! (`Chain::relay_identity` in the core). A client of more than one relay must be given it. The
-//! other hosts of the SDK (the TypeScript package, the Tauri plugin and the Go SDK) check every
-//! relay this way whatever the application does; this client checks only when given the
-//! identity, and its default options give none.
+//! A client of more than one relay keeps to one chain, so that a failover never takes reads, draft
+//! facts or submissions to a relay of another chain (a devnet generated again, say). Each relay is
+//! asked for its node configuration before its first use, and a relay whose configuration names
+//! another network hash or address byte is never asked anything else by that client. The chain
+//! is the one given ([`HttpClient::for_chain`], or [`HttpOptions::identity`]: a loaded chain's
+//! `Chain::relay_identity` in the core, or a pinned network hash and byte), or else the one of the
+//! first relay the client checks, which it learns then (trust on first use;
+//! [`HttpClient::identity`] says which). A client of one relay without an identity checks nothing,
+//! since it has no relay to fail over to.
+//! The other hosts of the SDK (the TypeScript package, the Tauri plugin and the Go SDK) hold
+//! every relay to the chain they connected to in the same way.
 //!
 //! Requests go to the relays and nowhere else: the client never follows a redirect (the node API
 //! does not redirect), and a relay that answers with one is skipped like a relay that cannot be
@@ -38,8 +39,8 @@
 //!   in the application's `Cargo.lock`; `cargo update -p webpki-root-certs` before each release);
 //! - no revocation is checked: a revoked certificate of a relay is accepted until it expires.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::call::Call;
@@ -81,12 +82,15 @@ pub struct HttpOptions {
     /// # }
     /// ```
     pub headers: Vec<(String, String)>,
-    /// The chain every relay must serve. When set, the client asks each relay for its node
-    /// configuration before the relay's first use: a relay that names another network hash or
-    /// byte is skipped for the client's lifetime, and one that cannot be checked now (it cannot be
-    /// reached, or its answer is refused) is skipped this time and checked again on the next
-    /// request. Default: none, and every relay is used as it answers, so set it on every client
-    /// of more than one relay: without it a failover can reach a relay of another chain.
+    /// The chain every relay must serve. The client asks each relay for its node configuration
+    /// before the relay's first use: a relay that names another network hash or byte is skipped
+    /// for the client's lifetime, and one that cannot be checked now (it cannot be reached, or its
+    /// answer is refused) is skipped this time and checked again on the next request.
+    ///
+    /// Default: none. A client of more than one relay then learns the chain from the first relay
+    /// it checks, the first one that answers, and holds every other relay to it; a client of one
+    /// relay checks nothing. Set it when the chain is known beforehand (a pinned network hash, or
+    /// a chain loaded earlier), so that the first relay is held to it too.
     ///
     /// ```no_run
     /// use iceroot_sdk_api::{RelayIdentity, HttpClient, HttpOptions, Relay};
@@ -144,8 +148,19 @@ pub struct HttpClient {
     started: Instant,
     /// The chain every relay must serve, and what is known of each relay's (see
     /// [`HttpOptions::identity`]).
-    identity: Option<RelayIdentity>,
+    chain: ChainCheck,
     checked: Vec<AtomicU8>,
+}
+
+/// How an [`HttpClient`] holds its relays to one chain.
+#[derive(Debug)]
+enum ChainCheck {
+    /// One relay and no identity: nothing to fail over to, so nothing is checked.
+    None,
+    /// Every relay must serve the chain given.
+    Given(RelayIdentity),
+    /// Every relay must serve the chain of the first relay checked, learned then.
+    Learned(OnceLock<RelayIdentity>),
 }
 
 /// A relay whose chain is not known yet.
@@ -156,8 +171,10 @@ const SAME_CHAIN: u8 = 1;
 const OTHER_CHAIN: u8 = 2;
 
 impl HttpClient {
-    /// A client for `relays`, tried in order, with default options, which check no relay's chain.
-    /// For more than one relay, use [`HttpClient::with_options`] with [`HttpOptions::identity`].
+    /// A client for `relays`, tried in order, with default options. With more than one relay, it
+    /// learns the chain from the first relay it checks and holds the others to it (see
+    /// [`HttpOptions::identity`]); where the chain is known, [`HttpClient::for_chain`] holds every
+    /// relay to it from the start.
     ///
     /// # Errors
     ///
@@ -165,6 +182,35 @@ impl HttpClient {
     /// stack cannot be set up (for example no TLS roots).
     pub fn new(relays: Vec<Relay>) -> Result<Self, ApiError> {
         HttpClient::with_options(relays, HttpOptions::default())
+    }
+
+    /// A client for `relays` of the chain `identity`, with default options otherwise: each relay,
+    /// the first one included, is used only once its node configuration names that chain. Give a
+    /// loaded chain's identity (`Chain::relay_identity` in the core), or a pinned network hash
+    /// with the address byte.
+    ///
+    /// ```no_run
+    /// use iceroot_sdk_api::{HttpClient, Relay, RelayIdentity};
+    ///
+    /// # fn run(nethash: String) -> Result<(), iceroot_sdk_api::ApiError> {
+    /// let relays = vec![
+    ///     Relay::parse("https://devnet.example/api")?,
+    ///     Relay::parse("https://backup.example/api")?,
+    /// ];
+    /// let client = HttpClient::for_chain(relays, RelayIdentity { nethash, network_byte: 90 })?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// As [`HttpClient::new`].
+    pub fn for_chain(relays: Vec<Relay>, identity: RelayIdentity) -> Result<Self, ApiError> {
+        let options = HttpOptions {
+            identity: Some(identity),
+            ..HttpOptions::default()
+        };
+        HttpClient::with_options(relays, options)
     }
 
     /// A client for `relays` with explicit options.
@@ -208,13 +254,18 @@ impl HttpClient {
             detail: format!("HTTP client: {e}"),
         })?;
         let checked = relays.iter().map(|_| AtomicU8::new(UNCHECKED)).collect();
+        let chain = match options.identity {
+            Some(identity) => ChainCheck::Given(identity),
+            None if relays.len() > 1 => ChainCheck::Learned(OnceLock::new()),
+            None => ChainCheck::None,
+        };
         Ok(HttpClient {
             http,
             relays,
             budget: Mutex::new(RequestBudget::new(options.rate_limit)),
             backoff: options.backoff,
             started: Instant::now(),
-            identity: options.identity,
+            chain,
             checked,
         })
     }
@@ -222,6 +273,18 @@ impl HttpClient {
     /// The relays, in the order they are tried.
     pub fn relays(&self) -> &[Relay] {
         &self.relays
+    }
+
+    /// The chain the client holds its relays to: the one it was given, or the one it learned from
+    /// the first relay it checked (the network hash in lowercase). `None` before a client that
+    /// learns has checked a relay, and for a client of one relay without an identity, which
+    /// checks nothing.
+    pub fn identity(&self) -> Option<RelayIdentity> {
+        match &self.chain {
+            ChainCheck::None => None,
+            ChainCheck::Given(identity) => Some(identity.clone()),
+            ChainCheck::Learned(learned) => learned.get().cloned(),
+        }
     }
 
     fn now_ms(&self) -> u64 {
@@ -312,8 +375,9 @@ impl HttpClient {
     /// or answers 5xx is skipped. A 429 is retried on the same relay after the backoff; when
     /// retries are spent, or the relay asks for a wait longer than [`Backoff::MAX_RETRY_AFTER`],
     /// the next relay is tried, and after the last one the error is [`ApiError::RateLimited`].
-    /// With [`HttpOptions::identity`], a relay is first checked to serve that chain, and skipped
-    /// when it does not, or cannot be checked now.
+    /// In a client of more than one relay, or one given [`HttpOptions::identity`], a relay is
+    /// first checked to serve the client's chain, and skipped when it does not, or cannot be
+    /// checked now.
     ///
     /// # Errors
     ///
@@ -386,14 +450,14 @@ impl HttpClient {
         }
     }
 
-    /// Whether `relay` may be used: with [`HttpOptions::identity`], only once its node
-    /// configuration names that chain. A relay of another chain is refused for the client's
-    /// lifetime; one that cannot be checked now is refused with the check's error, and checked
-    /// again next time.
+    /// Whether `relay` may be used: only once its node configuration names the client's chain,
+    /// the one given or, for the first relay checked, the one it names, which the client learns.
+    /// A relay of another chain is refused for the client's lifetime; one that cannot be checked
+    /// now is refused with the check's error, and checked again next time.
     async fn identify(&self, relay: &Relay, checked: &AtomicU8) -> Result<(), ApiError> {
-        let Some(identity) = &self.identity else {
+        if matches!(self.chain, ChainCheck::None) {
             return Ok(());
-        };
+        }
         let other_chain = || ApiError::NodeUnavailable {
             detail: format!("{} serves another chain than the client's", relay.as_str()),
         };
@@ -407,6 +471,13 @@ impl HttpClient {
             .attempt(relay, call.request(), &|response| call.decode(response))
             .await
             .and_then(|result| result)?;
+        let identity = match &self.chain {
+            ChainCheck::Given(identity) => identity,
+            ChainCheck::Learned(learned) => {
+                learned.get_or_init(|| RelayIdentity::of(&node.network))
+            }
+            ChainCheck::None => return Ok(()),
+        };
         if identity.matches(&node.network) {
             checked.store(SAME_CHAIN, Ordering::Relaxed);
             Ok(())

@@ -6,7 +6,8 @@
 //!
 //! - [`Chain::from_node`] loads the chain from the node's crypto configuration,
 //!   [`Chain::check_node`] refuses a node whose configuration names another chain, and
-//!   [`Chain::relay_identity`] gives the chain's identity for the HTTP client to check relays against.
+//!   [`Chain::relay_identity`] and [`Profile::relay_identity`] give the chain's identity for the
+//!   HTTP client to check relays against.
 //! - [`OnlineFacts::from_node`] reads a draft's nonce, height and second key from the sender's
 //!   account and the node's status, and refuses an account that is not the sender's.
 //! - [`OperationKind`] converts from and to the client's transaction kinds.
@@ -67,8 +68,8 @@ impl Chain {
     }
 
     /// The identity a node of this chain reports: the network hash and address network byte.
-    /// With `HttpOptions::identity` (the node API client's feature `http`), the HTTP client uses a
-    /// relay only once its node configuration names this chain.
+    /// Given it (`HttpClient::for_chain` or `HttpOptions::identity`, the node API client's feature
+    /// `http`), the HTTP client uses a relay only once its node configuration names this chain.
     pub fn relay_identity(&self) -> RelayIdentity {
         RelayIdentity {
             nethash: self.nethash().to_owned(),
@@ -97,6 +98,20 @@ impl Chain {
             });
         }
         Ok(())
+    }
+}
+
+impl Profile {
+    /// The identity of the chain this profile pins, for the HTTP client to hold every relay to
+    /// (`HttpClient::for_chain`): the network hash and address byte, when the profile has both.
+    /// `None` for a profile whose network hash is not pinned yet; a client of its relays learns
+    /// the chain from the first relay it checks.
+    pub fn relay_identity(&self) -> Option<RelayIdentity> {
+        let chain = self.chain();
+        Some(RelayIdentity {
+            nethash: chain.nethash.clone()?.to_ascii_lowercase(),
+            network_byte: chain.network_byte?,
+        })
     }
 }
 
@@ -428,5 +443,25 @@ mod tests {
             OnlineFacts::from_node(&chain, &sender, None, &far),
             Err(Error::BadResponse { .. })
         ));
+    }
+
+    #[test]
+    fn a_profile_gives_the_identity_of_the_chain_it_pins() {
+        use crate::profile::DevnetOptions;
+
+        assert_eq!(
+            Profile::devnet(DevnetOptions::default()).relay_identity(),
+            None
+        );
+        let chain = devnet_chain();
+        assert_eq!(
+            chain.profile().relay_identity(),
+            Some(chain.relay_identity())
+        );
+        let upper = Profile::devnet(DevnetOptions {
+            nethash: Some(chain.nethash().to_ascii_uppercase()),
+            ..DevnetOptions::default()
+        });
+        assert_eq!(upper.relay_identity(), Some(chain.relay_identity()));
     }
 }

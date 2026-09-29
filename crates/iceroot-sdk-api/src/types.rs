@@ -186,8 +186,8 @@ pub struct NetworkIdentity {
 
 /// The chain a relay must serve: the network hash and address network byte its node
 /// configuration names ([`NetworkIdentity`]). The core gives a loaded chain's with
-/// `Chain::relay_identity`, and `HttpOptions::identity` (feature `http`) makes the HTTP client check
-/// every relay against it before its first use.
+/// `Chain::relay_identity`; `HttpClient::for_chain` and `HttpOptions::identity` (feature `http`)
+/// make the HTTP client check every relay against it before its first use.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RelayIdentity {
     /// The network hash (hex).
@@ -197,6 +197,14 @@ pub struct RelayIdentity {
 }
 
 impl RelayIdentity {
+    /// The chain a node reporting `network` serves, with the network hash in lowercase.
+    pub fn of(network: &NetworkIdentity) -> RelayIdentity {
+        RelayIdentity {
+            nethash: network.nethash.to_ascii_lowercase(),
+            network_byte: network.network_byte,
+        }
+    }
+
     /// Whether a node reporting `network` serves this chain: the same network hash, in either
     /// case of hex, and the same network byte.
     pub fn matches(&self, network: &NetworkIdentity) -> bool {

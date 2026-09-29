@@ -46,7 +46,9 @@ pub fn deserialize(bytes: &[u8], profile: &Profile) -> Result<Draft> {
 /// The draft in `bytes` (from [`Draft::serialize`]), read on `chain`, the chain of the reader's
 /// own connection: a draft built under another network configuration is refused with
 /// `NetworkMismatch` (`details.reason`: `configuration`), and the floor, the rules and the labels
-/// come from `chain`, so a fee at the floor reads `floor` (see [`Draft::deserialize_on`]).
+/// come from `chain`, so a fee at the floor reads `floor` (see [`Draft::deserialize_on`]). The
+/// floor is that of the draft's own height, which the builder chose: where a milestone between it
+/// and the connection's next height changes the fee table, show the fee as an amount.
 pub fn deserialize_on(bytes: &[u8], chain: &Chain) -> Result<Draft> {
     Ok(Draft::deserialize_on(bytes, chain)?)
 }

@@ -348,6 +348,14 @@ impl Draft {
     ///
     /// Only a chain the reader trusts as much as its own connection makes a fee the floor: the
     /// chain of a draft read with [`Draft::deserialize`] is the configuration that draft carried.
+    ///
+    /// `chain` proves that the fee table is the reader's own, not that the draft's height is the
+    /// network's: the floor is computed at [`Draft::height`], which the builder chose. On a chain
+    /// whose milestones change the fee table, a draft that names a height before a change reads
+    /// `Floor` for the floor in force at that height, which may be above the floor of the
+    /// network's next block. A reader that calls such a fee the network's minimum first compares
+    /// the draft's height with its connection's next height, and shows the fee as an amount when
+    /// a milestone lies between them. The node checks the fee at its own height in any case.
     pub fn deserialize_on(bytes: &[u8], chain: &Chain) -> Result<Draft, Error> {
         let (carried, envelope) = envelope::decode(bytes, chain.profile(), EnvelopeKind::Draft)?;
         if !carried.same_configuration(chain) {

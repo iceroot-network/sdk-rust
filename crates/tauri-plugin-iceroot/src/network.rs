@@ -291,6 +291,11 @@ impl Session {
         self.height.load(Ordering::Relaxed)
     }
 
+    /// The height of the next block, the rules' height: one above [`Session::height`].
+    pub(crate) fn next_height(&self) -> u32 {
+        next_height(self.height())
+    }
+
     fn note(&self, response: &Response) {
         note_height(&self.height, response);
     }
@@ -463,6 +468,11 @@ fn note_height(height: &AtomicU64, response: &Response) {
     }
 }
 
+/// The height of the block after the one at `height`, as the rules take it.
+fn next_height(height: u64) -> u32 {
+    u32::try_from(height.saturating_add(1)).unwrap_or(u32::MAX)
+}
+
 /// The height of a node status answer in the client's JSON.
 fn status_height(answer: &str) -> Option<u64> {
     let value: serde_json::Value = serde_json::from_str(answer).ok()?;
@@ -535,7 +545,7 @@ pub(crate) struct AtNext {
 impl AtNext {
     /// The rules of `chain` after the block at `height`.
     pub(crate) fn of(chain: &Chain, height: u64) -> AtNext {
-        let next = u32::try_from(height.saturating_add(1)).unwrap_or(u32::MAX);
+        let next = next_height(height);
         AtNext {
             height: height.to_string(),
             next_height: next,
@@ -693,7 +703,51 @@ mod tests {
         up: Arc<std::sync::atomic::AtomicBool>,
         refusing: Arc<std::sync::atomic::AtomicBool>,
     ) -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
+        recorded_relay_with(Script {
+            nethash,
+            up,
+            refusing,
+            ..Script::default()
+        })
+        .await
+    }
+
+    /// How a recorded relay answers, beyond the recorded answers.
+    struct Script {
+        /// The network hash of the chain it serves in place of the recorded one.
+        nethash: Option<String>,
+        /// Every connection is closed unanswered while false.
+        up: Arc<std::sync::atomic::AtomicBool>,
+        /// Every request is answered with HTTP 404 while true.
+        refusing: Arc<std::sync::atomic::AtomicBool>,
+        /// The `X-Block-Height` of every answer.
+        header_height: Arc<AtomicU64>,
+        /// A milestone added to the crypto configuration at this height, with this `minFee`.
+        fee_change: Option<(u32, u64)>,
+    }
+
+    impl Default for Script {
+        fn default() -> Script {
+            Script {
+                nethash: None,
+                up: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+                refusing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                header_height: Arc::new(AtomicU64::new(80)),
+                fee_change: None,
+            }
+        }
+    }
+
+    /// A recorded relay that answers as `script` says.
+    async fn recorded_relay_with(script: Script) -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let Script {
+            nethash,
+            up,
+            refusing,
+            header_height,
+            fee_change,
+        } = script;
         const RECORDED: &str = "c9b03ab996ef3ac216a2ac53eaee71118cbf7995fa44449a7fb7f94bbe18bcca";
         let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../iceroot-sdk-api/tests/fixtures/devnet");
@@ -747,19 +801,35 @@ mod tests {
                         404,
                         r#"{"statusCode":404,"error":"Not Found","message":"none"}"#.to_owned(),
                     ),
-                    Some(entry) => (
-                        entry["status"].as_u64().unwrap(),
-                        std::fs::read_to_string(fixtures.join(entry["file"].as_str().unwrap()))
-                            .unwrap()
-                            .replace(RECORDED, nethash.as_deref().unwrap_or(RECORDED)),
-                    ),
+                    Some(entry) => {
+                        let body =
+                            std::fs::read_to_string(fixtures.join(entry["file"].as_str().unwrap()))
+                                .unwrap()
+                                .replace(RECORDED, nethash.as_deref().unwrap_or(RECORDED));
+                        let body = match fee_change {
+                            Some((height, min_fee)) if path == "/node/configuration/crypto" => {
+                                let mut value: serde_json::Value =
+                                    serde_json::from_str(&body).unwrap();
+                                let milestones =
+                                    value["data"]["milestones"].as_array_mut().unwrap();
+                                let mut changed = milestones.last().unwrap().clone();
+                                changed["height"] = height.into();
+                                changed["dynamicFees"]["minFee"] = min_fee.into();
+                                milestones.push(changed);
+                                value.to_string()
+                            }
+                            _ => body,
+                        };
+                        (entry["status"].as_u64().unwrap(), body)
+                    }
                     None => (
                         404,
                         r#"{"statusCode":404,"error":"Not Found","message":"none"}"#.to_owned(),
                     ),
                 };
                 let answer = format!(
-                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\nx-block-height: 80\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\nx-block-height: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    header_height.load(Ordering::Relaxed),
                     body.len()
                 );
                 socket.write_all(answer.as_bytes()).await.unwrap();
@@ -990,6 +1060,54 @@ mod tests {
         // A network the webview did not connect is no chain to read on.
         let other = read_draft(&state, "other", "main", &bytes, &profile, Some(id)).unwrap_err();
         assert_eq!(other.code(), "InvalidArgument");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_draft_read_on_a_connection_is_the_floor_only_at_the_connection_s_height() {
+        use crate::commands::read_draft;
+        use crate::state::Iceroot;
+        use iceroot_sdk_bindings::draft as drafts;
+
+        // The node's status is at height 80, so the next block is 81. On one chain fees are
+        // lowered at height 50, before it; on the other at height 1,000, after it.
+        let state = Iceroot::default();
+        let page = state.page("main", "main");
+        for (change, built_at, source) in [(50, 2, "unverified"), (1_000, 81, "floor")] {
+            let (relay, _) = recorded_relay_with(Script {
+                fee_change: Some((change, 3_000)),
+                ..Script::default()
+            })
+            .await;
+            let options: ConnectOptions = serde_json::from_str(r#"{"rateLimit":false}"#).unwrap();
+            let session = Arc::new(
+                Session::connect(&devnet(&relay), options)
+                    .await
+                    .unwrap()
+                    .session,
+            );
+            assert_eq!(session.height(), 80);
+            let (id, _) = state.add_session(&page, Arc::clone(&session)).unwrap();
+            let profile = iceroot_sdk_bindings::profile::to_json(session.chain.profile());
+            let key = iceroot_sdk_bindings::keys::Key::from_legacy_passphrase(
+                session.chain.profile(),
+                "sender".to_owned(),
+            )
+            .unwrap();
+            let facts = serde_json::json!({
+                "sender": crate::codec::to_hex(&key.public_key().unwrap()),
+                "nonce": "1",
+                "height": built_at,
+            })
+            .to_string();
+            let vote = r#"{"operation":{"kind":"vote","entries":[{"validator":"genesis_1","basisPoints":10000}]}}"#;
+            let draft = drafts::build(&session.chain, vote, &facts).unwrap();
+            let bytes = crate::codec::to_hex(&draft.serialize());
+            let read = read_draft(&state, "main", "main", &bytes, &profile, Some(id)).unwrap();
+            let info = serde_json::to_value(&read).unwrap();
+            let summary: serde_json::Value =
+                serde_json::from_str(info["summary"].as_str().unwrap()).unwrap();
+            assert_eq!(summary["fee"]["source"], source, "change at {change}");
+        }
     }
 
     /// A relay that answers every request with a 307 to `target`, and counts the requests.

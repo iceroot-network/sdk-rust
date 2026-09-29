@@ -44,11 +44,19 @@ pub fn deserialize(bytes: &[u8], profile: &Profile) -> Result<Draft> {
 }
 
 /// The draft in `bytes` (from [`Draft::serialize`]), read on `chain`, the chain of the reader's
-/// own connection: a draft built under another network configuration is refused with
+/// own connection, at `height`, the height of the network's next block as that connection
+/// reports it: a draft built under another network configuration is refused with
 /// `NetworkMismatch` (`details.reason`: `configuration`), and the floor, the rules and the labels
-/// come from `chain`, so a fee at the floor reads `floor` (see [`Draft::deserialize_on`]). The
-/// floor is that of the draft's own height, which the builder chose: where a milestone between it
-/// and the connection's next height changes the fee table, show the fee as an amount.
+/// come from `chain`. A fee at the floor of the draft's height, which the builder chose, reads
+/// `floor` when the floor at `height` is the same, and `unverified` when a change of the fee
+/// table lies between the two heights (see [`Draft::deserialize_at`]).
+pub fn deserialize_at(bytes: &[u8], chain: &Chain, height: u32) -> Result<Draft> {
+    Ok(Draft::deserialize_at(bytes, chain, height)?)
+}
+
+/// The draft in `bytes`, read on `chain` as [`deserialize_at`] reads it, for a reader that does
+/// not know the network's height: a fee at the floor reads `floor` only when the chain's fee table
+/// gives that floor at every height, and `unverified` otherwise (see [`Draft::deserialize_on`]).
 pub fn deserialize_on(bytes: &[u8], chain: &Chain) -> Result<Draft> {
     Ok(Draft::deserialize_on(bytes, chain)?)
 }
@@ -560,5 +568,39 @@ mod tests {
         assert_eq!(refused.code(), "NetworkMismatch");
         assert_eq!(refused.details()["reason"], "configuration");
         assert!(deserialize(tampered.as_bytes(), chain.profile()).is_ok());
+    }
+
+    #[test]
+    fn a_fee_is_the_floor_only_where_no_fee_change_lies_before_the_network_s_height() {
+        // The devnet chain with fees lowered at height 100.
+        let mut configuration: Value =
+            serde_json::from_str(crate::chain::tests::CONFIGURATION).unwrap();
+        let milestones = configuration["milestones"].as_array_mut().unwrap();
+        let mut lowered = milestones.last().unwrap().clone();
+        lowered["height"] = json!(100);
+        lowered["dynamicFees"]["minFee"] = json!(3000);
+        milestones.push(lowered);
+        let chain = crate::chain::load(&profile(), &configuration.to_string()).unwrap();
+        let key = Key::from_legacy_passphrase(&profile(), "sender".to_owned()).unwrap();
+        let transfer = json!({ "operation": { "kind": "transfer", "to": [{ "address": RECIPIENT, "amount": "1" }] } }).to_string();
+        let draft = build(&chain, &transfer, &facts(&key)).unwrap();
+        let bytes = draft.serialize();
+        let source = |draft: &Draft| {
+            let described: Value = serde_json::from_str(&summary(draft)).unwrap();
+            described["fee"]["source"].clone()
+        };
+        assert_eq!(source(&draft), "floor");
+        assert_eq!(
+            source(&deserialize_at(&bytes, &chain, 99).unwrap()),
+            "floor"
+        );
+        assert_eq!(
+            source(&deserialize_at(&bytes, &chain, 100).unwrap()),
+            "unverified"
+        );
+        assert_eq!(
+            source(&deserialize_on(&bytes, &chain).unwrap()),
+            "unverified"
+        );
     }
 }

@@ -534,9 +534,11 @@ pub(crate) async fn draft_deserialize<R: Runtime>(
 /// The serialized draft `bytes` (hex), for the webview `label` in the window `window`.
 ///
 /// With `session`, a network the webview connected, the draft is read on that connection's
-/// chain, which a relay of the profile served: a draft built under another network
-/// configuration is refused with `NetworkMismatch` (`details.reason`: `configuration`), a fee at
-/// the floor reads `floor`, and the draft's chain is the connection's, so none is added.
+/// chain, which a relay of the profile served, at the connection's next height: a draft built
+/// under another network configuration is refused with `NetworkMismatch` (`details.reason`:
+/// `configuration`), a fee at the floor of the draft's height reads `floor` when the floor at the
+/// connection's next height is the same and `unverified` when a change of the fee table lies
+/// between them, and the draft's chain is the connection's, so none is added.
 /// Otherwise the draft is read for `profile` under the configuration it carries, whose fee table
 /// the pinned network hash does not cover: such a fee reads `unverified`, and the draft's chain
 /// is held for the webview and described.
@@ -550,7 +552,11 @@ pub(crate) fn read_draft(
 ) -> Result<DraftInfo> {
     if let Some(session) = session {
         let session = state.session(label, session)?;
-        let draft = drafts::deserialize_on(&from_hex(bytes, "the draft")?, &session.chain)?;
+        let draft = drafts::deserialize_at(
+            &from_hex(bytes, "the draft")?,
+            &session.chain,
+            session.next_height(),
+        )?;
         return Ok(draft_info(&draft, None));
     }
     let page = state.page(label, window);

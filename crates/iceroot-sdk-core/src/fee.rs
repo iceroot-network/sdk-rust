@@ -69,19 +69,25 @@ pub enum FeeChoice {
 pub enum FeeSource {
     /// The fee equals the exact fee floor of the milestone in force, under a network
     /// configuration the reader holds itself: the chain a draft was built on, or the chain a
-    /// serialized draft was read on ([`crate::transaction::Draft::deserialize_on`]).
+    /// serialized draft was read on ([`crate::transaction::Draft::deserialize_at`]), where no
+    /// change of the fee table lies between the draft's height and the network's.
     Floor,
     /// A fee the caller set: an exact amount, or a multiple of the minimum that comes out above
     /// the floor. A deserialized draft also reads as explicit whenever its fee is not the floor
     /// computed again, and whatever other source its serialized form claims (see
     /// [`crate::transaction::Draft::deserialize`]).
     Explicit,
-    /// A serialized draft read without a chain of the reader's own
-    /// ([`crate::transaction::Draft::deserialize`]) whose form calls its fee the floor, and whose
-    /// fee equals the floor computed again under the network configuration the form carries.
-    /// The pinned network hash does not cover that configuration's fee table, so the builder of
-    /// the form chose that floor: the fee is shown as an amount, and never called the network's
-    /// minimum. The floor beside it is for display only.
+    /// A serialized draft whose form calls its fee the floor, and whose fee equals the floor
+    /// computed again at the draft's height, which the reader cannot hold to be the network's
+    /// floor now. Either the draft was read without a chain of the reader's own
+    /// ([`crate::transaction::Draft::deserialize`]): the pinned network hash does not cover the
+    /// fee table of the configuration the form carries, so the builder of the form chose that
+    /// floor. Or it was read on the reader's chain, but a change of the fee table lies between the
+    /// draft's height, which the builder chose, and the network's
+    /// ([`crate::transaction::Draft::deserialize_at`]), or the reader gave no height and the
+    /// chain's fee table changes at some height ([`crate::transaction::Draft::deserialize_on`]).
+    /// The fee is shown as an amount, and never called the network's minimum. The floor beside
+    /// it is for display only.
     Unverified,
 }
 

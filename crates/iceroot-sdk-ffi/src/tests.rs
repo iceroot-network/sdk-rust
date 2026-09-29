@@ -290,3 +290,69 @@ fn a_draft_is_read_on_the_host_s_chain_when_the_host_gives_it() {
     );
     assert_eq!(signed["result"]["verified"], true, "{signed}");
 }
+
+#[test]
+fn a_draft_read_on_the_host_s_chain_is_judged_at_the_host_s_height() {
+    let mut session = Session::default();
+    // The devnet chain with fees lowered at height 100.
+    let mut configuration: Value = serde_json::from_str(include_str!(
+        "../../iceroot-sdk-bindings/tests/data/devnet-configuration.json"
+    ))
+    .unwrap();
+    let milestones = configuration["milestones"].as_array_mut().unwrap();
+    let mut lowered = milestones.last().unwrap().clone();
+    lowered["height"] = json!(100);
+    lowered["dynamicFees"]["minFee"] = json!(3000);
+    milestones.push(lowered);
+    let key = call(
+        &mut session,
+        json!({"op":"keyLegacy","profile":profile(),"passphrase":"example"}),
+    )["result"]
+        .clone();
+    let pinned = call(
+        &mut session,
+        json!({"op":"chainInfo","profile":profile(),"configuration":configuration}),
+    )["result"]["profile"]
+        .clone();
+    let built = call(
+        &mut session,
+        json!({"op":"draftBuild","profile":pinned,"configuration":configuration,"request":{"operation":{"kind":"vote","entries":[{"validator":"a","basisPoints":10000}]}},"facts":{"sender":key["publicKey"],"nonce":"1","height":2}}),
+    )["result"]
+        .clone();
+    assert_eq!(built["summary"]["fee"]["source"], "floor");
+    let serialized = built["serialized"].clone();
+
+    // The host's next height: the floor holds before the change, and is unverified past it.
+    for (height, source) in [
+        (Some(99), "floor"),
+        (Some(100), "unverified"),
+        (None, "unverified"),
+    ] {
+        let mut request = json!({"op":"draftRead","profile":pinned,"serialized":serialized,"configuration":configuration});
+        if let Some(height) = height {
+            request["height"] = json!(height);
+        }
+        let read = call(&mut session, request);
+        assert_eq!(read["result"]["fee"]["source"], source, "{height:?} {read}");
+        assert_eq!(
+            read["result"]["fee"]["floor"],
+            built["summary"]["fee"]["floor"]
+        );
+    }
+    // A height without the host's chain is refused, as is a height that is not a u32.
+    let refused = call(
+        &mut session,
+        json!({"op":"draftRead","profile":pinned,"serialized":serialized,"height":99}),
+    );
+    assert_eq!(refused["error"]["code"], "InvalidArgument", "{refused}");
+    let refused = call(
+        &mut session,
+        json!({"op":"draftSign","profile":pinned,"serialized":serialized,"configuration":configuration,"height":-1,"key":key["handle"]}),
+    );
+    assert_eq!(refused["error"]["code"], "InvalidArgument", "{refused}");
+    let signed = call(
+        &mut session,
+        json!({"op":"draftSign","profile":pinned,"serialized":serialized,"configuration":configuration,"height":150,"key":key["handle"]}),
+    );
+    assert_eq!(signed["result"]["verified"], true, "{signed}");
+}

@@ -678,6 +678,143 @@ fn a_draft_read_on_the_reader_s_chain_is_judged_by_that_chain() {
     ));
 }
 
+/// The devnet chain with a milestone at `height` that sets the fee table's `minFee` to `min_fee`.
+fn chain_with_a_fee_change(height: u32, min_fee: u64) -> Chain {
+    let network = serde_json::to_string(&chain().network().to_json()).unwrap();
+    let mut milestones: Vec<serde_json::Value> = chain()
+        .milestones()
+        .all()
+        .iter()
+        .map(|params| serde_json::Value::Object(params.as_json().clone()))
+        .collect();
+    let mut changed = milestones.last().unwrap().clone();
+    changed["height"] = height.into();
+    changed["dynamicFees"]["minFee"] = min_fee.into();
+    milestones.push(changed);
+    let milestones = serde_json::to_string(&milestones).unwrap();
+    Chain::from_parts(chain().profile(), &network, &milestones).unwrap()
+}
+
+#[test]
+fn a_draft_s_floor_is_the_network_s_only_where_no_fee_change_lies_between_their_heights() {
+    // Fees are lowered at height 100; the draft names height 2, before the change, as a builder
+    // may choose to.
+    let changing = chain_with_a_fee_change(100, 3_000);
+    let sender = phrase_account(0);
+    let recipient = phrase_account(1);
+    let draft = Draft::build(
+        &changing,
+        &DraftRequest::new(transfer(&recipient, 1)),
+        &facts(&sender),
+    )
+    .unwrap();
+    let floor = Amount::from(1_000_026u64);
+    assert_eq!(
+        (draft.fee().amount, draft.fee().source, draft.fee().floor),
+        (floor, FeeSource::Floor, Some(floor))
+    );
+    let bytes = draft.serialize();
+    assert!(changing.fee_floor(draft.kind(), draft.size(), 100) < Some(floor));
+
+    // Read on the chain without the network's height, the floor at the draft's height may not be
+    // the floor now: it is unverified, and kept for display.
+    let read = Draft::deserialize_on(&bytes, &changing).unwrap();
+    assert_eq!(
+        (read.fee().amount, read.fee().source, read.fee().floor),
+        (floor, FeeSource::Unverified, Some(floor))
+    );
+
+    // Given the network's next height, it is the floor while the network is before the change,
+    // and unverified once the network is past it.
+    for (height, source) in [
+        (2, FeeSource::Floor),
+        (99, FeeSource::Floor),
+        (100, FeeSource::Unverified),
+        (u32::MAX, FeeSource::Unverified),
+    ] {
+        let read = Draft::deserialize_at(&bytes, &changing, height).unwrap();
+        assert_eq!(
+            (read.fee().amount, read.fee().source, read.fee().floor),
+            (floor, source, Some(floor)),
+            "{height}"
+        );
+        assert_eq!(read.height(), 2);
+    }
+
+    // A draft that names a height past the change, read while the network is before it: the
+    // floor of the draft's height is not the network's either.
+    let later = Draft::build(
+        &changing,
+        &DraftRequest::new(transfer(&recipient, 1)),
+        &OnlineFacts {
+            height: 150,
+            ..facts(&sender)
+        },
+    )
+    .unwrap();
+    let lowered = later.fee().floor;
+    assert!(lowered < Some(floor));
+    let bytes = later.serialize();
+    assert_eq!(
+        Draft::deserialize_at(&bytes, &changing, 2)
+            .unwrap()
+            .fee()
+            .source,
+        FeeSource::Unverified
+    );
+    assert_eq!(
+        Draft::deserialize_at(&bytes, &changing, 151)
+            .unwrap()
+            .fee()
+            .source,
+        FeeSource::Floor
+    );
+
+    // An explicit fee stays explicit, and a chain whose fee table never changes keeps the floor
+    // whatever the heights.
+    let explicit = Draft::build(
+        &changing,
+        &DraftRequest {
+            operation: transfer(&recipient, 1),
+            memo: None,
+            fee: FeeChoice::Exact(Amount::from(2_000_000u64)),
+        },
+        &facts(&sender),
+    )
+    .unwrap();
+    assert_eq!(
+        Draft::deserialize_at(&explicit.serialize(), &changing, 150)
+            .unwrap()
+            .fee()
+            .source,
+        FeeSource::Explicit
+    );
+    let steady = build(&sender, transfer(&recipient, 1)).unwrap().serialize();
+    for height in [1, 2, 1_000_000, u32::MAX] {
+        assert_eq!(
+            Draft::deserialize_at(&steady, chain(), height)
+                .unwrap()
+                .fee()
+                .source,
+            FeeSource::Floor
+        );
+    }
+    assert_eq!(
+        Draft::deserialize_on(&steady, chain())
+            .unwrap()
+            .fee()
+            .source,
+        FeeSource::Floor
+    );
+    // The configuration must still be the reader's own.
+    assert_eq!(
+        Draft::deserialize_at(&steady, &changing, 2).unwrap_err(),
+        Error::NetworkMismatch {
+            problem: MismatchProblem::Configuration
+        }
+    );
+}
+
 /// The devnet chain with no dynamic fee table in any milestone.
 fn chain_without_fee_table() -> Chain {
     let network = serde_json::to_string(&chain().network().to_json()).unwrap();

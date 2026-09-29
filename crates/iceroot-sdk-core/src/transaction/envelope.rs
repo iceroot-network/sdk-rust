@@ -24,7 +24,8 @@
 //!
 //! The reader takes the fee from the transaction itself and computes its floor again: `fee.floor`
 //! is written for other readers and checked only for its form, and `fee.source` is a claim that
-//! [`super::Draft::deserialize`] and [`super::Draft::deserialize_on`] check against the floor.
+//! [`super::Draft::deserialize`], [`super::Draft::deserialize_at`] and
+//! [`super::Draft::deserialize_on`] check against the floor.
 //! `floor` and `unverified` (the floor as a reader without a chain of its own read it) both claim
 //! the floor; any other source is read as `explicit`.
 

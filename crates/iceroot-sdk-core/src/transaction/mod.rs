@@ -11,8 +11,10 @@
 //! [`Draft::deserialize`] reads it back against a profile, refuses another network and recomputes
 //! the summary from the transaction's own fields. The configuration it carries is the builder's,
 //! so a fee equal to its floor reads as unverified, never as the floor; a reader with a chain of
-//! its own reads the draft with [`Draft::deserialize_on`], which refuses another configuration
-//! and calls the fee the floor when it is. A signed transaction travels back the same way.
+//! its own reads the draft with [`Draft::deserialize_at`] at the network's height, which refuses
+//! another configuration and calls the fee the floor when it is the floor at the network's height
+//! too ([`Draft::deserialize_on`] without a height). A signed transaction travels back the same
+//! way.
 //!
 //! The six operations of today's formats are built and signed by `heartwood-crypto`'s
 //! transaction builder, so the bytes and ids are the node's own.

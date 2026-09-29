@@ -370,14 +370,27 @@ impl Session {
             "draftRead" | "draftSign" => {
                 // With the host's connected chain (`configuration`), the draft is read on it: a
                 // draft built under another configuration is refused, and a fee at the floor is
-                // the floor. With the profile alone, such a fee is unverified.
+                // the floor where the floor at the host's next `height` is the same (at every
+                // height of the chain without one). With the profile alone, such a fee is
+                // unverified.
                 let serialized = bytes(v, "serialized")?;
-                let d = match v.get("configuration") {
-                    None | Some(Value::Null) => b::draft::deserialize(&serialized, &profile(v)?)?,
-                    Some(_) => b::draft::deserialize_on(
-                        &serialized,
-                        &b::chain::load(&profile(v)?, &raw(v, "configuration")?)?,
-                    )?,
+                let height = optional_number(v, "height")?;
+                let d = match (v.get("configuration"), height) {
+                    (None | Some(Value::Null), None) => {
+                        b::draft::deserialize(&serialized, &profile(v)?)?
+                    }
+                    (None | Some(Value::Null), Some(_)) => {
+                        return Err(BindingError::argument(
+                            "a height is given only with the host's configuration",
+                        ));
+                    }
+                    (Some(_), height) => {
+                        let chain = b::chain::load(&profile(v)?, &raw(v, "configuration")?)?;
+                        match height {
+                            Some(height) => b::draft::deserialize_at(&serialized, &chain, height)?,
+                            None => b::draft::deserialize_on(&serialized, &chain)?,
+                        }
+                    }
                 };
                 if text(v, "op")? == "draftRead" {
                     return parsed(b::draft::summary(&d));

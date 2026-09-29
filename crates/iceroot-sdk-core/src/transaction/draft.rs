@@ -328,42 +328,76 @@ impl Draft {
     /// and the fee equals the floor computed here, and [`FeeSource::Explicit`] otherwise,
     /// whatever other source the form names. The floor is kept for display only: a signer
     /// without a chain of its own shows the fee as an amount, never as the network's minimum.
-    /// A signer connected to the network reads the draft with [`Draft::deserialize_on`] instead.
+    /// A signer connected to the network reads the draft with [`Draft::deserialize_at`] instead.
     pub fn deserialize(bytes: &[u8], profile: &Profile) -> Result<Draft, Error> {
         let (chain, envelope) = envelope::decode(bytes, profile, EnvelopeKind::Draft)?;
         Draft::read(chain, envelope, FeeSource::Unverified)
     }
 
-    /// The draft in `bytes`, read on `chain`: a chain the reader loaded itself, such as the one
-    /// its own connection to the network serves. Data made for another profile or network is
-    /// refused with [`Error::NetworkMismatch`], and so is a draft built under another network
+    /// The draft in `bytes`, read on `chain` at `height`: a chain the reader loaded itself, such
+    /// as the one its own connection to the network serves, and the height of the network's next
+    /// block, as that connection reports it. Data made for another profile or network is refused
+    /// with [`Error::NetworkMismatch`], and so is a draft built under another network
     /// configuration than `chain`'s (the problem [`MismatchProblem::Configuration`]): another fee
     /// table, other rules or other labels under the same chain's identity. A draft built just
     /// before the network changed its milestones is refused too; build it again.
     ///
     /// The summary is computed again from the transaction's own fields, and the floor, the rules
-    /// and the token's labels come from `chain`. The fee's source reads [`FeeSource::Floor`] when
-    /// the form says the fee is the floor (`floor`, or `unverified` from a reader without a
-    /// chain) and the fee equals the floor computed here, and [`FeeSource::Explicit`] otherwise.
+    /// and the token's labels come from `chain`. The floor is computed at [`Draft::height`], which
+    /// the builder chose; the fee's source reads [`FeeSource::Floor`] when the form says the fee
+    /// is the floor (`floor`, or `unverified` from a reader without a chain), the fee equals that
+    /// floor, and the floor at `height` is the same, so that no change of the fee table lies
+    /// between the draft's height and the network's. When the floor at `height` differs, the
+    /// source reads [`FeeSource::Unverified`], with the floor at the draft's height kept for
+    /// display, and otherwise [`FeeSource::Explicit`]. The node checks the fee at its own height
+    /// in any case.
     ///
     /// Only a chain the reader trusts as much as its own connection makes a fee the floor: the
     /// chain of a draft read with [`Draft::deserialize`] is the configuration that draft carried.
-    ///
-    /// `chain` proves that the fee table is the reader's own, not that the draft's height is the
-    /// network's: the floor is computed at [`Draft::height`], which the builder chose. On a chain
-    /// whose milestones change the fee table, a draft that names a height before a change reads
-    /// `Floor` for the floor in force at that height, which may be above the floor of the
-    /// network's next block. A reader that calls such a fee the network's minimum first compares
-    /// the draft's height with its connection's next height, and shows the fee as an amount when
-    /// a milestone lies between them. The node checks the fee at its own height in any case.
+    pub fn deserialize_at(bytes: &[u8], chain: &Chain, height: u32) -> Result<Draft, Error> {
+        Draft::read_on(bytes, chain, Some(height))
+    }
+
+    /// The draft in `bytes`, read on `chain` as [`Draft::deserialize_at`] reads it, for a reader
+    /// that does not know the network's height. The fee's source then reads [`FeeSource::Floor`]
+    /// only when the floor of the draft's kind and size is the same at every height of `chain`,
+    /// since the draft's height is the builder's choice: on a chain whose milestones change the
+    /// fee table, such a fee reads [`FeeSource::Unverified`]. A reader connected to the network
+    /// gives its height with [`Draft::deserialize_at`].
     pub fn deserialize_on(bytes: &[u8], chain: &Chain) -> Result<Draft, Error> {
+        Draft::read_on(bytes, chain, None)
+    }
+
+    /// The draft in `bytes` on `chain`, the reader's own, with its floor checked against the
+    /// floor at the network's `height`, or at every height of `chain` without one.
+    fn read_on(bytes: &[u8], chain: &Chain, height: Option<u32>) -> Result<Draft, Error> {
         let (carried, envelope) = envelope::decode(bytes, chain.profile(), EnvelopeKind::Draft)?;
         if !carried.same_configuration(chain) {
             return Err(Error::NetworkMismatch {
                 problem: MismatchProblem::Configuration,
             });
         }
-        Draft::read(chain.clone(), envelope, FeeSource::Floor)
+        let mut draft = Draft::read(chain.clone(), envelope, FeeSource::Floor)?;
+        if draft.fee.source == FeeSource::Floor && !draft.floor_holds_at(height) {
+            draft.fee.source = FeeSource::Unverified;
+        }
+        Ok(draft)
+    }
+
+    /// Whether the floor at the draft's height is the floor at `height`, or, without a height,
+    /// at every height of the draft's chain.
+    fn floor_holds_at(&self, height: Option<u32>) -> bool {
+        let (kind, size) = (self.kind(), self.size());
+        let floor = self.chain.fee_floor(kind, size, self.height);
+        match height {
+            Some(height) => self.chain.fee_floor(kind, size, height) == floor,
+            None => self
+                .chain
+                .milestones()
+                .all()
+                .iter()
+                .all(|params| fee::floor(kind, size, params) == floor),
+        }
     }
 
     /// The draft of a serialized form's fields on `chain`, whose fee reads `floor` when the form

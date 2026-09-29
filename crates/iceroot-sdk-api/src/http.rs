@@ -3,8 +3,16 @@
 //! It sends [`Call`]s to a list of relays: reads go to the first relay that answers, a relay that
 //! cannot be reached or answers with a server error is skipped, and HTTP 429 is retried after a
 //! [`Backoff`]; a relay whose retries are spent, or that asks for a wait longer than
-//! [`Backoff::MAX_RETRY_AFTER`], is skipped too. Requests are spent against a [`RequestBudget`] before they leave, so a busy client
-//! waits instead of being refused.
+//! [`Backoff::MAX_RETRY_AFTER`], is skipped too. Requests are spent against a [`RequestBudget`]
+//! before they leave, so a busy client waits instead of being refused.
+//!
+//! The relays are not assumed to serve one chain. Without [`HttpOptions::identity`], a request
+//! goes to whichever relay answers first, so when a relay fails over, reads, draft facts and
+//! submissions may reach a relay of another chain (a devnet generated again, say). With it, each
+//! relay is asked for its node configuration before its first use, and a relay whose
+//! configuration names another network hash or byte is never asked anything else by that client:
+//! load the chain from a relay first, then send through a client with the chain's identity
+//! (`Chain::relay_identity` in the core).
 //!
 //! Requests go to the relays and nowhere else: the client never follows a redirect (the node API
 //! does not redirect), and a relay that answers with one is skipped like a relay that cannot be
@@ -28,6 +36,7 @@
 //! - no revocation is checked: a revoked certificate of a relay is accepted until it expires.
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::call::Call;
@@ -35,7 +44,7 @@ use crate::error::ApiError;
 use crate::limits::{Backoff, RateLimit, RequestBudget};
 use crate::request::{MAX_RESPONSE_BYTES, Method, Relay, Request, Response};
 use crate::solar_compat::{SolarCompat, SubmitPlan};
-use crate::types::{SubmitReport, TxRecord};
+use crate::types::{RelayIdentity, SubmitReport, TxRecord};
 
 /// Settings of an [`HttpClient`]. Its `Debug` output names the extra headers but never shows
 /// their values, which may be tokens.
@@ -69,6 +78,29 @@ pub struct HttpOptions {
     /// # }
     /// ```
     pub headers: Vec<(String, String)>,
+    /// The chain every relay must serve. When set, the client asks each relay for its node
+    /// configuration before the relay's first use: a relay that names another network hash or
+    /// byte is skipped for the client's lifetime, and one that cannot be checked now (it cannot be
+    /// reached, or its answer is refused) is skipped this time and checked again on the next
+    /// request. Default: none, and every relay is used as it answers.
+    ///
+    /// ```no_run
+    /// use iceroot_sdk_api::{RelayIdentity, HttpClient, HttpOptions, Relay};
+    ///
+    /// # fn run(nethash: String) -> Result<(), iceroot_sdk_api::ApiError> {
+    /// let options = HttpOptions {
+    ///     identity: Some(RelayIdentity { nethash, network_byte: 90 }),
+    ///     ..HttpOptions::default()
+    /// };
+    /// let relays = vec![
+    ///     Relay::parse("https://devnet.example/api")?,
+    ///     Relay::parse("https://backup.example/api")?,
+    /// ];
+    /// let client = HttpClient::with_options(relays, options)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub identity: Option<RelayIdentity>,
 }
 
 impl std::fmt::Debug for HttpOptions {
@@ -80,6 +112,7 @@ impl std::fmt::Debug for HttpOptions {
             .field("backoff", &self.backoff)
             .field("user_agent", &self.user_agent)
             .field("headers", &headers)
+            .field("identity", &self.identity)
             .finish()
     }
 }
@@ -92,6 +125,7 @@ impl Default for HttpOptions {
             backoff: Backoff::default(),
             user_agent: concat!("iceroot-sdk-api/", env!("CARGO_PKG_VERSION")).to_owned(),
             headers: Vec::new(),
+            identity: None,
         }
     }
 }
@@ -104,7 +138,18 @@ pub struct HttpClient {
     budget: Mutex<RequestBudget>,
     backoff: Backoff,
     started: Instant,
+    /// The chain every relay must serve, and what is known of each relay's (see
+    /// [`HttpOptions::identity`]).
+    identity: Option<RelayIdentity>,
+    checked: Vec<AtomicU8>,
 }
+
+/// A relay whose chain is not known yet.
+const UNCHECKED: u8 = 0;
+/// A relay that serves the client's chain.
+const SAME_CHAIN: u8 = 1;
+/// A relay that serves another chain: never asked again.
+const OTHER_CHAIN: u8 = 2;
 
 impl HttpClient {
     /// A client for `relays`, tried in order, with default options.
@@ -157,12 +202,15 @@ impl HttpClient {
         let http = builder.build().map_err(|e| ApiError::NodeUnavailable {
             detail: format!("HTTP client: {e}"),
         })?;
+        let checked = relays.iter().map(|_| AtomicU8::new(UNCHECKED)).collect();
         Ok(HttpClient {
             http,
             relays,
             budget: Mutex::new(RequestBudget::new(options.rate_limit)),
             backoff: options.backoff,
             started: Instant::now(),
+            identity: options.identity,
+            checked,
         })
     }
 
@@ -259,6 +307,8 @@ impl HttpClient {
     /// or answers 5xx is skipped. A 429 is retried on the same relay after the backoff; when
     /// retries are spent, or the relay asks for a wait longer than [`Backoff::MAX_RETRY_AFTER`],
     /// the next relay is tried, and after the last one the error is [`ApiError::RateLimited`].
+    /// With [`HttpOptions::identity`], a relay is first checked to serve that chain, and skipped
+    /// when it does not, or cannot be checked now.
     ///
     /// # Errors
     ///
@@ -285,41 +335,80 @@ impl HttpClient {
         let mut last = ApiError::NodeUnavailable {
             detail: "no relay was tried".into(),
         };
-        for relay in &self.relays {
-            let mut attempt = 0u32;
-            loop {
-                self.spend().await;
-                let response = match self.fetch(relay, request).await {
-                    Ok(response) => response,
-                    Err(error) => {
-                        last = error;
-                        break;
-                    }
-                };
-                match decode(&response) {
-                    Err(ApiError::RateLimited { retry_after }) => {
-                        match self.backoff.delay(attempt, retry_after) {
-                            Some(wait) => {
-                                self.block(wait);
-                                attempt = attempt.saturating_add(1);
-                            }
-                            // Retries spent, or a wait longer than the client keeps: another
-                            // relay may answer, and none is blocked for this one.
-                            None => {
-                                last = ApiError::RateLimited { retry_after };
-                                break;
-                            }
-                        }
-                    }
-                    Err(error @ ApiError::Refused { status, .. }) if status >= 500 => {
-                        last = error;
-                        break;
-                    }
-                    result => return result,
-                }
+        for (relay, checked) in self.relays.iter().zip(&self.checked) {
+            if let Err(error) = self.identify(relay, checked).await {
+                last = error;
+                continue;
+            }
+            match self.attempt(relay, request, &decode).await {
+                Ok(result) => return result,
+                Err(error) => last = error,
             }
         }
         Err(last)
+    }
+
+    /// Sends `request` to `relay` alone, with the retries of HTTP 429: the decoded result, or the
+    /// error that skips the relay (it cannot be reached, answers 5xx or with a redirect, or its
+    /// retries are spent).
+    async fn attempt<T>(
+        &self,
+        relay: &Relay,
+        request: &Request,
+        decode: &impl Fn(&Response) -> Result<T, ApiError>,
+    ) -> Result<Result<T, ApiError>, ApiError> {
+        let mut attempt = 0u32;
+        loop {
+            self.spend().await;
+            let response = self.fetch(relay, request).await?;
+            match decode(&response) {
+                Err(ApiError::RateLimited { retry_after }) => {
+                    match self.backoff.delay(attempt, retry_after) {
+                        Some(wait) => {
+                            self.block(wait);
+                            attempt = attempt.saturating_add(1);
+                        }
+                        // Retries spent, or a wait longer than the client keeps: another relay
+                        // may answer, and none is blocked for this one.
+                        None => return Err(ApiError::RateLimited { retry_after }),
+                    }
+                }
+                Err(error @ ApiError::Refused { status, .. }) if status >= 500 => {
+                    return Err(error);
+                }
+                result => return Ok(result),
+            }
+        }
+    }
+
+    /// Whether `relay` may be used: with [`HttpOptions::identity`], only once its node
+    /// configuration names that chain. A relay of another chain is refused for the client's
+    /// lifetime; one that cannot be checked now is refused with the check's error, and checked
+    /// again next time.
+    async fn identify(&self, relay: &Relay, checked: &AtomicU8) -> Result<(), ApiError> {
+        let Some(identity) = &self.identity else {
+            return Ok(());
+        };
+        let other_chain = || ApiError::NodeUnavailable {
+            detail: format!("{} serves another chain than the client's", relay.as_str()),
+        };
+        match checked.load(Ordering::Relaxed) {
+            SAME_CHAIN => return Ok(()),
+            OTHER_CHAIN => return Err(other_chain()),
+            _ => {}
+        }
+        let call = SolarCompat::new(0).node_configuration();
+        let node = self
+            .attempt(relay, call.request(), &|response| call.decode(response))
+            .await
+            .and_then(|result| result)?;
+        if identity.matches(&node.network) {
+            checked.store(SAME_CHAIN, Ordering::Relaxed);
+            Ok(())
+        } else {
+            checked.store(OTHER_CHAIN, Ordering::Relaxed);
+            Err(other_chain())
+        }
     }
 
     /// Sends every call of a submission plan and joins the outcomes in submission order.

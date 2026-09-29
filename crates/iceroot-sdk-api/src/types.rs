@@ -184,6 +184,27 @@ pub struct NetworkIdentity {
     pub wif: u8,
 }
 
+/// The chain a relay must serve: the network hash and address network byte its node
+/// configuration names ([`NetworkIdentity`]). The core gives a loaded chain's with
+/// `Chain::relay_identity`, and `HttpOptions::identity` (feature `http`) makes the HTTP client check
+/// every relay against it before its first use.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RelayIdentity {
+    /// The network hash (hex).
+    pub nethash: String,
+    /// The address network byte.
+    pub network_byte: u8,
+}
+
+impl RelayIdentity {
+    /// Whether a node reporting `network` serves this chain: the same network hash, in either
+    /// case of hex, and the same network byte.
+    pub fn matches(&self, network: &NetworkIdentity) -> bool {
+        network.nethash.eq_ignore_ascii_case(&self.nethash)
+            && network.network_byte == self.network_byte
+    }
+}
+
 /// The labels a node shows for the native token. Display only: the asset is [`AssetId::ROOT`].
 #[cfg_attr(
     feature = "serde",

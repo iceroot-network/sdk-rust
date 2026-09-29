@@ -4,8 +4,9 @@
 //! This module turns them into the core's inputs, and checks them on the way rather than trusting
 //! them:
 //!
-//! - [`Chain::from_node`] loads the chain from the node's crypto configuration, and
-//!   [`Chain::check_node`] refuses a node whose configuration names another chain.
+//! - [`Chain::from_node`] loads the chain from the node's crypto configuration,
+//!   [`Chain::check_node`] refuses a node whose configuration names another chain, and
+//!   [`Chain::relay_identity`] gives the chain's identity for the HTTP client to check relays against.
 //! - [`OnlineFacts::from_node`] reads a draft's nonce, height and second key from the sender's
 //!   account and the node's status, and refuses an account that is not the sender's.
 //! - [`OperationKind`] converts from and to the client's transaction kinds.
@@ -18,8 +19,8 @@
 
 use heartwood_crypto::PublicKey;
 use iceroot_sdk_api::{
-    AccountInfo, ApiError, CryptoConfiguration, NodeConfiguration, NodeStatus, SubmitOutcome,
-    SubmitStatus, SubmitTx, TxKind,
+    AccountInfo, ApiError, CryptoConfiguration, NodeConfiguration, NodeStatus, RelayIdentity,
+    SubmitOutcome, SubmitStatus, SubmitTx, TxKind,
 };
 use serde_json::Value;
 
@@ -63,6 +64,16 @@ impl Chain {
             });
         }
         Ok(chain)
+    }
+
+    /// The identity a node of this chain reports: the network hash and address network byte.
+    /// With `HttpOptions::identity` (the node API client's feature `http`), the HTTP client uses a
+    /// relay only once its node configuration names this chain.
+    pub fn relay_identity(&self) -> RelayIdentity {
+        RelayIdentity {
+            nethash: self.nethash().to_owned(),
+            network_byte: self.network_byte(),
+        }
     }
 
     /// `Ok` when the node's configuration names this chain: the same network hash and address

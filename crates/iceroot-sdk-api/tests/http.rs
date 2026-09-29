@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use iceroot_sdk_api::{
-    ApiError, Backoff, HttpClient, HttpOptions, PoolLimits, RateLimit, Relay, SolarCompat,
-    SubmitStatus, SubmitTx,
+    ApiError, Backoff, HttpClient, HttpOptions, PoolLimits, RateLimit, Relay, RelayIdentity,
+    SolarCompat, SubmitStatus, SubmitTx,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -463,4 +463,138 @@ async fn a_long_retry_after_moves_on_to_the_next_relay_and_blocks_nothing() {
             }
         );
     }
+}
+
+/// The recorded devnet's network hash.
+const RECORDED_NETHASH: &str = "c9b03ab996ef3ac216a2ac53eaee71118cbf7995fa44449a7fb7f94bbe18bcca";
+
+/// The recorded devnet node configuration, naming the chain of `nethash`.
+fn configuration(nethash: &str) -> &'static str {
+    let recorded = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/devnet/node-configuration.json"),
+    )
+    .unwrap();
+    assert!(recorded.contains(RECORDED_NETHASH));
+    Box::leak(recorded.replace(RECORDED_NETHASH, nethash).into_boxed_str())
+}
+
+fn recorded_chain() -> RelayIdentity {
+    RelayIdentity {
+        nethash: RECORDED_NETHASH.to_uppercase(),
+        network_byte: 90,
+    }
+}
+
+/// The request lines a scripted server received.
+fn lines(seen: &Mutex<Vec<String>>) -> Vec<String> {
+    seen.lock()
+        .unwrap()
+        .iter()
+        .map(|request| request.lines().next().unwrap_or("").to_owned())
+        .collect()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn with_an_identity_a_relay_is_used_only_once_it_serves_the_chain() {
+    let dead = dead_relay().await;
+    let other_chain = "ab".repeat(32);
+    let (other, asked) = server(vec![(200, configuration(&other_chain))]).await;
+    let (same, served) = server(vec![
+        (200, configuration(RECORDED_NETHASH)),
+        (200, STATUS),
+        (200, STATUS),
+    ])
+    .await;
+    let relays = || {
+        vec![
+            Relay::parse(&dead).unwrap(),
+            Relay::parse(&other).unwrap(),
+            Relay::parse(&same).unwrap(),
+        ]
+    };
+    let checked = HttpOptions {
+        identity: Some(recorded_chain()),
+        ..options(0)
+    };
+    let client = HttpClient::with_options(relays(), checked).unwrap();
+    for _ in 0..2 {
+        let status = client
+            .send(&SolarCompat::new(53).node_status())
+            .await
+            .unwrap();
+        assert_eq!(status.height, 42);
+    }
+    // The relay of another chain was asked for its configuration once, and for nothing else; the
+    // relay of the chain was checked once, before its first use.
+    assert_eq!(lines(&asked), ["GET /api/node/configuration HTTP/1.1"]);
+    assert_eq!(
+        lines(&served),
+        [
+            "GET /api/node/configuration HTTP/1.1",
+            "GET /api/node/status HTTP/1.1",
+            "GET /api/node/status HTTP/1.1"
+        ]
+    );
+
+    // With relays of another chain only, nothing is sent past the check.
+    let (other, asked) = server(vec![(200, configuration(&other_chain))]).await;
+    let checked = HttpOptions {
+        identity: Some(recorded_chain()),
+        ..options(0)
+    };
+    let client = HttpClient::with_options(vec![Relay::parse(&other).unwrap()], checked).unwrap();
+    for _ in 0..2 {
+        let error = client
+            .send(&SolarCompat::new(53).node_status())
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "NodeUnavailable");
+        assert!(error.to_string().contains("another chain"), "{error}");
+    }
+    assert_eq!(lines(&asked), ["GET /api/node/configuration HTTP/1.1"]);
+
+    // Without an identity, the client asks relays in order, as before.
+    let (unchecked, asked) = server(vec![(200, STATUS)]).await;
+    let client =
+        HttpClient::with_options(vec![Relay::parse(&unchecked).unwrap()], options(0)).unwrap();
+    client
+        .send(&SolarCompat::new(53).node_status())
+        .await
+        .unwrap();
+    assert_eq!(lines(&asked), ["GET /api/node/status HTTP/1.1"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_relay_whose_check_fails_otherwise_is_checked_again() {
+    let not_found = r#"{"statusCode":404,"error":"Not Found","message":"none"}"#;
+    let (relay, asked) = server(vec![
+        (404, not_found),
+        (200, configuration(RECORDED_NETHASH)),
+        (200, STATUS),
+    ])
+    .await;
+    let checked = HttpOptions {
+        identity: Some(recorded_chain()),
+        ..options(0)
+    };
+    let client = HttpClient::with_options(vec![Relay::parse(&relay).unwrap()], checked).unwrap();
+    let error = client
+        .send(&SolarCompat::new(53).node_status())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), "NotFound");
+    let status = client
+        .send(&SolarCompat::new(53).node_status())
+        .await
+        .unwrap();
+    assert_eq!(status.height, 42);
+    assert_eq!(
+        lines(&asked),
+        [
+            "GET /api/node/configuration HTTP/1.1",
+            "GET /api/node/configuration HTTP/1.1",
+            "GET /api/node/status HTTP/1.1"
+        ]
+    );
 }

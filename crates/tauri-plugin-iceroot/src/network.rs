@@ -508,6 +508,9 @@ fn http_options(options: ConnectOptions) -> HttpOptions {
         backoff: Backoff::default(),
         user_agent: concat!("tauri-plugin-iceroot/", env!("CARGO_PKG_VERSION")).to_owned(),
         headers: options.headers,
+        // Each relay has a client of its own, which the session checks itself (see `Session`),
+        // so that a relay of another chain is refused with `NetworkMismatch`.
+        identity: None,
     }
 }
 

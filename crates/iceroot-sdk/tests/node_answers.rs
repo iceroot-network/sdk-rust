@@ -66,6 +66,7 @@ fn the_chain_comes_from_the_node() {
         .decode(&answer("node-configuration.json"))
         .unwrap();
     chain.check_node(&node).unwrap();
+    assert!(chain.relay_identity().matches(&node.network));
 
     // A node of another chain is refused, and so is a profile pinned to another chain.
     let mut other = node.clone();
@@ -74,6 +75,10 @@ fn the_chain_comes_from_the_node() {
         chain.check_node(&other),
         Err(Error::NetworkMismatch { .. })
     ));
+    assert!(!chain.relay_identity().matches(&other.network));
+    let mut other_byte = node.clone();
+    other_byte.network.network_byte = 63;
+    assert!(!chain.relay_identity().matches(&other_byte.network));
     let configuration = API
         .crypto_configuration()
         .decode(&answer("node-configuration-crypto.json"))

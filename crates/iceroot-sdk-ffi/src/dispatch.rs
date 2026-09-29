@@ -207,6 +207,18 @@ impl Session {
                 self.key(v, "key")?
                     .sign_message_with(&bytes(v, "message")?, aux(v)?)?,
             ),
+            // A website's sign-in message, signed only once it passes its checks against the
+            // origin of the page that asks and the key's identity.
+            "signinSign" => parsed(
+                self.key(v, "key")?.sign_sign_in_with(
+                    text(v, "message")?,
+                    text(v, "origin")?,
+                    field(v, "now")?
+                        .as_f64()
+                        .ok_or_else(|| BindingError::argument("now must be milliseconds"))?,
+                    aux(v)?,
+                )?,
+            ),
             "verifyMessage" => Ok(json!(b::messages::verify_message(
                 &bytes(v, "message")?,
                 text(v, "publicKey")?,

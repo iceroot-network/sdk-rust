@@ -20,6 +20,7 @@ const COMMANDS: &[&str] = &[
     "key_from_legacy_passphrase",
     "key_from_keystore",
     "key_sign_message",
+    "key_sign_sign_in",
     "key_release",
     "chain_load",
     "chain_stage_at",

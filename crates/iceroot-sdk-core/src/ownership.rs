@@ -734,6 +734,22 @@ mod tests {
     }
 
     #[test]
+    fn a_proof_is_signed_only_as_a_proof() {
+        // A devnet account imported from the Solar passphrase holds the same secret key; a plain
+        // message signature of the proof's text would be a valid proof, so it is refused.
+        let key = SolarKey::from_passphrase(PASSPHRASE).unwrap();
+        let text = message(&key);
+        let profile = crate::Profile::devnet(crate::profile::DevnetOptions::default());
+        let account = crate::Account::from_legacy_passphrase(&profile, PASSPHRASE).unwrap();
+        assert_eq!(account.public_key().to_hex(), PUBLIC_KEY);
+        assert!(matches!(
+            message::sign(&profile, &account, &text),
+            Err(Error::InvalidArgument { .. })
+        ));
+        assert!(verify(&sign(&key, &text, ISSUED).unwrap(), ISSUED).is_ok());
+    }
+
+    #[test]
     fn the_legacy_signer_s_proof() {
         let key = SolarKey::from_passphrase(PASSPHRASE).unwrap();
         assert_eq!(key.address().to_string(), ADDRESS);

@@ -42,14 +42,7 @@ pub fn parse_sign_in(
     now_ms: f64,
 ) -> Result<String> {
     let expected = json::parse_object(expected, "the expected fields")?;
-    if !now_ms.is_finite() || now_ms.fract() != 0.0 || now_ms.abs() > 9_007_199_254_740_991.0 {
-        return Err(BindingError::argument(
-            "now is not a whole number of milliseconds",
-        ));
-    }
-    // The check above keeps the value within the integers a double holds exactly.
-    #[allow(clippy::cast_possible_truncation)]
-    let now_ms = now_ms as i64;
+    let now_ms = milliseconds(now_ms)?;
     let challenge = signin::parse(
         profile,
         message,
@@ -71,6 +64,19 @@ pub fn parse_sign_in(
         "expiresAtMs": challenge.expires_at_ms,
     })
     .to_string())
+}
+
+/// A time in milliseconds since 1970-01-01T00:00:00Z from JavaScript, which must be a whole
+/// number a double holds exactly.
+pub(crate) fn milliseconds(now_ms: f64) -> Result<i64> {
+    if !now_ms.is_finite() || now_ms.fract() != 0.0 || now_ms.abs() > 9_007_199_254_740_991.0 {
+        return Err(BindingError::argument(
+            "now is not a whole number of milliseconds",
+        ));
+    }
+    // The check above keeps the value within the integers a double holds exactly.
+    #[allow(clippy::cast_possible_truncation)]
+    Ok(now_ms as i64)
 }
 
 #[cfg(test)]
@@ -123,6 +129,52 @@ mod tests {
             parse_sign_in(&profile, &message, "{}", f64::NAN)
                 .unwrap_err()
                 .code(),
+            "InvalidArgument"
+        );
+    }
+
+    #[test]
+    fn a_sign_in_message_is_signed_only_once_it_passes_its_checks() {
+        let profile = crate::profile::from_json(
+            r#"{"id":"devnet","backend":"solar-compat","api":{"relays":[]},"chain":{"networkByte":90},"keyScheme":"bip32-secp256k1"}"#,
+        )
+        .unwrap();
+        let key = Key::from_legacy_passphrase(&profile, "probe passphrase".to_owned()).unwrap();
+        let origin = "https://validators.example";
+        let message = build_sign_in(
+            &profile,
+            &json!({
+                "origin": origin,
+                "publicKey": hex::encode(key.public_key().unwrap()),
+                "nonce": "ab".repeat(32),
+                "issuedAt": 1_790_000_000,
+                "expiresAt": 1_790_000_300,
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let now = 1_790_000_010_000.0;
+        // Checked for the origin that asks, it is signed.
+        let signed: Value =
+            serde_json::from_str(&key.sign_sign_in(&message, origin, now).unwrap()).unwrap();
+        assert_eq!(signed["network"], "heartwood-devnet-v90");
+        assert!(crate::messages::verify_message(
+            message.as_bytes(),
+            signed["publicKey"].as_str().unwrap(),
+            signed["signature"].as_str().unwrap(),
+            signed["algorithm"].as_str().unwrap(),
+        ));
+        for (origin, now) in [
+            ("https://phish.example", now),
+            (origin, 1_790_001_000_000.0),
+        ] {
+            assert_eq!(
+                key.sign_sign_in(&message, origin, now).unwrap_err().code(),
+                "InvalidSignIn"
+            );
+        }
+        assert_eq!(
+            key.sign_sign_in(&message, origin, 0.5).unwrap_err().code(),
             "InvalidArgument"
         );
     }

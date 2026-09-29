@@ -303,6 +303,24 @@ pub(crate) async fn key_sign_message<R: Runtime>(
     state.with_key(webview.label(), key, |key| Ok(key.sign_message(&message)?))
 }
 
+/// A sign-in message's signature (JSON) with a key the plugin holds, for the website of `origin`
+/// (as the webview reports it) at `now_ms`: the message is checked against that origin and the
+/// key's public key and address first, as `signin_parse` checks it, and signed only if every check
+/// passes.
+#[command]
+pub(crate) async fn key_sign_sign_in<R: Runtime>(
+    webview: Webview<R>,
+    state: State<'_, Iceroot>,
+    key: u64,
+    message: String,
+    origin: String,
+    now_ms: f64,
+) -> Result<String> {
+    state.with_key(webview.label(), key, |key| {
+        Ok(key.sign_sign_in(&message, &origin, now_ms)?)
+    })
+}
+
 /// Wipes a key the plugin holds. Nothing happens for a key already released.
 #[command]
 pub(crate) async fn key_release<R: Runtime>(

@@ -29,7 +29,7 @@ No transaction or transfer is authorized.
 | Nonce | 64 lowercase hex digits. A signer uses 32 random bytes; a process that issues its own messages may choose it, for example to tie a proof to one request (see the claims draft). |
 | Issued at | A real UTC date and time with seconds, and optionally exactly three digits of milliseconds. A reader refuses a message issued more than five minutes ahead of its own clock. How old a proof may be is the rule of the process that asks for it. |
 
-A signer shows the whole message to the holder before signing, checks that it names the address of the key in use, and refuses every other text.
+A signer shows the whole message to the holder before signing, checks that it names the address of the key in use, and refuses every other text. A proof's signature is a plain message signature over the text, so any other signer of messages must refuse a proof's text: the SDK's message signing refuses text whose first line is the proof's title, and signs a proof only through `ownership::sign`.
 
 ## The signed proof
 

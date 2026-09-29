@@ -26,6 +26,7 @@ permissions = [
     "allow-key-from-legacy-passphrase",
     "allow-key-from-keystore",
     "allow-key-sign-message",
+    "allow-key-sign-sign-in",
     "allow-key-release",
     "allow-chain-load",
     "allow-chain-stage-at",

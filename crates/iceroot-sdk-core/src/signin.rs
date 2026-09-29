@@ -25,14 +25,21 @@
 //! times (expiry in the future, issued no more than 30 seconds ahead, at most 305 seconds apart
 //! and at most 305 seconds ago).
 //!
-//! The message is signed as any message is ([`crate::message::sign`]).
+//! A wallet signs it with [`sign`], which runs [`parse`] against the origin of the page that asks
+//! and the signing account's own public key and address, and signs only a message that passes.
+//! The signature is a message signature ([`crate::message`]), so a server checks it with
+//! [`crate::message::verify`]. A wallet never signs a sign-in message as a plain message from a
+//! generic prompt: a challenge that a page of another origin fetched for the holder's key and
+//! relayed would give that page a valid sign-in (see [`crate::message`]).
 
 use crate::address::Address;
 use crate::error::{Error, SignInProblem};
-use crate::message::compressed_key;
+use crate::keys::Account;
+use crate::message::{self, MessageSignature, compressed_key};
 use crate::profile::Profile;
 use crate::time::{format_rfc3339_seconds, parse_rfc3339_ms};
 use crate::utils::is_lower_hex;
+use heartwood_crypto::Aux;
 use heartwood_crypto::PublicKey;
 
 /// The first line.
@@ -246,6 +253,53 @@ pub fn parse(
     })
 }
 
+/// Sign the sign-in `message` with `account`, for the website of `origin` (the origin of the page
+/// that asks, as the browser reports it, never one the page claims), at the signer's time `now_ms`
+/// (milliseconds since 1970-01-01T00:00:00Z), with fresh randomness.
+///
+/// The message is first checked with [`parse`], expecting `origin` and the account's own public
+/// key and address, so a challenge made for another website or another identity, or one that has
+/// lapsed, is never signed. The origin is the caller's to report truthfully.
+///
+/// # Errors
+///
+/// [`Error::InvalidSignIn`] with the reason when a check fails; [`Error::UnsupportedOnNetwork`]
+/// without message signing, and [`Error::NetworkMismatch`] for an account of another profile.
+pub fn sign(
+    profile: &Profile,
+    account: &Account,
+    message: &str,
+    origin: &str,
+    now_ms: i64,
+) -> Result<MessageSignature, Error> {
+    sign_with(profile, account, message, origin, now_ms, Aux::random())
+}
+
+/// [`sign`] with the auxiliary randomness `aux`. Outside tests only [`Aux::random`] exists.
+pub fn sign_with(
+    profile: &Profile,
+    account: &Account,
+    message: &str,
+    origin: &str,
+    now_ms: i64,
+    aux: Aux,
+) -> Result<MessageSignature, Error> {
+    message::check_signer(profile, account)?;
+    let public_key = account.public_key().to_hex();
+    let address = account.address().to_string();
+    parse(
+        profile,
+        message,
+        &SignInExpected {
+            origin: Some(origin),
+            public_key: Some(&public_key),
+            address: Some(&address),
+        },
+        now_ms,
+    )?;
+    message::sign_with(profile, account, message, aux)
+}
+
 /// Whether `origin` is a secure web origin in its serialized form: `https://host[:port]`, or
 /// `http://` on `localhost`, `127.0.0.1` or `[::1]`, with a lowercase host, no path, no user
 /// name and no default port.
@@ -349,7 +403,7 @@ mod tests {
         Account::from_legacy_passphrase(&devnet(), "this is a top secret passphrase").unwrap()
     }
 
-    fn problem_of(result: Result<SignInChallenge, Error>) -> SignInProblem {
+    fn problem_of<T: std::fmt::Debug>(result: Result<T, Error>) -> SignInProblem {
         match result {
             Err(Error::InvalidSignIn { problem }) => problem,
             other => panic!("{other:?}"),
@@ -382,6 +436,48 @@ mod tests {
         assert_eq!(challenge.issued_at_ms, ISSUED * 1000);
         assert_eq!(challenge.expires_at_ms, (ISSUED + 300) * 1000);
         assert_eq!(challenge.uri, "https://validators.example/login");
+    }
+
+    #[test]
+    fn a_sign_in_message_is_signed_only_once_it_passes_every_check() {
+        let account = account();
+        let origin = "https://validators.example";
+        let text = message(&account, origin);
+        let now = ISSUED * 1000 + 1000;
+        let signed = sign(&devnet(), &account, &text, origin, now).unwrap();
+        assert_eq!(signed.public_key, account.public_key().to_hex());
+        assert_eq!(signed.network, "heartwood-devnet-v90");
+        assert!(crate::message::verify(&text, &signed));
+
+        // A page of another origin that fetched this challenge cannot have it signed.
+        assert_eq!(
+            problem_of(sign(
+                &devnet(),
+                &account,
+                &text,
+                "https://phish.example",
+                now
+            )),
+            SignInProblem::Mismatch
+        );
+        // Nor can a challenge for another identity be signed with this account.
+        let other =
+            Account::from_legacy_passphrase(&devnet(), "another top secret passphrase").unwrap();
+        assert_eq!(
+            problem_of(sign(&devnet(), &other, &text, origin, now)),
+            SignInProblem::Mismatch
+        );
+        assert_eq!(
+            problem_of(sign(&devnet(), &account, &text, origin, now + 400_000)),
+            SignInProblem::Expired
+        );
+        assert_eq!(
+            problem_of(sign(&devnet(), &account, "hello", origin, now)),
+            SignInProblem::Format
+        );
+        // An account of another profile is refused before the message is read.
+        let other_profile = Profile::devnet_pq(DevnetOptions::default());
+        assert!(sign(&other_profile, &account, &text, origin, now).is_err());
     }
 
     #[test]

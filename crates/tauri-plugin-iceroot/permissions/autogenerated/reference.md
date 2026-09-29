@@ -25,6 +25,7 @@ keys open from a keystore without it.
 - `allow-key-from-legacy-passphrase`
 - `allow-key-from-keystore`
 - `allow-key-sign-message`
+- `allow-key-sign-sign-in`
 - `allow-key-release`
 - `allow-chain-load`
 - `allow-chain-stage-at`
@@ -532,6 +533,32 @@ Enables the key_sign_message command without any pre-configured scope.
 <td>
 
 Denies the key_sign_message command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`iceroot:allow-key-sign-sign-in`
+
+</td>
+<td>
+
+Enables the key_sign_sign_in command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`iceroot:deny-key-sign-sign-in`
+
+</td>
+<td>
+
+Denies the key_sign_sign_in command without any pre-configured scope.
 
 </td>
 </tr>

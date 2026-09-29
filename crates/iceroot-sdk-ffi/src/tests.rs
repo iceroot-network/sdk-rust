@@ -196,3 +196,38 @@ fn the_host_reads_the_client_s_answer_limit() {
     );
     assert_eq!(refused["error"]["code"], "BadResponse");
 }
+#[test]
+fn a_sign_in_message_is_signed_only_once_it_passes_its_checks() {
+    let mut session = Session::default();
+    let key = call(
+        &mut session,
+        json!({"op":"keyLegacy","profile":profile(),"passphrase":"example"}),
+    )["result"]
+        .clone();
+    let origin = "https://validators.example";
+    let message = call(
+        &mut session,
+        json!({"op":"signinBuild","profile":profile(),"request":{"origin":origin,"publicKey":key["publicKey"],"nonce":"ab".repeat(32),"issuedAt":1_790_000_000,"expiresAt":1_790_000_300}}),
+    )["result"]
+        .clone();
+    let signed = call(
+        &mut session,
+        json!({"op":"signinSign","key":key["handle"],"message":message,"origin":origin,"now":1_790_000_010_000u64}),
+    );
+    let verified = call(
+        &mut session,
+        json!({"op":"verifyMessage","message":hex::encode(message.as_str().unwrap()),"publicKey":signed["result"]["publicKey"],"signature":signed["result"]["signature"],"algorithm":signed["result"]["algorithm"]}),
+    );
+    assert_eq!(verified, json!({"result":true}), "{signed}");
+    let phished = call(
+        &mut session,
+        json!({"op":"signinSign","key":key["handle"],"message":message,"origin":"https://phish.example","now":1_790_000_010_000u64}),
+    );
+    assert_eq!(phished["error"]["code"], "InvalidSignIn");
+    // An ownership proof's text is never signed as a message.
+    let proof = call(
+        &mut session,
+        json!({"op":"signMessage","key":key["handle"],"message":hex::encode("IceRoot migration ownership proof\nVersion: 1")}),
+    );
+    assert_eq!(proof["error"]["code"], "InvalidArgument");
+}

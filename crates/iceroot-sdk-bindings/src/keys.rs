@@ -9,6 +9,23 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::error::{BindingError, Result};
 
+/// A message signature in the JSON form of the TypeScript API.
+fn signature_json(signed: MessageSignature) -> String {
+    let MessageSignature {
+        public_key,
+        signature,
+        algorithm,
+        network,
+    } = signed;
+    json!({
+        "publicKey": public_key,
+        "signature": signature,
+        "algorithm": algorithm,
+        "network": network,
+    })
+    .to_string()
+}
+
 /// An account of the core: a secret key, its public key and address, and the profile it belongs
 /// to. The secret never leaves the binding's memory: a host receives public keys, addresses and
 /// signatures only.
@@ -165,7 +182,9 @@ impl Key {
     /// SHA-256, with fresh auxiliary randomness. JSON: `{ publicKey, signature, algorithm,
     /// network }`. The bytes must be UTF-8 text; any other bytes are refused with
     /// `InvalidArgument`, since they may be a transaction's, whose signature a message signature
-    /// would be.
+    /// would be. Text whose first line is an ownership proof's is refused with `InvalidArgument`
+    /// too: a proof is signed only by the proof keys of [`crate::ownership`]. A website's sign-in
+    /// message is signed with [`Key::sign_sign_in`], never from a generic message prompt.
     pub fn sign_message(&self, message: &[u8]) -> Result<String> {
         self.sign_message_with(message, Aux::random())
     }
@@ -173,19 +192,36 @@ impl Key {
     /// As [`Key::sign_message`], with the auxiliary randomness `aux` (the test seam of the
     /// feature `fixed-aux` passes fixed bytes).
     pub fn sign_message_with(&self, message: &[u8], aux: Aux) -> Result<String> {
-        let MessageSignature {
-            public_key,
-            signature,
-            algorithm,
-            network,
-        } = message::sign_bytes_with(&self.profile, self.account()?, message, aux)?;
-        Ok(json!({
-            "publicKey": public_key,
-            "signature": signature,
-            "algorithm": algorithm,
-            "network": network,
-        })
-        .to_string())
+        let signed = message::sign_bytes_with(&self.profile, self.account()?, message, aux)?;
+        Ok(signature_json(signed))
+    }
+
+    /// The signature of the sign-in `message`, for the website of `origin` (as the browser
+    /// reports it), at `now_ms` (milliseconds since 1970-01-01T00:00:00Z): the message is checked
+    /// against that origin and this key's public key and address first, and signed only if every
+    /// check passes. JSON as [`Key::sign_message`]; a refusal is `InvalidSignIn` with the reason.
+    pub fn sign_sign_in(&self, message: &str, origin: &str, now_ms: f64) -> Result<String> {
+        self.sign_sign_in_with(message, origin, now_ms, Aux::random())
+    }
+
+    /// As [`Key::sign_sign_in`], with the auxiliary randomness `aux`.
+    pub fn sign_sign_in_with(
+        &self,
+        message: &str,
+        origin: &str,
+        now_ms: f64,
+        aux: Aux,
+    ) -> Result<String> {
+        let now_ms = crate::signin::milliseconds(now_ms)?;
+        let signed = iceroot_sdk::signin::sign_with(
+            &self.profile,
+            self.account()?,
+            message,
+            origin,
+            now_ms,
+            aux,
+        )?;
+        Ok(signature_json(signed))
     }
 
     /// Wipes the secret key. Every later call that needs the key fails with `KeyReleased`.

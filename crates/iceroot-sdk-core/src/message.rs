@@ -16,6 +16,23 @@
 //! digest the caller chooses. The reference implementation signs only text, so nothing it signs is
 //! lost. A wallet still shows the holder the text it signs; from the post-quantum formats on the
 //! message domain carries its own tag, so that the separation holds whatever the bytes are.
+//!
+//! Two kinds of text are signatures of their own, and a plain message signature over either is
+//! valid for it:
+//!
+//! - An ownership proof ([`crate::ownership`]) is signed exactly as a message is, and a devnet
+//!   account imported from a Solar passphrase holds the Solar key itself. [`sign`] and
+//!   [`sign_bytes`] refuse, with [`Error::InvalidArgument`], text whose first line is a proof's
+//!   ([`crate::ownership::TITLE`]); a proof is made only by [`crate::ownership::sign`], or from a
+//!   signature made elsewhere.
+//! - A sign-in message ([`crate::signin`]) is the one text a wallet signs for a website, and it is
+//!   valid for the origin it names. A page of another origin can fetch a website's challenge for
+//!   the holder's key and relay it, so a wallet signs a sign-in message only with
+//!   [`crate::signin::sign`], which checks it against the origin of the page that asks (as the
+//!   wallet sees it) and the signing account first. A wallet never offers a website, or any
+//!   generic "sign this message" prompt, [`sign`] of text that parses as a sign-in message:
+//!   nothing here refuses one, since a wallet that checked it with [`crate::signin::parse`] may
+//!   still sign it with [`sign`].
 
 use heartwood_crypto::crypto::hash::sha256;
 use heartwood_crypto::crypto::sig::{self, SchemeId, Signature, SigningDomain};
@@ -56,6 +73,11 @@ pub struct MessageSignature {
 }
 
 /// Sign `message` with `account` on the network of `profile`, with fresh randomness.
+///
+/// # Errors
+///
+/// As [`sign_bytes`]: an ownership proof's text is refused with [`Error::InvalidArgument`] (see
+/// the module documentation).
 pub fn sign(
     profile: &Profile,
     account: &Account,
@@ -81,8 +103,9 @@ pub fn sign_with(
 /// # Errors
 ///
 /// [`Error::InvalidArgument`] when the bytes are not UTF-8 text: such bytes may be a transaction's
-/// (see the module documentation). [`Error::UnsupportedOnNetwork`] without message signing, and
-/// [`Error::NetworkMismatch`] for an account of another profile.
+/// (see the module documentation); and for an ownership proof's text, which is signed only as a
+/// proof. [`Error::UnsupportedOnNetwork`] without message signing, and [`Error::NetworkMismatch`]
+/// for an account of another profile.
 pub fn sign_bytes(
     profile: &Profile,
     account: &Account,
@@ -98,6 +121,18 @@ pub fn sign_bytes_with(
     message: &[u8],
     aux: Aux,
 ) -> Result<MessageSignature, Error> {
+    check_signer(profile, account)?;
+    let Ok(text) = std::str::from_utf8(message) else {
+        return Err(Error::InvalidArgument { reason: NOT_TEXT });
+    };
+    if is_proof(text) {
+        return Err(Error::InvalidArgument { reason: PROOF_TEXT });
+    }
+    signature_of(profile, account, text, aux)
+}
+
+/// `Ok` when `profile` signs messages and `account` is of that profile.
+pub(crate) fn check_signer(profile: &Profile, account: &Account) -> Result<(), Error> {
     profile.require(Capability::MessageSigning)?;
     if account.profile() != profile.id() {
         return Err(Error::NetworkMismatch {
@@ -107,10 +142,16 @@ pub fn sign_bytes_with(
             },
         });
     }
-    if !is_text(message) {
-        return Err(Error::InvalidArgument { reason: NOT_TEXT });
-    }
-    let signature = sign_digest(account, &sha256(message), aux)?;
+    Ok(())
+}
+
+fn signature_of(
+    profile: &Profile,
+    account: &Account,
+    text: &str,
+    aux: Aux,
+) -> Result<MessageSignature, Error> {
+    let signature = sign_digest(account, &sha256(text.as_bytes()), aux)?;
     Ok(MessageSignature {
         public_key: account.public_key().to_hex(),
         signature: signature.to_hex(),
@@ -121,6 +162,14 @@ pub fn sign_bytes_with(
 
 /// Why a message given as bytes is refused.
 const NOT_TEXT: &str = "a message is signed only as UTF-8 text";
+/// Why an ownership proof's text is refused as a message.
+const PROOF_TEXT: &str = "an ownership proof is signed only as a proof, never as a message";
+
+/// Whether `text` has an ownership proof's first line. [`crate::ownership::parse`] reads a proof
+/// only when its first line is exactly that, so no other text can pass as one.
+fn is_proof(text: &str) -> bool {
+    text.split('\n').next() == Some(crate::ownership::TITLE)
+}
 
 /// Whether a message's bytes are UTF-8 text. A transaction's bytes never are: they start with the
 /// header byte 0xff.
@@ -303,6 +352,38 @@ mod tests {
             ..bytes
         };
         assert!(!verify_bytes(&[0xff, 0x00], &over_digest));
+    }
+
+    #[test]
+    fn an_ownership_proof_is_never_signed_as_a_message() {
+        let profile = Profile::devnet(DevnetOptions::default());
+        // A devnet account imported from a Solar passphrase holds the Solar key itself.
+        let account =
+            Account::from_legacy_passphrase(&profile, "this is a top secret passphrase").unwrap();
+        let proof = [
+            crate::ownership::TITLE,
+            "Version: 1",
+            "Source network: solar-mainnet",
+            "Source address: SNAgA2XCRZDKfm5Vu9h4KR1bZw5xn9EiC3",
+        ]
+        .join("\n");
+        let refused = Error::InvalidArgument { reason: PROOF_TEXT };
+        for text in [proof.as_str(), crate::ownership::TITLE] {
+            assert_eq!(sign(&profile, &account, text).unwrap_err(), refused);
+            assert_eq!(
+                sign_bytes(&profile, &account, text.as_bytes()).unwrap_err(),
+                refused
+            );
+        }
+        // Text whose first line is not exactly a proof's is a message: no proof reads it.
+        for text in [
+            format!(" {proof}"),
+            format!("\n{proof}"),
+            format!("{}\r\nVersion: 1", crate::ownership::TITLE),
+            format!("Quoted: {}", crate::ownership::TITLE),
+        ] {
+            assert!(verify(&text, &sign(&profile, &account, &text).unwrap()));
+        }
     }
 
     #[test]

@@ -437,7 +437,8 @@ pub(crate) struct DraftInfo {
     /// Each amount of the summary (base units) as the review screen writes it, with the token's
     /// decimals.
     amounts: BTreeMap<String, String>,
-    /// The chain of a deserialized draft, which the plugin now holds.
+    /// The chain of a draft deserialized for a profile, which the plugin now holds; absent for a
+    /// draft built on a chain or read on a connection's chain.
     #[serde(skip_serializing_if = "Option::is_none")]
     chain: Option<ChainInfo>,
 }
@@ -510,16 +511,50 @@ pub(crate) async fn draft_build<R: Runtime>(
     Ok(draft_info(&draft, None))
 }
 
-/// A serialized draft for a profile, with its chain, which the plugin now holds.
+/// A serialized draft for a profile, with its chain, which the plugin now holds; or, with
+/// `session`, read on the chain of that connected network (see [`read_draft`]).
 #[command]
 pub(crate) async fn draft_deserialize<R: Runtime>(
     webview: Webview<R>,
     state: State<'_, Iceroot>,
     bytes: String,
     profile: String,
+    session: Option<u64>,
 ) -> Result<DraftInfo> {
-    let page = page_of(&state, &webview);
-    let draft = drafts::deserialize(&from_hex(&bytes, "the draft")?, &self::profile(&profile)?)?;
+    read_draft(
+        &state,
+        webview.label(),
+        webview.window().label(),
+        &bytes,
+        &profile,
+        session,
+    )
+}
+
+/// The serialized draft `bytes` (hex), for the webview `label` in the window `window`.
+///
+/// With `session`, a network the webview connected, the draft is read on that connection's
+/// chain, which a relay of the profile served: a draft built under another network
+/// configuration is refused with `NetworkMismatch` (`details.reason`: `configuration`), a fee at
+/// the floor reads `floor`, and the draft's chain is the connection's, so none is added.
+/// Otherwise the draft is read for `profile` under the configuration it carries, whose fee table
+/// the pinned network hash does not cover: such a fee reads `unverified`, and the draft's chain
+/// is held for the webview and described.
+pub(crate) fn read_draft(
+    state: &Iceroot,
+    label: &str,
+    window: &str,
+    bytes: &str,
+    profile: &str,
+    session: Option<u64>,
+) -> Result<DraftInfo> {
+    if let Some(session) = session {
+        let session = state.session(label, session)?;
+        let draft = drafts::deserialize_on(&from_hex(bytes, "the draft")?, &session.chain)?;
+        return Ok(draft_info(&draft, None));
+    }
+    let page = state.page(label, window);
+    let draft = drafts::deserialize(&from_hex(bytes, "the draft")?, &self::profile(profile)?)?;
     let chain = Arc::new(draft.chain().clone());
     let id = state.add_chain(&page, Arc::clone(&chain))?;
     Ok(draft_info(&draft, Some(chain_info(id, &chain))))

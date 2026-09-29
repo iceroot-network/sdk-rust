@@ -36,9 +36,19 @@ pub fn build(chain: &Chain, request: &str, facts: &str) -> Result<Draft> {
 
 /// The draft in `bytes` (from [`Draft::serialize`]), for `profile`, whose network hash must be
 /// pinned. A draft for another profile or network is refused, and the summary is computed again
-/// from the transaction's own fields.
+/// from the transaction's own fields. With no chain of the reader's own, a fee that the draft
+/// calls the floor and that equals the floor of the configuration it carries reads `unverified`,
+/// never `floor` (see [`Draft::deserialize`]).
 pub fn deserialize(bytes: &[u8], profile: &Profile) -> Result<Draft> {
     Ok(Draft::deserialize(bytes, profile)?)
+}
+
+/// The draft in `bytes` (from [`Draft::serialize`]), read on `chain`, the chain of the reader's
+/// own connection: a draft built under another network configuration is refused with
+/// `NetworkMismatch` (`details.reason`: `configuration`), and the floor, the rules and the labels
+/// come from `chain`, so a fee at the floor reads `floor` (see [`Draft::deserialize_on`]).
+pub fn deserialize_on(bytes: &[u8], chain: &Chain) -> Result<Draft> {
+    Ok(Draft::deserialize_on(bytes, chain)?)
 }
 
 /// Everything a review screen shows, in JSON: `{ profile, networkByte, nethash, height, kind,
@@ -516,5 +526,37 @@ mod tests {
             (&described["fee"]["amount"], &described["fee"]["source"]),
             (&json!("0"), &json!("floor"))
         );
+    }
+
+    #[test]
+    fn a_fee_is_the_floor_only_on_the_reader_s_own_chain() {
+        let chain = devnet();
+        let key = Key::from_legacy_passphrase(&profile(), "sender".to_owned()).unwrap();
+        let vote = json!({ "operation": { "kind": "vote", "entries": [{ "validator": "a", "basisPoints": 10000 }] } }).to_string();
+        let draft = build(&chain, &vote, &facts(&key)).unwrap();
+        let fee = |draft: &Draft| {
+            let described: Value = serde_json::from_str(&summary(draft)).unwrap();
+            described["fee"].clone()
+        };
+        let floor = fee(&draft)["floor"].clone();
+        assert_eq!(fee(&draft)["source"], "floor");
+
+        // With the profile alone, the floor of the configuration the draft carries is unverified.
+        let bytes = draft.serialize();
+        let read = deserialize(&bytes, chain.profile()).unwrap();
+        assert_eq!(fee(&read)["source"], "unverified");
+        assert_eq!(fee(&read)["floor"], floor);
+        // On the reader's own chain it is the floor.
+        let read = deserialize_on(&bytes, &chain).unwrap();
+        assert_eq!(fee(&read), fee(&draft));
+
+        // A draft that carries a fee table of its own is refused there.
+        let text = String::from_utf8(bytes).unwrap();
+        let tampered = text.replace(r#""minFee":6173"#, r#""minFee":61730"#);
+        assert_ne!(tampered, text);
+        let refused = deserialize_on(tampered.as_bytes(), &chain).unwrap_err();
+        assert_eq!(refused.code(), "NetworkMismatch");
+        assert_eq!(refused.details()["reason"], "configuration");
+        assert!(deserialize(tampered.as_bytes(), chain.profile()).is_ok());
     }
 }

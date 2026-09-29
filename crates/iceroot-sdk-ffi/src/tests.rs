@@ -231,3 +231,62 @@ fn a_sign_in_message_is_signed_only_once_it_passes_its_checks() {
     );
     assert_eq!(proof["error"]["code"], "InvalidArgument");
 }
+#[test]
+fn a_draft_is_read_on_the_host_s_chain_when_the_host_gives_it() {
+    let mut session = Session::default();
+    let configuration: Value = serde_json::from_str(include_str!(
+        "../../iceroot-sdk-bindings/tests/data/devnet-configuration.json"
+    ))
+    .unwrap();
+    let key = call(
+        &mut session,
+        json!({"op":"keyLegacy","profile":profile(),"passphrase":"example"}),
+    )["result"]
+        .clone();
+    let pinned = call(
+        &mut session,
+        json!({"op":"chainInfo","profile":profile(),"configuration":configuration}),
+    )["result"]["profile"]
+        .clone();
+    let built = call(
+        &mut session,
+        json!({"op":"draftBuild","profile":pinned,"configuration":configuration,"request":{"operation":{"kind":"vote","entries":[{"validator":"a","basisPoints":10000}]}},"facts":{"sender":key["publicKey"],"nonce":"1","height":2}}),
+    )["result"]
+        .clone();
+    let fee = built["summary"]["fee"].clone();
+    assert_eq!(fee["source"], "floor");
+    let serialized = built["serialized"].clone();
+
+    // With the profile alone, the floor of the configuration the draft carries is unverified.
+    let read = call(
+        &mut session,
+        json!({"op":"draftRead","profile":pinned,"serialized":serialized}),
+    );
+    assert_eq!(read["result"]["fee"]["source"], "unverified", "{read}");
+    assert_eq!(read["result"]["fee"]["floor"], fee["floor"]);
+    // On the host's chain it is the floor.
+    let on_chain = call(
+        &mut session,
+        json!({"op":"draftRead","profile":pinned,"serialized":serialized,"configuration":configuration}),
+    );
+    assert_eq!(on_chain["result"]["fee"], fee, "{on_chain}");
+
+    // A draft that carries a fee table of its own is refused on the host's chain, to read or
+    // to sign.
+    let text = String::from_utf8(hex::decode(serialized.as_str().unwrap()).unwrap()).unwrap();
+    let tampered = hex::encode(text.replace(r#""minFee":6173"#, r#""minFee":61730"#));
+    assert_ne!(tampered, serialized.as_str().unwrap());
+    for request in [
+        json!({"op":"draftRead","profile":pinned,"serialized":tampered,"configuration":configuration}),
+        json!({"op":"draftSign","profile":pinned,"serialized":tampered,"configuration":configuration,"key":key["handle"]}),
+    ] {
+        let refused = call(&mut session, request);
+        assert_eq!(refused["error"]["code"], "NetworkMismatch", "{refused}");
+        assert_eq!(refused["error"]["details"]["reason"], "configuration");
+    }
+    let signed = call(
+        &mut session,
+        json!({"op":"draftSign","profile":pinned,"serialized":serialized,"configuration":configuration,"key":key["handle"]}),
+    );
+    assert_eq!(signed["result"]["verified"], true, "{signed}");
+}

@@ -929,6 +929,69 @@ mod tests {
         assert_eq!(error.code(), "NodeUnavailable");
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_draft_read_on_a_connection_is_judged_by_its_chain() {
+        use crate::commands::read_draft;
+        use crate::state::Iceroot;
+        use iceroot_sdk_bindings::draft as drafts;
+
+        let (relay, _) = recorded_relay().await;
+        let options: ConnectOptions = serde_json::from_str(r#"{"rateLimit":false}"#).unwrap();
+        let session = Arc::new(
+            Session::connect(&devnet(&relay), options)
+                .await
+                .unwrap()
+                .session,
+        );
+        let state = Iceroot::default();
+        let page = state.page("main", "main");
+        let (id, _) = state.add_session(&page, Arc::clone(&session)).unwrap();
+        let profile = iceroot_sdk_bindings::profile::to_json(session.chain.profile());
+        let key = iceroot_sdk_bindings::keys::Key::from_legacy_passphrase(
+            session.chain.profile(),
+            "sender".to_owned(),
+        )
+        .unwrap();
+        let facts = serde_json::json!({
+            "sender": crate::codec::to_hex(&key.public_key().unwrap()),
+            "nonce": "1",
+            "height": 81,
+        })
+        .to_string();
+        let vote = r#"{"operation":{"kind":"vote","entries":[{"validator":"genesis_1","basisPoints":10000}]}}"#;
+        let draft = drafts::build(&session.chain, vote, &facts).unwrap();
+        let bytes = crate::codec::to_hex(&draft.serialize());
+        let described = |info: &crate::commands::DraftInfo| {
+            let info = serde_json::to_value(info).unwrap();
+            let summary: serde_json::Value =
+                serde_json::from_str(info["summary"].as_str().unwrap()).unwrap();
+            (
+                summary["fee"]["source"].clone(),
+                info.get("chain").is_some(),
+            )
+        };
+
+        // For the profile alone, the floor the draft carries is unverified, and its chain held.
+        let read = read_draft(&state, "main", "main", &bytes, &profile, None).unwrap();
+        assert_eq!(described(&read), (serde_json::json!("unverified"), true));
+        // On the connection's chain, the floor is the floor, and the chain is the connection's.
+        let read = read_draft(&state, "main", "main", &bytes, &profile, Some(id)).unwrap();
+        assert_eq!(described(&read), (serde_json::json!("floor"), false));
+
+        // A draft that carries a fee table of its own is refused on the connection's chain.
+        let text = String::from_utf8(draft.serialize()).unwrap();
+        let tampered = text.replace(r#""minFee":6173"#, r#""minFee":61730"#);
+        assert_ne!(tampered, text);
+        let tampered = crate::codec::to_hex(tampered.as_bytes());
+        let refused =
+            read_draft(&state, "main", "main", &tampered, &profile, Some(id)).unwrap_err();
+        assert_eq!(refused.code(), "NetworkMismatch");
+        assert_eq!(refused.details()["reason"], "configuration");
+        // A network the webview did not connect is no chain to read on.
+        let other = read_draft(&state, "other", "main", &bytes, &profile, Some(id)).unwrap_err();
+        assert_eq!(other.code(), "InvalidArgument");
+    }
+
     /// A relay that answers every request with a 307 to `target`, and counts the requests.
     async fn redirecting_relay(target: String) -> (String, Arc<std::sync::Mutex<usize>>) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};

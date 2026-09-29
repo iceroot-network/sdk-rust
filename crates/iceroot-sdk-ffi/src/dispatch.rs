@@ -368,7 +368,17 @@ impl Session {
                 }
             }
             "draftRead" | "draftSign" => {
-                let d = b::draft::deserialize(&bytes(v, "serialized")?, &profile(v)?)?;
+                // With the host's connected chain (`configuration`), the draft is read on it: a
+                // draft built under another configuration is refused, and a fee at the floor is
+                // the floor. With the profile alone, such a fee is unverified.
+                let serialized = bytes(v, "serialized")?;
+                let d = match v.get("configuration") {
+                    None | Some(Value::Null) => b::draft::deserialize(&serialized, &profile(v)?)?,
+                    Some(_) => b::draft::deserialize_on(
+                        &serialized,
+                        &b::chain::load(&profile(v)?, &raw(v, "configuration")?)?,
+                    )?,
+                };
                 if text(v, "op")? == "draftRead" {
                     return parsed(b::draft::summary(&d));
                 }

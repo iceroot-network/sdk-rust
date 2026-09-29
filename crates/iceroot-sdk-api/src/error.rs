@@ -15,10 +15,11 @@ const MAX_DETAIL_CHARS: usize = 300;
 /// Every variant has a stable [`code`](ApiError::code) that the SDK's error model keeps.
 ///
 /// Text a node chose (the message and name of an error status, the value a decoder refuses) is
-/// kept to [`MAX_NODE_TEXT_CHARS`] characters (a decoder's explanation to 300), with control
-/// characters and characters that hide or reorder text written as escapes such as `\u{202e}`,
-/// and a node's own message is never part of the `Display` text: an application that shows an
-/// error's message shows no text a node wrote.
+/// kept to [`MAX_NODE_TEXT_CHARS`] characters (a decoder's explanation to 300), with control and
+/// format characters, line and paragraph separators and every space but the ASCII space (the
+/// Unicode categories Cc, Cf, Zl, Zp and Zs, which hide or reorder text) written as escapes such
+/// as `\u{202e}`, as the TypeScript and Go SDKs keep it, and a node's own message is never part of
+/// the `Display` text: an application that shows an error's message shows no text a node wrote.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ApiError {
@@ -134,13 +135,13 @@ pub(crate) fn node_text(text: &str) -> String {
     bounded(text, MAX_NODE_TEXT_CHARS)
 }
 
-/// `text` with control characters and characters that hide or reorder text written as escapes
-/// (`\u{202e}`), cut to at most `max` characters, the escapes included, and then ending with `…`.
+/// `text` with every [`hidden`] character written as an escape (`\u{202e}`), cut to at most `max`
+/// characters, the escapes included, and then ending with `…`.
 fn bounded(text: &str, max: usize) -> String {
     let mut out = String::with_capacity(text.len().min(max.saturating_mul(4)));
     let mut count = 0usize;
     for c in text.chars() {
-        let escaped = c.is_control() || hides_or_reorders(c);
+        let escaped = hidden(c);
         let width = if escaped {
             c.escape_unicode().count()
         } else {
@@ -160,19 +161,45 @@ fn bounded(text: &str, max: usize) -> String {
     out
 }
 
-/// Whether `c` is invisible or changes the order text is shown in: the Unicode bidirectional
-/// controls, zero-width characters and the line and paragraph separators.
-fn hides_or_reorders(c: char) -> bool {
-    matches!(
-        c,
-        '\u{061c}'
-            | '\u{200b}'..='\u{200f}'
-            | '\u{2028}'..='\u{202e}'
-            | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{2069}'
-            | '\u{feff}'
-    )
+/// Whether `c` hides or reorders text: a control character (the Unicode category Cc), a format
+/// character (Cf: the bidirectional controls, zero-width characters, the soft hyphen, tags and
+/// the like), a line or paragraph separator (Zl, Zp), or a space other than the ASCII space (Zs).
+/// These are the characters the TypeScript and Go SDKs escape in a node's text, as of Unicode 16.
+fn hidden(c: char) -> bool {
+    c.is_control()
+        || HIDDEN
+            .iter()
+            .any(|(first, last)| (*first..=*last).contains(&c))
 }
+
+/// The format characters (Cf), line and paragraph separators (Zl, Zp) and spaces other than the
+/// ASCII space (Zs) of Unicode 16, as ranges.
+const HIDDEN: [(char, char); 24] = [
+    ('\u{a0}', '\u{a0}'),
+    ('\u{ad}', '\u{ad}'),
+    ('\u{600}', '\u{605}'),
+    ('\u{61c}', '\u{61c}'),
+    ('\u{6dd}', '\u{6dd}'),
+    ('\u{70f}', '\u{70f}'),
+    ('\u{890}', '\u{891}'),
+    ('\u{8e2}', '\u{8e2}'),
+    ('\u{1680}', '\u{1680}'),
+    ('\u{180e}', '\u{180e}'),
+    ('\u{2000}', '\u{200f}'),
+    ('\u{2028}', '\u{202f}'),
+    ('\u{205f}', '\u{2064}'),
+    ('\u{2066}', '\u{206f}'),
+    ('\u{3000}', '\u{3000}'),
+    ('\u{feff}', '\u{feff}'),
+    ('\u{fff9}', '\u{fffb}'),
+    ('\u{110bd}', '\u{110bd}'),
+    ('\u{110cd}', '\u{110cd}'),
+    ('\u{13430}', '\u{1343f}'),
+    ('\u{1bca0}', '\u{1bca3}'),
+    ('\u{1d173}', '\u{1d17a}'),
+    ('\u{e0001}', '\u{e0001}'),
+    ('\u{e0020}', '\u{e007f}'),
+];
 
 #[cfg(test)]
 mod tests {

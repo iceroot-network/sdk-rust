@@ -103,3 +103,74 @@ fn a_refused_value_is_never_echoed_at_length() {
     assert!(detail.chars().count() <= 301, "{}", detail.chars().count());
     assert!(error.to_string().chars().count() < 400);
 }
+
+#[test]
+fn a_node_s_text_is_escaped_as_the_other_sdks_escape_it() {
+    // Control, format and separator characters, and every space but the ASCII space: what the
+    // TypeScript and Go SDKs escape in a node's text, so that all three keep the same text.
+    let hidden = [
+        '\u{0}',
+        '\u{1b}',
+        '\u{7f}',
+        '\u{85}',
+        '\u{ad}',
+        '\u{a0}',
+        '\u{600}',
+        '\u{61c}',
+        '\u{6dd}',
+        '\u{70f}',
+        '\u{890}',
+        '\u{8e2}',
+        '\u{1680}',
+        '\u{180e}',
+        '\u{2000}',
+        '\u{2003}',
+        '\u{200a}',
+        '\u{200b}',
+        '\u{200f}',
+        '\u{2028}',
+        '\u{2029}',
+        '\u{202a}',
+        '\u{202e}',
+        '\u{202f}',
+        '\u{205f}',
+        '\u{2060}',
+        '\u{2064}',
+        '\u{2066}',
+        '\u{206f}',
+        '\u{3000}',
+        '\u{feff}',
+        '\u{fff9}',
+        '\u{fffb}',
+        '\u{110bd}',
+        '\u{110cd}',
+        '\u{13430}',
+        '\u{1343f}',
+        '\u{1bca0}',
+        '\u{1bca3}',
+        '\u{1d173}',
+        '\u{1d17a}',
+        '\u{e0001}',
+        '\u{e0020}',
+        '\u{e007f}',
+    ];
+    // Letters, marks, symbols and the ASCII space stay as they are.
+    let shown = "Ñandú née 東京 ☃ a b\u{301}";
+    let call = SolarCompat::new(53).node_status();
+    for c in hidden {
+        let text = format!("x{c}y {shown}");
+        let body = json!({ "statusCode": 422, "error": "Unprocessable", "message": text });
+        let error = call
+            .decode(&Response::new(422, body.to_string()))
+            .unwrap_err();
+        let ApiError::Refused { message, .. } = error else {
+            panic!("{error:?}");
+        };
+        assert_eq!(
+            message,
+            format!("x\\u{{{:x}}}y {shown}", u32::from(c)),
+            "U+{:04X}",
+            u32::from(c)
+        );
+    }
+}

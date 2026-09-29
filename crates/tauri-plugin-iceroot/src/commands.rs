@@ -741,7 +741,9 @@ pub(crate) async fn net_connect<R: Runtime>(
 pub(crate) struct ReadAnswer {
     /// The answer, in the client's JSON.
     answer: String,
-    /// The node's height, as a decimal string.
+    /// The node's height, as a decimal string: that of its last status, or a higher one a
+    /// successful answer reported since. After a status read it may be lower than before, and
+    /// the page follows it down.
     height: String,
     /// The rules at the next block, when the height differs from the one the webview knew.
     #[serde(skip_serializing_if = "Option::is_none")]

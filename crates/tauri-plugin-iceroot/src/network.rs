@@ -170,8 +170,8 @@ pub struct Session {
     seats: u32,
     max_per_request: u32,
     max_bytes: u32,
-    /// The highest block height a relay of the session's chain reported, by a successful
-    /// answer's `X-Block-Height` or its status.
+    /// The node's height: the height of its last status, or the highest `X-Block-Height` a
+    /// successful answer of a relay of the session's chain reported since, when that is higher.
     height: AtomicU64,
 }
 
@@ -286,7 +286,9 @@ impl Session {
         })
     }
 
-    /// The highest block height the node reported so far; 0 before any.
+    /// The node's height: that of its last status, or a higher one that a successful answer's
+    /// `X-Block-Height` reported since; 0 before any. The status is the node's own word, so a
+    /// height an answer's header reported earlier gives way to it, even when it is lower.
     pub(crate) fn height(&self) -> u64 {
         self.height.load(Ordering::Relaxed)
     }
@@ -374,7 +376,8 @@ impl Session {
         if operation == "nodeStatus"
             && let Some(height) = status_height(&answer)
         {
-            self.height.fetch_max(height, Ordering::Relaxed);
+            // The node's own word, which a header's height, even this answer's, gives way to.
+            self.height.store(height, Ordering::Relaxed);
         }
         Ok(answer)
     }
@@ -1108,6 +1111,39 @@ mod tests {
                 serde_json::from_str(info["summary"].as_str().unwrap()).unwrap();
             assert_eq!(summary["fee"]["source"], source, "change at {change}");
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_node_s_status_corrects_a_height_an_answer_raised() {
+        let header_height = Arc::new(AtomicU64::new(80));
+        let (relay, _) = recorded_relay_with(Script {
+            header_height: Arc::clone(&header_height),
+            ..Script::default()
+        })
+        .await;
+        let options: ConnectOptions = serde_json::from_str(r#"{"rateLimit":false}"#).unwrap();
+        let session = Session::connect(&devnet(&relay), options)
+            .await
+            .unwrap()
+            .session;
+        assert_eq!(session.height(), 80);
+        // An answer that succeeds reports a height far ahead of the node's, as a relay may.
+        header_height.store(4_000_000_000, Ordering::Relaxed);
+        let account = r#"{"address":"dZ1W1GsDCSyhR148oMhuHy3PkhnnSGCqVn"}"#;
+        session.read("account", account).await.unwrap();
+        assert_eq!(session.height(), 4_000_000_000);
+        assert_eq!(session.next_height(), 4_000_000_001);
+        // The node's status is its own word: the height follows it down, even when the status
+        // answer's header still reports the height far ahead.
+        session.read("nodeStatus", "{}").await.unwrap();
+        assert_eq!(session.height(), 80);
+        // A later answer's height counts again once it is above the status's.
+        header_height.store(81, Ordering::Relaxed);
+        session.read("account", account).await.unwrap();
+        assert_eq!(session.height(), 81);
+        header_height.store(79, Ordering::Relaxed);
+        session.read("account", account).await.unwrap();
+        assert_eq!(session.height(), 81);
     }
 
     /// A relay that answers every request with a 307 to `target`, and counts the requests.

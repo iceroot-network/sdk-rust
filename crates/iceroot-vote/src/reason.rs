@@ -39,7 +39,9 @@ impl Dimension {
 }
 
 /// One reason a validator was picked or meets a mode's criteria, with the values the review
-/// screen shows. [`fmt::Display`] gives a plain English sentence.
+/// screen shows. [`fmt::Display`] gives a plain English sentence, on one line: a value the
+/// validator declared appears in quotes, written as Rust writes a string literal, with every space
+/// of a run of two or more ASCII spaces written as `\u{20}`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Reason {
     /// How the pick was drawn: at which step, among how many candidates, and with which weight
@@ -147,7 +149,8 @@ pub enum Reason {
     ChosenByHolder,
 }
 
-/// One criterion a validator fails. [`fmt::Display`] gives a plain English sentence.
+/// One criterion a validator fails. [`fmt::Display`] gives a plain English sentence, with a
+/// declared value written as in a [`Reason`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Shortfall {
     /// The validator is not in the snapshot any more: it is no longer registered, or a snapshot of
@@ -299,15 +302,28 @@ impl fmt::Display for PartsPerMillion {
     }
 }
 
-/// A value a validator declared, shown in quotes with control, invisible and direction
-/// characters escaped, so that it reads as the validator's statement and cannot rearrange the
-/// sentence around it.
+/// A value a validator declared, shown in quotes as Rust writes a string literal (control,
+/// invisible and direction characters, every space but the ASCII space, quotes and backslashes
+/// escaped), with every space of a run of two or more ASCII spaces written as `\u{20}`, so that
+/// it reads as the validator's statement and cannot rearrange the sentence around it, nor set
+/// text apart with blank space in a renderer that wraps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Declared<'a>(&'a str);
 
 impl fmt::Display for Declared<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.0)
+        // The escaped form holds an ASCII space only where the value has one.
+        let quoted = format!("{:?}", self.0);
+        let mut rest = quoted.as_str();
+        while let Some(start) = rest.find("  ") {
+            let run = rest[start..].len() - rest[start..].trim_start_matches(' ').len();
+            f.write_str(&rest[..start])?;
+            for _ in 0..run {
+                f.write_str("\\u{20}")?;
+            }
+            rest = &rest[start + run..];
+        }
+        f.write_str(rest)
     }
 }
 
@@ -831,6 +847,46 @@ mod tests {
         assert_eq!(
             group(Dimension::Operator, "Ñandú Nodes"),
             "Shares operator \"Ñandú Nodes\" with 1 earlier pick"
+        );
+    }
+
+    #[test]
+    fn runs_of_spaces_in_declared_values_are_escaped() {
+        let group = |value: &str| {
+            Reason::Group {
+                dimension: Dimension::Operator,
+                value: Some(value.to_owned()),
+                earlier_picks: 1,
+            }
+            .to_string()
+        };
+        // A run of spaces would push the text after it onto what looks like a line of its own in
+        // a renderer that wraps; each of its spaces is written as an escape.
+        let padded = group(&format!("Nodes{}Forged 100.00 %", " ".repeat(300)));
+        assert_eq!(
+            padded,
+            format!(
+                "Shares operator \"Nodes{}Forged 100.00 %\" with 1 earlier pick",
+                "\\u{20}".repeat(300)
+            )
+        );
+        assert!(!padded.contains("  "), "{padded}");
+        assert_eq!(
+            group("a  b "),
+            "Shares operator \"a\\u{20}\\u{20}b \" with 1 earlier pick"
+        );
+        // Wide and invisible spaces are escaped too, and single spaces between words stay.
+        assert_eq!(
+            group("a\u{2003}\u{3000}b c"),
+            "Shares operator \"a\\u{2003}\\u{3000}b c\" with 1 earlier pick"
+        );
+        assert_eq!(
+            Shortfall::OperatorCap {
+                operator: Some("Frost   line".to_owned()),
+                maximum: 2
+            }
+            .to_string(),
+            "More than 2 picks from operator \"Frost\\u{20}\\u{20}\\u{20}line\""
         );
     }
 }

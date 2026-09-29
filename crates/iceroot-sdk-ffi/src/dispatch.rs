@@ -1,7 +1,9 @@
+use iceroot_sdk::api::{Backoff, MAX_RESPONSE_BYTES};
 use iceroot_sdk::{Aux, Profile};
 use iceroot_sdk_bindings::{self as b, BindingError, Result, keys::Key};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+use std::time::Duration;
 use zeroize::{Zeroize, Zeroizing};
 
 /// An isolated set of opaque keys. Calls must be serialized by the host.
@@ -41,6 +43,10 @@ fn secret_bytes(v: &Value, name: &str) -> Result<Zeroizing<Vec<u8>>> {
 }
 fn raw(v: &Value, name: &str) -> Result<String> {
     Ok(field(v, name)?.to_string())
+}
+/// A wait in whole milliseconds.
+fn milliseconds(wait: Duration) -> u64 {
+    u64::try_from(wait.as_millis()).unwrap_or(u64::MAX)
 }
 fn parsed(s: String) -> Result<Value> {
     serde_json::from_str(&s).map_err(|_| BindingError::argument("invalid JSON response"))
@@ -261,6 +267,23 @@ impl Session {
                     .ok_or_else(|| BindingError::argument("now must be milliseconds"))?,
             )?),
             "relay" => Ok(json!(b::api::check_relay(text(v, "url")?)?)),
+            // The host's transport keeps to the client's bounds: it reads at most
+            // `maxResponseBytes` of an answer, and waits after HTTP 429 as `backoffDelay` says.
+            "transportLimits" => Ok(json!({
+                "maxResponseBytes": MAX_RESPONSE_BYTES,
+                "maxRetryAfterMs": milliseconds(Backoff::MAX_RETRY_AFTER),
+            })),
+            "backoffDelay" => {
+                let retry_after = match v.get("retryAfterMs") {
+                    None | Some(Value::Null) => None,
+                    Some(ms) => Some(Duration::from_millis(ms.as_u64().ok_or_else(|| {
+                        BindingError::argument("retryAfterMs must be whole milliseconds")
+                    })?)),
+                };
+                Ok(Backoff::default()
+                    .delay(number(v, "attempt")?, retry_after)
+                    .map_or(Value::Null, |wait| json!(milliseconds(wait))))
+            }
             "apiPrepare" | "apiDecode" => {
                 let call = b::api::PreparedCall::prepare(
                     number(v, "seats")?,

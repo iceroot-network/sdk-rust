@@ -11,6 +11,15 @@ The exports the Go SDK calls. [sdk-go](https://github.com/iceroot-network/sdk-go
 
 The checks of a profile against the chain a node serves stay in Rust. `Session::call` runs the same dispatcher natively, and the `json` example reads one request per line and writes one answer per line, for the Go SDK's differential tests against native Rust.
 
+## The host's transport
+
+The module performs no input or output, so the bounds of the node API client's transport are the host's to keep, as they are `HttpClient`'s in Rust and the `fetch` transport's in TypeScript. The Go SDK's transport must keep them:
+
+- It reads at most `maxResponseBytes` (8 MiB) of an answer, through a reader limited to one byte more, and never decompresses it: a relay that declares or sends a longer body is unavailable, like a relay that cannot be reached, and the next relay is tried. `apiDecode` refuses a longer body with `BadResponse` as well, but only once the host has read it and sent it in, so that check does not bound the host's memory.
+- After HTTP 429 it asks `backoffDelay` for the wait (`attempt` from 0, and `retryAfterMs` from the error's `retryAfterSeconds` when the node sent one). A `null` answer means the relay's retries are spent or the node asked for more than `maxRetryAfterMs` (one minute): the host tries the next relay instead of waiting, and reports `RateLimited` after the last one.
+
+`transportLimits` gives both bounds, so the host reads them from the module rather than repeating them.
+
 ## Building
 
 ```sh

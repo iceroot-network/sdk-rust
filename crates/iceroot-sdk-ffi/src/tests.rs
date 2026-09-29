@@ -139,3 +139,60 @@ fn a_password_change_keeps_to_a_lowered_memory_ceiling() {
     );
     assert!(changed["result"].is_string(), "{changed}");
 }
+#[test]
+fn the_host_waits_after_429_as_the_client_does() {
+    let mut session = Session::default();
+    let mut delay = |mut request: Value| {
+        request["op"] = json!("backoffDelay");
+        call(&mut session, request)
+    };
+    // 2 s doubling up to 30 s, three retries, or the node's longer Retry-After up to a minute.
+    for (request, wait) in [
+        (json!({"attempt":0}), json!(2000)),
+        (json!({"attempt":1}), json!(4000)),
+        (json!({"attempt":2,"retryAfterMs":null}), json!(8000)),
+        (json!({"attempt":1,"retryAfterMs":9000}), json!(9000)),
+        (json!({"attempt":0,"retryAfterMs":60000}), json!(60000)),
+        // Retries spent, or a longer wait asked for: the host tries the next relay instead.
+        (json!({"attempt":3}), Value::Null),
+        (json!({"attempt":0,"retryAfterMs":60001}), Value::Null),
+        (
+            json!({"attempt":0,"retryAfterMs":3_000_000_000_000u64}),
+            Value::Null,
+        ),
+    ] {
+        let answer = delay(request.clone());
+        assert_eq!(answer, json!({"result":wait}), "{request}");
+    }
+    for request in [
+        json!({}),
+        json!({"attempt":-1}),
+        json!({"attempt":0,"retryAfterMs":"5"}),
+        json!({"attempt":0,"retryAfterMs":1.5}),
+    ] {
+        assert_eq!(
+            delay(request.clone())["error"]["code"],
+            "InvalidArgument",
+            "{request}"
+        );
+    }
+}
+#[test]
+fn the_host_reads_the_client_s_answer_limit() {
+    let mut session = Session::default();
+    let limits = call(&mut session, json!({"op":"transportLimits"}));
+    assert_eq!(
+        limits,
+        json!({"result":{"maxResponseBytes":8_388_608,"maxRetryAfterMs":60_000}})
+    );
+    // An answer the host read past the limit is refused when decoded too.
+    let body = format!(
+        "{{\"data\":{{\"synced\":true,\"now\":1,\"blocksCount\":0,\"timestamp\":1}},\"pad\":\"{}\"}}",
+        "x".repeat(8 * 1024 * 1024)
+    );
+    let refused = call(
+        &mut session,
+        json!({"op":"apiDecode","seats":53,"operation":"nodeStatus","args":{},"status":200,"headers":[],"body":body}),
+    );
+    assert_eq!(refused["error"]["code"], "BadResponse");
+}

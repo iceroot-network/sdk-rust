@@ -689,12 +689,6 @@ mod tests {
             call.decode(200, "[]", b"{").unwrap_err().code(),
             "BadResponse"
         );
-        // A body longer than the client reads is refused before it is copied or parsed.
-        let long = vec![b' '; iceroot_sdk::api::MAX_RESPONSE_BYTES + 1];
-        assert_eq!(
-            call.decode(200, "[]", &long).unwrap_err().code(),
-            "BadResponse"
-        );
         for headers in ["{", "[[1,2]]", r#"[["a"]]"#, "{}"] {
             assert_eq!(
                 call.decode(200, headers, b"{}").unwrap_err().code(),
@@ -702,6 +696,37 @@ mod tests {
                 "{headers}"
             );
         }
+    }
+
+    #[test]
+    fn an_answer_longer_than_the_client_reads_is_refused_before_it_is_read() {
+        use iceroot_sdk::api::MAX_RESPONSE_BYTES;
+        // A node status that parses, padded with a field the decoder ignores to `size` bytes.
+        let padded = |size: usize| {
+            let head =
+                r#"{"data":{"synced":true,"now":80,"blocksCount":0,"timestamp":656},"pad":""#;
+            format!("{head}{}\"}}", "x".repeat(size - head.len() - 2))
+        };
+        let call = PreparedCall::prepare(53, "nodeStatus", "{}").unwrap();
+        let fits = padded(MAX_RESPONSE_BYTES);
+        assert_eq!(fits.len(), MAX_RESPONSE_BYTES);
+        let status: Value =
+            serde_json::from_str(&call.decode(200, "[]", fits.as_bytes()).unwrap()).unwrap();
+        assert_eq!(status["height"], "80");
+
+        let long = padded(MAX_RESPONSE_BYTES + 1);
+        let detail = format!(
+            "the answer is {} bytes; at most {MAX_RESPONSE_BYTES} are read",
+            MAX_RESPONSE_BYTES + 1
+        );
+        let error = call.decode(200, "[]", long.as_bytes()).unwrap_err();
+        assert_eq!(error.code(), "BadResponse");
+        assert!(error.message().contains(&detail), "{}", error.message());
+        // The length is checked before anything else of the answer is read: headers that are not
+        // `[name, value]` pairs are not looked at.
+        let error = response(200, "{", long.as_bytes()).unwrap_err();
+        assert_eq!(error.code(), "BadResponse");
+        assert!(error.message().contains(&detail), "{}", error.message());
     }
 
     fn signed(nonce: u64) -> SignedTransaction {

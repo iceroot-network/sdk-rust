@@ -12,7 +12,10 @@
 //! relay is asked for its node configuration before its first use, and a relay whose
 //! configuration names another network hash or byte is never asked anything else by that client:
 //! load the chain from a relay first, then send through a client with the chain's identity
-//! (`Chain::relay_identity` in the core).
+//! (`Chain::relay_identity` in the core). A client of more than one relay must be given it. The
+//! other hosts of the SDK (the TypeScript package, the Tauri plugin and the Go SDK) check every
+//! relay this way whatever the application does; this client checks only when given the
+//! identity, and its default options give none.
 //!
 //! Requests go to the relays and nowhere else: the client never follows a redirect (the node API
 //! does not redirect), and a relay that answers with one is skipped like a relay that cannot be
@@ -82,7 +85,8 @@ pub struct HttpOptions {
     /// configuration before the relay's first use: a relay that names another network hash or
     /// byte is skipped for the client's lifetime, and one that cannot be checked now (it cannot be
     /// reached, or its answer is refused) is skipped this time and checked again on the next
-    /// request. Default: none, and every relay is used as it answers.
+    /// request. Default: none, and every relay is used as it answers, so set it on every client
+    /// of more than one relay: without it a failover can reach a relay of another chain.
     ///
     /// ```no_run
     /// use iceroot_sdk_api::{RelayIdentity, HttpClient, HttpOptions, Relay};
@@ -152,7 +156,8 @@ const SAME_CHAIN: u8 = 1;
 const OTHER_CHAIN: u8 = 2;
 
 impl HttpClient {
-    /// A client for `relays`, tried in order, with default options.
+    /// A client for `relays`, tried in order, with default options, which check no relay's chain.
+    /// For more than one relay, use [`HttpClient::with_options`] with [`HttpOptions::identity`].
     ///
     /// # Errors
     ///

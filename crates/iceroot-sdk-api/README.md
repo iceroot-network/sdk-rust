@@ -45,6 +45,26 @@ Every transport keeps the same bounds: it reads at most `MAX_RESPONSE_BYTES` (8 
 
 `HttpClient` sends calls with reqwest (rustls) to a list of relays: reads go to the first relay that answers, 429 is retried after the backoff (a relay whose retries are spent, or that asks for more than a minute, is skipped), and requests keep to the request budget. An answer is read up to `MAX_RESPONSE_BYTES` (8 MiB) and never decompressed; a relay that declares or sends more is skipped like one that cannot be reached. Every decoder also refuses a longer body with `BadResponse` before parsing it, whatever transport received it. `HttpOptions::headers` adds headers to every request, for a relay behind a proxy that asks for a token; their values never appear in the client's `Debug` output. The relays are not assumed to serve one chain: without `HttpOptions::identity` a request goes to whichever relay answers, so a failover can reach a relay of another chain. With it (`Chain::relay_identity` of a chain loaded from a relay, in the core), each relay is asked for its node configuration before its first use, a relay that names another network hash or byte is never asked anything else by that client, and one that cannot be checked now is skipped and checked again on the next request. It is available on native targets only; a WebAssembly build never contains reqwest, hyper or tokio.
 
+A client of more than one relay must be given the identity. The TypeScript package, the Tauri plugin and the Go SDK check every relay whatever the application does; `HttpClient` checks only with `HttpOptions::identity`, and its default options set none. Load the chain first, checking the node's configuration against it since any relay may have answered, then send everything else through a client with the chain's identity. With the `iceroot-sdk` crate:
+
+```rust,no_run
+use iceroot_sdk::api::{HttpClient, HttpOptions, Relay, SolarCompat};
+use iceroot_sdk::{Chain, Error, Profile};
+
+async fn connect(profile: &Profile) -> Result<(Chain, SolarCompat, HttpClient), Error> {
+    let relays = profile.endpoints().relays.iter().map(|relay| Relay::parse(relay)).collect::<Result<Vec<_>, _>>()?;
+    // Loading the chain: any relay may answer, so the node's configuration is checked against it.
+    let loader = HttpClient::new(relays.clone())?;
+    let configuration = loader.send(&SolarCompat::new(0).node_configuration()).await?;
+    let api = SolarCompat::for_configuration(&configuration);
+    let chain = Chain::from_node(profile, &loader.send(&api.crypto_configuration()).await?)?;
+    chain.check_node(&configuration)?;
+    // Everything else: each relay is checked to serve this chain before its first use.
+    let options = HttpOptions { identity: Some(chain.relay_identity()), ..HttpOptions::default() };
+    Ok((chain, api, HttpClient::with_options(relays, options)?))
+}
+```
+
 ```rust,no_run
 use iceroot_sdk_api::{HttpClient, Relay, SolarCompat};
 

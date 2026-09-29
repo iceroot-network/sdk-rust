@@ -17,7 +17,7 @@ use iceroot_sdk_api::{
     SolarCompat, SubmitStatus, SubmitTx,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpSocket};
 
 const STATUS: &str = r#"{"data":{"synced":true,"now":42,"blocksCount":0,"timestamp":330}}"#;
 const TOO_MANY: &str =
@@ -100,12 +100,13 @@ async fn redirecting_relay(status: u16, target: String) -> (String, Arc<Mutex<Ve
     (url, seen)
 }
 
-/// A relay URL on which nothing listens.
-async fn dead_relay() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("http://{}/api", listener.local_addr().unwrap());
-    drop(listener);
-    url
+/// A relay URL on which nothing listens: every connection is refused. The port is held by a
+/// socket that never listens, so a server of another test cannot take it while the socket lives.
+fn dead_relay() -> (String, TcpSocket) {
+    let socket = TcpSocket::new_v4().unwrap();
+    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let url = format!("http://{}/api", socket.local_addr().unwrap());
+    (url, socket)
 }
 
 fn options(retries: u32) -> HttpOptions {
@@ -123,7 +124,7 @@ fn options(retries: u32) -> HttpOptions {
 
 #[tokio::test(flavor = "current_thread")]
 async fn fails_over_and_retries_after_429() {
-    let dead = dead_relay().await;
+    let (dead, _held) = dead_relay();
     // A client of two relays checks the live relay's chain before its first use.
     let (live, seen) = server(vec![
         (200, configuration(RECORDED_NETHASH)),
@@ -153,7 +154,7 @@ async fn fails_over_and_retries_after_429() {
 async fn exchanges_a_request_with_the_host_s_own_decoder() {
     // A host that keeps its calls in another form (the SDK's bindings write each answer as
     // JSON) gets the same failover and backoff; its decoder sees every answer, the 429 included.
-    let dead = dead_relay().await;
+    let (dead, _held) = dead_relay();
     let (live, seen) = server(vec![
         (200, configuration(RECORDED_NETHASH)),
         (429, TOO_MANY),
@@ -194,9 +195,8 @@ async fn reports_the_rate_limit_when_retries_are_spent() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn no_relay_answers() {
-    let client =
-        HttpClient::with_options(vec![Relay::parse(&dead_relay().await).unwrap()], options(0))
-            .unwrap();
+    let (dead, _held) = dead_relay();
+    let client = HttpClient::with_options(vec![Relay::parse(&dead).unwrap()], options(0)).unwrap();
     let error = client
         .send(&SolarCompat::new(53).node_status())
         .await
@@ -519,7 +519,7 @@ fn lines(seen: &Mutex<Vec<String>>) -> Vec<String> {
 
 #[tokio::test(flavor = "current_thread")]
 async fn with_an_identity_a_relay_is_used_only_once_it_serves_the_chain() {
-    let dead = dead_relay().await;
+    let (dead, _held) = dead_relay();
     let other_chain = "ab".repeat(32);
     let (other, asked) = server(vec![(200, configuration(&other_chain))]).await;
     let (same, served) = server(vec![
@@ -717,7 +717,7 @@ async fn a_client_of_more_than_one_relay_keeps_to_the_chain_of_the_first_relay_i
 
 #[tokio::test(flavor = "current_thread")]
 async fn a_client_learns_the_chain_from_the_first_relay_that_answers_unless_given_it() {
-    let dead = dead_relay().await;
+    let (dead, _held) = dead_relay();
     let other_chain = "ab".repeat(32);
     let (first, first_asked) = chain_relay(RECORDED_NETHASH, (200, STATUS)).await;
     let (other, other_asked) = chain_relay(&other_chain, (200, STATUS)).await;

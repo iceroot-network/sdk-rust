@@ -160,8 +160,10 @@ pub enum Allowance {
 /// chain it reads, and any other relay is asked for its node configuration, which must name the
 /// same network hash and byte, before it is asked anything else. A relay of another chain (a
 /// relay of a devnet generated again, say) is never asked again in the session, so no read,
-/// draft fact or submission silently switches chain when a relay fails over. Each relay keeps
-/// its own request allowance, as a node keeps one per client.
+/// draft fact or submission silently switches chain when a relay fails over. A relay whose check
+/// fails for another reason (it cannot be reached, or its answer is refused) is skipped and
+/// checked again on the next call. Each relay keeps its own request allowance, as a node keeps
+/// one per client.
 pub struct Session {
     pub(crate) chain: Arc<Chain>,
     relays: Vec<RelayClient>,
@@ -223,8 +225,11 @@ enum Unusable {
     /// It did not answer, or not in time, or refused for its rate limit or a server error:
     /// another relay may answer.
     Unavailable(ApiError),
-    /// It answered, and the answer is refused.
+    /// It answered, and the answer is refused: a client error status, or an answer that does not
+    /// have the documented shape.
     Refused(Error),
+    /// It serves another chain: its node configuration names another network hash or byte.
+    OtherChain(Error),
 }
 
 impl Session {
@@ -257,7 +262,7 @@ impl Session {
                     break;
                 }
                 Err(Unusable::Unavailable(error)) => last = error.into(),
-                Err(Unusable::Refused(error)) => return Err(error),
+                Err(Unusable::Refused(error) | Unusable::OtherChain(error)) => return Err(error),
             }
         }
         let Some((chain, node)) = found else {
@@ -292,7 +297,9 @@ impl Session {
 
     /// Sends `request` to the first relay of the session's chain that answers, and decodes the
     /// answer with `decode`. A relay not checked yet is checked first; one that serves another
-    /// chain is skipped for the rest of the session.
+    /// chain is skipped for the rest of the session, and one whose check fails otherwise (it
+    /// cannot be reached, or its answer is refused) is skipped this time and checked again on the
+    /// next call.
     async fn exchange<T>(
         &self,
         request: &Request,
@@ -310,6 +317,10 @@ impl Session {
                         continue;
                     }
                     Err(Unusable::Refused(error)) => {
+                        last = Some(error);
+                        continue;
+                    }
+                    Err(Unusable::OtherChain(error)) => {
                         relay.mark(OTHER_CHAIN);
                         last = Some(error);
                         continue;
@@ -345,9 +356,7 @@ impl Session {
             .exchange(call.request(), |response| call.decode(response))
             .await
             .map_err(unusable)?;
-        self.chain
-            .check_node(&node)
-            .map_err(|error| Unusable::Refused(error.into()))
+        self.chain.check_node(&node).map_err(other_chain)
     }
 
     /// Reads `operation` of the node API with its JSON `args`, as the WebAssembly module's
@@ -422,10 +431,18 @@ async fn first_contact(
         })
         .await
         .map_err(unusable)?;
-    chain
-        .check_node(&node)
-        .map_err(|error| Unusable::Refused(error.into()))?;
+    chain.check_node(&node).map_err(other_chain)?;
     Ok((chain, node))
+}
+
+/// A refusal of [`Chain::check_node`]: the relay serves another chain, which is what
+/// `NetworkMismatch` says. Any other refusal counts as a refused answer.
+fn other_chain(error: iceroot_sdk::Error) -> Unusable {
+    if matches!(error, iceroot_sdk::Error::NetworkMismatch { .. }) {
+        Unusable::OtherChain(error.into())
+    } else {
+        Unusable::Refused(error.into())
+    }
 }
 
 /// An error of the node API client, as a reason to try another relay or to stop.
@@ -662,6 +679,17 @@ mod tests {
         nethash: Option<String>,
         up: Arc<std::sync::atomic::AtomicBool>,
     ) -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
+        let refusing = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        recorded_relay_refusing(nethash, up, refusing).await
+    }
+
+    /// [`recorded_relay_serving`], answering every request with HTTP 404 while `refusing` is
+    /// true, as a misrouted proxy in front of the relay would.
+    async fn recorded_relay_refusing(
+        nethash: Option<String>,
+        up: Arc<std::sync::atomic::AtomicBool>,
+        refusing: Arc<std::sync::atomic::AtomicBool>,
+    ) -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         const RECORDED: &str = "c9b03ab996ef3ac216a2ac53eaee71118cbf7995fa44449a7fb7f94bbe18bcca";
         let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -712,6 +740,10 @@ mod tests {
                     entry["method"] == method && entry["path"].as_str() == Some(path.as_str())
                 });
                 let (status, body) = match entry {
+                    Some(_) if refusing.load(Ordering::Relaxed) => (
+                        404,
+                        r#"{"statusCode":404,"error":"Not Found","message":"none"}"#.to_owned(),
+                    ),
                     Some(entry) => (
                         entry["status"].as_u64().unwrap(),
                         std::fs::read_to_string(fixtures.join(entry["file"].as_str().unwrap()))
@@ -835,6 +867,42 @@ mod tests {
         // Back up, the first relay answers again.
         up.store(true, Ordering::Relaxed);
         session.read("nodeStatus", "{}").await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_relay_whose_check_fails_otherwise_is_checked_again() {
+        use std::sync::atomic::AtomicBool;
+        // The second relay serves the session's chain, but its check is refused at first, as
+        // behind a proxy that misroutes a request for a while.
+        let up = Arc::new(AtomicBool::new(true));
+        let (first, _) = recorded_relay_serving(None, Arc::clone(&up)).await;
+        let refusing = Arc::new(AtomicBool::new(true));
+        let (second, asked) =
+            recorded_relay_refusing(None, Arc::new(AtomicBool::new(true)), Arc::clone(&refusing))
+                .await;
+        let profile = iceroot_sdk_bindings::profile::from_json(&format!(
+            r#"{{"id":"devnet","backend":"solar-compat","api":{{"relays":["{first}","{second}"]}},"chain":{{"networkByte":90}},"keyScheme":"bip32-secp256k1"}}"#
+        ))
+        .unwrap();
+        let options: ConnectOptions = serde_json::from_str(r#"{"rateLimit":false}"#).unwrap();
+        let session = Session::connect(&profile, options).await.unwrap().session;
+
+        // The first relay goes down: the second's check is refused, and that refusal reported.
+        up.store(false, Ordering::Relaxed);
+        let error = session.read("nodeStatus", "{}").await.unwrap_err();
+        assert_eq!(error.code(), "NotFound");
+        // Once it answers again, it is checked again and used: a refusal other than another
+        // chain does not take a relay out of the session.
+        refusing.store(false, Ordering::Relaxed);
+        session.read("nodeStatus", "{}").await.unwrap();
+        assert_eq!(
+            *asked.lock().unwrap(),
+            [
+                "GET /node/configuration",
+                "GET /node/configuration",
+                "GET /node/status"
+            ]
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

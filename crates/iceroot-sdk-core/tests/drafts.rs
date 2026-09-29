@@ -469,12 +469,18 @@ fn a_serialized_fee_source_is_checked() {
     let form = |draft: &Draft| String::from_utf8(draft.serialize()).unwrap();
     let floor = Amount::from(1_000_026u64);
 
-    // The floor stays the floor, and an explicit fee stays explicit, even at the floor.
-    for (fee, source) in [
-        (FeeChoice::Minimum, FeeSource::Floor),
-        (FeeChoice::Exact(floor), FeeSource::Explicit),
+    // Read on the chain the reader holds, the floor stays the floor, and an explicit fee stays
+    // explicit, even at the floor. Read with the profile alone, the floor is unverified.
+    for (fee, source, unverified) in [
+        (FeeChoice::Minimum, FeeSource::Floor, FeeSource::Unverified),
+        (
+            FeeChoice::Exact(floor),
+            FeeSource::Explicit,
+            FeeSource::Explicit,
+        ),
         (
             FeeChoice::Exact(Amount::from(2_000_000u64)),
+            FeeSource::Explicit,
             FeeSource::Explicit,
         ),
         (
@@ -482,42 +488,82 @@ fn a_serialized_fee_source_is_checked() {
                 basis_points: 15_000,
             },
             FeeSource::Explicit,
+            FeeSource::Explicit,
         ),
     ] {
         let draft = with_fee(fee);
         assert_eq!(draft.fee().source, source, "{fee:?}");
+        let on_chain = Draft::deserialize_on(form(&draft).as_bytes(), chain()).unwrap();
+        assert_eq!(on_chain.summary(), draft.summary(), "{fee:?}");
         let again = Draft::deserialize(form(&draft).as_bytes(), profile).unwrap();
-        assert_eq!(again.summary(), draft.summary(), "{fee:?}");
+        let mut expected = draft.summary();
+        expected.fee.source = unverified;
+        assert_eq!(again.summary(), expected, "{fee:?}");
+        // Written again by a reader without a chain, the claim of the floor travels on.
+        let onward = Draft::deserialize_on(&again.serialize(), chain()).unwrap();
+        assert_eq!(onward.summary(), draft.summary(), "{fee:?}");
     }
 
     // A fee above the floor that the form calls the floor reads as explicit, beside the floor.
     let above = with_fee(FeeChoice::Exact(Amount::from(2_000_000u64)));
     let text = form(&above);
     assert!(text.contains(r#""source":"explicit""#), "{text}");
-    let claimed = text.replace(r#""source":"explicit""#, r#""source":"floor""#);
-    let shown = Draft::deserialize(claimed.as_bytes(), profile).unwrap();
-    assert_eq!(shown.fee().amount, Amount::from(2_000_000u64));
-    assert_eq!(shown.fee().source, FeeSource::Explicit);
-    assert_eq!(shown.fee().floor, Some(floor));
+    for claim in ["floor", "unverified"] {
+        let claimed = text.replace(r#""source":"explicit""#, &format!(r#""source":"{claim}""#));
+        for shown in [
+            Draft::deserialize(claimed.as_bytes(), profile).unwrap(),
+            Draft::deserialize_on(claimed.as_bytes(), chain()).unwrap(),
+        ] {
+            assert_eq!(shown.fee().amount, Amount::from(2_000_000u64));
+            assert_eq!(shown.fee().source, FeeSource::Explicit, "{claim}");
+            assert_eq!(shown.fee().floor, Some(floor));
+        }
+    }
 
-    // The floor in the form is never read; any source other than the floor reads as explicit.
+    // The floor in the form is never read; `unverified` claims the floor as `floor` does, and
+    // any other source reads as explicit.
     let minimum = form(&with_fee(FeeChoice::Minimum));
     let lowered = minimum.replace(r#""floor":"1000026""#, r#""floor":"1""#);
     assert_ne!(lowered, minimum);
     let again = Draft::deserialize(lowered.as_bytes(), profile).unwrap();
     assert_eq!(
         (again.fee().source, again.fee().floor),
+        (FeeSource::Unverified, Some(floor))
+    );
+    let again = Draft::deserialize_on(lowered.as_bytes(), chain()).unwrap();
+    assert_eq!(
+        (again.fee().source, again.fee().floor),
         (FeeSource::Floor, Some(floor))
     );
-    for claim in ["node-statistics", "cheapest", "explicit", ""] {
+    let unverified = minimum.replace(r#""source":"floor""#, r#""source":"unverified""#);
+    assert_ne!(unverified, minimum);
+    assert_eq!(
+        Draft::deserialize(unverified.as_bytes(), profile)
+            .unwrap()
+            .fee()
+            .source,
+        FeeSource::Unverified
+    );
+    assert_eq!(
+        Draft::deserialize_on(unverified.as_bytes(), chain())
+            .unwrap()
+            .fee()
+            .source,
+        FeeSource::Floor
+    );
+    for claim in ["node-statistics", "cheapest", "explicit", "Floor", ""] {
         let claimed = minimum.replace(r#""source":"floor""#, &format!(r#""source":"{claim}""#));
         assert_ne!(claimed, minimum);
-        let again = Draft::deserialize(claimed.as_bytes(), profile).unwrap();
-        assert_eq!(
-            (again.fee().amount, again.fee().source, again.fee().floor),
-            (floor, FeeSource::Explicit, Some(floor)),
-            "{claim}"
-        );
+        for again in [
+            Draft::deserialize(claimed.as_bytes(), profile).unwrap(),
+            Draft::deserialize_on(claimed.as_bytes(), chain()).unwrap(),
+        ] {
+            assert_eq!(
+                (again.fee().amount, again.fee().source, again.fee().floor),
+                (floor, FeeSource::Explicit, Some(floor)),
+                "{claim}"
+            );
+        }
     }
     // A form without a source is malformed.
     let unsourced = minimum.replace(r#""source":"floor","#, "");
@@ -525,6 +571,110 @@ fn a_serialized_fee_source_is_checked() {
     assert!(matches!(
         Draft::deserialize(unsourced.as_bytes(), profile),
         Err(Error::InvalidDraft { .. })
+    ));
+}
+
+/// The form of a transfer whose fee is ten times its floor, calling that fee the floor and
+/// carrying a fee table ten times the network's, under which the fee is the floor: the pinned
+/// network hash does not cover the milestones, so a builder can send such a form.
+fn a_form_with_its_own_fee_table() -> String {
+    let sender = phrase_account(0);
+    let recipient = phrase_account(1);
+    let raised = Draft::build(
+        chain(),
+        &DraftRequest {
+            operation: transfer(&recipient, 1),
+            memo: None,
+            fee: FeeChoice::Exact(Amount::from(10_000_260u64)),
+        },
+        &facts(&sender),
+    )
+    .unwrap();
+    // A 154-byte transfer: its floor is (85 + 77) × 6173 = 1,000,026.
+    assert_eq!(raised.fee().floor, Some(Amount::from(1_000_026u64)));
+    let form = String::from_utf8(raised.serialize()).unwrap();
+    let tables = form.matches(r#""minFee":6173"#).count();
+    assert!(tables > 0, "{form}");
+    let tampered = form
+        .replace(r#""source":"explicit""#, r#""source":"floor""#)
+        .replace(r#""minFee":6173"#, r#""minFee":61730"#);
+    assert_eq!(tampered.matches(r#""minFee":61730"#).count(), tables);
+    assert!(tampered.contains(r#""source":"floor""#));
+    tampered
+}
+
+#[test]
+fn a_draft_s_own_fee_table_never_makes_its_fee_the_floor() {
+    let tampered = a_form_with_its_own_fee_table();
+    let shown = Draft::deserialize(tampered.as_bytes(), chain().profile()).unwrap();
+    assert_eq!(shown.fee().amount, Amount::from(10_000_260u64));
+    // Read with the profile alone, the fee equals the floor of the form's own table, which
+    // nothing checks: it is unverified, never the floor. That floor is kept for display.
+    assert_eq!(shown.fee().source.as_str(), "unverified");
+    assert_eq!(shown.fee().floor, Some(Amount::from(10_000_260u64)));
+}
+
+#[test]
+fn a_draft_read_on_the_reader_s_chain_is_judged_by_that_chain() {
+    // Read on the chain the reader holds, a form with its own fee table is refused.
+    let tampered = a_form_with_its_own_fee_table();
+    assert_eq!(
+        Draft::deserialize_on(tampered.as_bytes(), chain()).unwrap_err(),
+        Error::NetworkMismatch {
+            problem: MismatchProblem::Configuration
+        }
+    );
+    // So is a form whose configuration differs in anything else, such as the token's name.
+    let sender = phrase_account(0);
+    let recipient = phrase_account(1);
+    let draft = build(&sender, transfer(&recipient, 1)).unwrap();
+    let mut form: serde_json::Value = serde_json::from_slice(&draft.serialize()).unwrap();
+    form["configuration"]["network"]["client"]["token"] = "dROOT two".into();
+    let renamed = serde_json::to_vec(&form).unwrap();
+    assert!(Draft::deserialize(&renamed, chain().profile()).is_ok());
+    assert_eq!(
+        Draft::deserialize_on(&renamed, chain()).unwrap_err(),
+        Error::NetworkMismatch {
+            problem: MismatchProblem::Configuration
+        }
+    );
+    // The same configuration in another layout or key order is the same configuration.
+    let mut reordered = serde_json::Map::new();
+    let network = form["configuration"]["network"]
+        .as_object()
+        .unwrap()
+        .clone();
+    for (key, value) in network.iter().rev() {
+        reordered.insert(key.clone(), value.clone());
+    }
+    form["configuration"]["network"] = serde_json::Value::Object(reordered);
+    form["configuration"]["network"]["client"]["token"] = chain().token().name.into();
+    let reordered = serde_json::to_vec_pretty(&form).unwrap();
+    let read = Draft::deserialize_on(&reordered, chain()).unwrap();
+    assert_eq!(read.summary(), draft.summary());
+    assert_eq!(read.fee().source, FeeSource::Floor);
+    assert_eq!(read.chain(), chain());
+    // Another chain's identity is refused as before.
+    let other = chain().profile().clone().with_id("devnet-2");
+    let elsewhere = Chain::from_parts(
+        &other,
+        &serde_json::to_string(&chain().network().to_json()).unwrap(),
+        &serde_json::to_string(
+            &chain()
+                .milestones()
+                .all()
+                .iter()
+                .map(|params| serde_json::Value::Object(params.as_json().clone()))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        Draft::deserialize_on(&draft.serialize(), &elsewhere),
+        Err(Error::NetworkMismatch {
+            problem: MismatchProblem::Profile { .. }
+        })
     ));
 }
 
@@ -660,7 +810,13 @@ fn serialized_drafts() {
     let profile = chain().profile();
 
     let again = Draft::deserialize(&bytes, profile).unwrap();
-    assert_eq!(again.summary(), draft.summary());
+    assert_eq!(
+        Draft::deserialize_on(&bytes, chain()).unwrap().summary(),
+        draft.summary()
+    );
+    let mut expected = draft.summary();
+    expected.fee.source = FeeSource::Unverified;
+    assert_eq!(again.summary(), expected);
     let signed = again.sign_with(&sender, None, AUX).unwrap();
     assert_eq!(
         signed.id(),

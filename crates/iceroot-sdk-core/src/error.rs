@@ -1014,16 +1014,22 @@ pub enum MismatchProblem {
     /// The profile has no pinned chain identity, so data made for a network cannot be matched to
     /// it.
     NotPinned,
+    /// A serialized draft carries another network configuration (network description or
+    /// milestones) than the chain it is read on: the same chain's identity, with other rules,
+    /// such as another fee table.
+    Configuration,
 }
 
 impl MismatchProblem {
-    /// A stable string for the problem: `network-byte`, `nethash`, `profile` or `not-pinned`.
+    /// A stable string for the problem: `network-byte`, `nethash`, `profile`, `not-pinned` or
+    /// `configuration`.
     pub const fn as_str(&self) -> &'static str {
         match self {
             MismatchProblem::NetworkByte { .. } => "network-byte",
             MismatchProblem::Nethash { .. } => "nethash",
             MismatchProblem::Profile { .. } => "profile",
             MismatchProblem::NotPinned => "not-pinned",
+            MismatchProblem::Configuration => "configuration",
         }
     }
 
@@ -1037,7 +1043,9 @@ impl MismatchProblem {
             | MismatchProblem::Profile { expected, actual } => {
                 json!({ "reason": reason, "expected": expected, "actual": actual })
             }
-            MismatchProblem::NotPinned => json!({ "reason": reason }),
+            MismatchProblem::NotPinned | MismatchProblem::Configuration => {
+                json!({ "reason": reason })
+            }
         }
     }
 }
@@ -1055,6 +1063,9 @@ impl fmt::Display for MismatchProblem {
                 write!(f, "made for profile {actual:?}, expected {expected:?}")
             }
             MismatchProblem::NotPinned => f.write_str("the profile has no pinned chain identity"),
+            MismatchProblem::Configuration => f.write_str(
+                "the configuration differs from the chain's (milestones or network description)",
+            ),
         }
     }
 }

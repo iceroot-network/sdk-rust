@@ -9,7 +9,10 @@
 //! A draft can be built where the network is and signed where the key is, such as a sandboxed
 //! page or another device: [`Draft::serialize`] writes it with the network's configuration, and
 //! [`Draft::deserialize`] reads it back against a profile, refuses another network and recomputes
-//! the summary from the transaction's own fields. A signed transaction travels back the same way.
+//! the summary from the transaction's own fields. The configuration it carries is the builder's,
+//! so a fee equal to its floor reads as unverified, never as the floor; a reader with a chain of
+//! its own reads the draft with [`Draft::deserialize_on`], which refuses another configuration
+//! and calls the fee the floor when it is. A signed transaction travels back the same way.
 //!
 //! The six operations of today's formats are built and signed by `heartwood-crypto`'s
 //! transaction builder, so the bytes and ids are the node's own.

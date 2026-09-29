@@ -67,27 +67,37 @@ pub enum FeeChoice {
 /// Where a draft's fee comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FeeSource {
-    /// The fee equals the exact fee floor of the milestone in force.
+    /// The fee equals the exact fee floor of the milestone in force, under a network
+    /// configuration the reader holds itself: the chain a draft was built on, or the chain a
+    /// serialized draft was read on ([`crate::transaction::Draft::deserialize_on`]).
     Floor,
     /// A fee the caller set: an exact amount, or a multiple of the minimum that comes out above
     /// the floor. A deserialized draft also reads as explicit whenever its fee is not the floor
     /// computed again, and whatever other source its serialized form claims (see
     /// [`crate::transaction::Draft::deserialize`]).
     Explicit,
+    /// A serialized draft read without a chain of the reader's own
+    /// ([`crate::transaction::Draft::deserialize`]) whose form calls its fee the floor, and whose
+    /// fee equals the floor computed again under the network configuration the form carries.
+    /// The pinned network hash does not cover that configuration's fee table, so the builder of
+    /// the form chose that floor: the fee is shown as an amount, and never called the network's
+    /// minimum. The floor beside it is for display only.
+    Unverified,
 }
 
 impl FeeSource {
-    /// The stable string form: `floor` or `explicit`.
+    /// The stable string form: `floor`, `explicit` or `unverified`.
     pub const fn as_str(self) -> &'static str {
         match self {
             FeeSource::Floor => "floor",
             FeeSource::Explicit => "explicit",
+            FeeSource::Unverified => "unverified",
         }
     }
 
     /// The source with the string form `text`.
     pub fn parse(text: &str) -> Option<FeeSource> {
-        [FeeSource::Floor, FeeSource::Explicit]
+        [FeeSource::Floor, FeeSource::Explicit, FeeSource::Unverified]
             .into_iter()
             .find(|source| source.as_str() == text)
     }
@@ -101,7 +111,9 @@ pub struct ResolvedFee {
     /// Where it comes from.
     pub source: FeeSource,
     /// The exact fee floor of the milestone in force, for the transaction's type and size; `None`
-    /// where no floor is in force (the milestone has no enabled dynamic fee table).
+    /// where no floor is in force (the milestone has no enabled dynamic fee table). For a draft
+    /// read by [`crate::transaction::Draft::deserialize`], it is the floor under the network
+    /// configuration the serialized form carries, which only a display may show.
     pub floor: Option<Amount>,
 }
 
@@ -390,7 +402,7 @@ mod tests {
             ),
             Err(Error::InvalidFee { .. })
         ));
-        for source in [FeeSource::Floor, FeeSource::Explicit] {
+        for source in [FeeSource::Floor, FeeSource::Explicit, FeeSource::Unverified] {
             assert_eq!(FeeSource::parse(source.as_str()), Some(source));
         }
         for text in ["node-statistics", "floors", ""] {

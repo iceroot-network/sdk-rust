@@ -20,7 +20,9 @@ use super::{DraftRequest, OnlineFacts, Operation, OperationKind, Resignation};
 use crate::address::Address;
 use crate::amount::Amount;
 use crate::chain::Chain;
-use crate::error::{AddressProblem, AmountProblem, Error, TransactionProblem, VoteProblem};
+use crate::error::{
+    AddressProblem, AmountProblem, Error, MismatchProblem, TransactionProblem, VoteProblem,
+};
 use crate::fee::{self, FeeSource, ResolvedFee};
 use crate::keys::Account;
 use crate::profile::Profile;
@@ -317,19 +319,48 @@ impl Draft {
     /// another profile or network is refused with [`Error::NetworkMismatch`], and the summary is
     /// computed again from the transaction's own fields.
     ///
-    /// The fee is the transaction's own, and its floor is computed again at the draft's height.
-    /// The fee's source is not taken on trust from the serialized form: it reads
-    /// [`FeeSource::Floor`] only when the form says so and the fee equals the floor computed
-    /// here, and [`FeeSource::Explicit`] otherwise, whatever other source the form names, since
-    /// where any other fee came from cannot be checked.
-    ///
-    /// The floor, the rules and the token's labels come from the network configuration the
-    /// serialized form carries, which the draft was built under. The pinned network hash identifies
-    /// the chain but does not cover the milestones or the labels of that configuration, so a
-    /// signer that does not trust the context that built the draft judges the fee by its amount,
-    /// not by its source.
+    /// The fee is the transaction's own, and its floor is computed again at the draft's height,
+    /// under the network configuration the serialized form carries, which the draft was built
+    /// under: the reader has no configuration of its own. The pinned network hash identifies the
+    /// chain but covers neither the milestones nor the labels of that configuration, so its fee
+    /// table is the builder's to choose, and a fee equal to its floor is never called the floor:
+    /// the fee's source reads [`FeeSource::Unverified`] when the form says the fee is the floor
+    /// and the fee equals the floor computed here, and [`FeeSource::Explicit`] otherwise,
+    /// whatever other source the form names. The floor is kept for display only: a signer
+    /// without a chain of its own shows the fee as an amount, never as the network's minimum.
+    /// A signer connected to the network reads the draft with [`Draft::deserialize_on`] instead.
     pub fn deserialize(bytes: &[u8], profile: &Profile) -> Result<Draft, Error> {
         let (chain, envelope) = envelope::decode(bytes, profile, EnvelopeKind::Draft)?;
+        Draft::read(chain, envelope, FeeSource::Unverified)
+    }
+
+    /// The draft in `bytes`, read on `chain`: a chain the reader loaded itself, such as the one
+    /// its own connection to the network serves. Data made for another profile or network is
+    /// refused with [`Error::NetworkMismatch`], and so is a draft built under another network
+    /// configuration than `chain`'s (the problem [`MismatchProblem::Configuration`]): another fee
+    /// table, other rules or other labels under the same chain's identity. A draft built just
+    /// before the network changed its milestones is refused too; build it again.
+    ///
+    /// The summary is computed again from the transaction's own fields, and the floor, the rules
+    /// and the token's labels come from `chain`. The fee's source reads [`FeeSource::Floor`] when
+    /// the form says the fee is the floor (`floor`, or `unverified` from a reader without a
+    /// chain) and the fee equals the floor computed here, and [`FeeSource::Explicit`] otherwise.
+    ///
+    /// Only a chain the reader trusts as much as its own connection makes a fee the floor: the
+    /// chain of a draft read with [`Draft::deserialize`] is the configuration that draft carried.
+    pub fn deserialize_on(bytes: &[u8], chain: &Chain) -> Result<Draft, Error> {
+        let (carried, envelope) = envelope::decode(bytes, chain.profile(), EnvelopeKind::Draft)?;
+        if !carried.same_configuration(chain) {
+            return Err(Error::NetworkMismatch {
+                problem: MismatchProblem::Configuration,
+            });
+        }
+        Draft::read(chain.clone(), envelope, FeeSource::Floor)
+    }
+
+    /// The draft of a serialized form's fields on `chain`, whose fee reads `floor` when the form
+    /// claims the floor and the fee equals the floor computed on `chain`.
+    fn read(chain: Chain, envelope: Envelope, floor_source: FeeSource) -> Result<Draft, Error> {
         let data = deserialiser::deserialise(&envelope.transaction).map_err(|error| {
             Error::InvalidTransaction {
                 problem: super::signed::decode_problem(&error),
@@ -362,7 +393,7 @@ impl Draft {
             .chain
             .fee_floor(draft.kind(), draft.size(), draft.height);
         let source = match claimed {
-            FeeSource::Floor if floor == Some(amount) => FeeSource::Floor,
+            FeeSource::Floor if floor == Some(amount) => floor_source,
             _ => FeeSource::Explicit,
         };
         draft.fee = ResolvedFee {

@@ -256,6 +256,19 @@ impl Chain {
     pub(crate) fn milestones_json(&self) -> &str {
         &self.inner.milestones_json
     }
+
+    /// Whether `other` has the same network description and milestones, as JSON values: the
+    /// layout of the text and the order of an object's keys do not count, every name and value
+    /// does.
+    pub(crate) fn same_configuration(&self, other: &Chain) -> bool {
+        let value = |text: &str| serde_json::from_str::<Value>(text).ok();
+        let same = |ours: &str, theirs: &str| match (value(ours), value(theirs)) {
+            (Some(ours), Some(theirs)) => ours == theirs,
+            _ => false,
+        };
+        same(self.network_json(), other.network_json())
+            && same(self.milestones_json(), other.milestones_json())
+    }
 }
 
 /// The token's labels, which review screens show next to amounts: a symbol of 1 to

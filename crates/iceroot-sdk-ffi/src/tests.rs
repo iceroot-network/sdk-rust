@@ -224,6 +224,66 @@ fn a_sign_in_message_is_signed_only_once_it_passes_its_checks() {
         json!({"op":"signinSign","key":key["handle"],"message":message,"origin":"https://phish.example","now":1_790_000_010_000u64}),
     );
     assert_eq!(phished["error"]["code"], "InvalidSignIn");
+    let text = message.as_str().unwrap();
+    // The same challenge with its times written in another form the parser accepts.
+    let times = |zone: &str| {
+        text.split('\n')
+            .map(|line| {
+                if line.starts_with("Issued at: ") || line.starts_with("Expires at: ") {
+                    line.replace('Z', zone)
+                } else {
+                    line.to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    for text in [text.to_owned(), times(".000Z"), times("+00:00")] {
+        let mut requests =
+            vec![json!({"op":"signMessage","key":key["handle"],"message":hex::encode(&text)})];
+        if cfg!(feature = "test-seams") {
+            requests.push(json!({"op":"signMessage","key":key["handle"],"message":hex::encode(&text),"aux":"42".repeat(32)}));
+        }
+        for request in requests {
+            let refused = call(&mut session, request);
+            assert_eq!(refused["error"]["code"], "InvalidArgument");
+            assert_eq!(
+                refused["error"]["details"],
+                json!({"reason":
+                    "a sign-in message is signed only for the page that asks for it, never as a plain message"
+                })
+            );
+        }
+    }
+    for text in [
+        "About sign-in".to_owned(),
+        format!(" {text}"),
+        format!("\u{feff}{text}"),
+        text.replace('\n', "\r\n"),
+        format!("{text}\n"),
+    ] {
+        let signed = call(
+            &mut session,
+            json!({"op":"signMessage","key":key["handle"],"message":hex::encode(&text)}),
+        );
+        assert_eq!(
+            call(
+                &mut session,
+                json!({"op":"verifyMessage","message":hex::encode(&text),"publicKey":signed["result"]["publicKey"],"signature":signed["result"]["signature"],"algorithm":signed["result"]["algorithm"]})
+            ),
+            json!({"result":true})
+        );
+    }
+    let other = call(
+        &mut session,
+        json!({"op":"keyLegacy","profile":profile(),"passphrase":"other"}),
+    )["result"]
+        .clone();
+    let refused = call(
+        &mut session,
+        json!({"op":"signinSign","key":other["handle"],"message":message,"origin":origin,"now":1_790_000_010_000u64}),
+    );
+    assert_eq!(refused["error"]["code"], "InvalidSignIn");
     // An ownership proof's text is never signed as a message.
     let proof = call(
         &mut session,

@@ -28,9 +28,10 @@
 //! A wallet signs it with [`sign`], which runs [`parse`] against the origin of the page that asks
 //! and the signing account's own public key and address, and signs only a message that passes.
 //! The signature is a message signature ([`crate::message`]), so a server checks it with
-//! [`crate::message::verify`]. A wallet never signs a sign-in message as a plain message from a
-//! generic prompt: a challenge that a page of another origin fetched for the holder's key and
-//! relayed would give that page a valid sign-in (see [`crate::message`]).
+//! [`crate::message::verify`]. A sign-in message is never signed as a plain message: a challenge
+//! that a page of another origin fetched for the holder's key and relayed would give that page a
+//! valid sign-in. So [`crate::message::sign`] and [`crate::message::sign_bytes`] refuse any text
+//! that [`parse`] accepts for some network, origin, account and time, a lapsed challenge included.
 
 use crate::address::Address;
 use crate::error::{Error, SignInProblem};
@@ -162,7 +163,24 @@ pub fn parse(
     expected: &SignInExpected<'_>,
     now_ms: i64,
 ) -> Result<SignInChallenge, Error> {
-    let network = profile.message_network()?;
+    parse_inner(Some(profile), message, expected, Some(now_ms))
+}
+
+/// `message` read as sign-in text: `Ok` exactly when [`parse`] accepts it for some reader's
+/// profile, expectations and time. It is read on the network it names, against no expected origin
+/// or identity, at its own issue time, so a challenge that has lapsed, or names another origin,
+/// account or network, is still sign-in text. Plain message signing refuses such text.
+pub(crate) fn parse_challenge(message: &str) -> Result<SignInChallenge, Error> {
+    parse_inner(None, message, &SignInExpected::default(), None)
+}
+
+fn parse_inner(
+    profile: Option<&Profile>,
+    message: &str,
+    expected: &SignInExpected<'_>,
+    now_ms: Option<i64>,
+) -> Result<SignInChallenge, Error> {
+    let network = profile.map(Profile::message_network).transpose()?;
     if message.len() > MAX_LENGTH || message.contains('\r') {
         return Err(problem(SignInProblem::Format));
     }
@@ -214,9 +232,20 @@ pub fn parse(
     {
         return Err(problem(SignInProblem::Origin));
     }
-    if challenge.network != network {
+    if network.is_some_and(|network| challenge.network != network) {
         return Err(problem(SignInProblem::Network));
     }
+    // Without the reader's profile, the challenge is read on the network it names: a message
+    // signature does not cover a network, so a challenge of any network is sign-in text.
+    let named;
+    let profile = match profile {
+        Some(profile) => profile,
+        None => {
+            named = Profile::of_message_network(&challenge.network)
+                .ok_or(problem(SignInProblem::Network))?;
+            &named
+        }
+    };
     let key = compressed_key(&challenge.public_key).ok_or(problem(SignInProblem::Identity))?;
     if challenge.nonce.len() != 64 || !is_lower_hex(&challenge.nonce) {
         return Err(problem(SignInProblem::Identity));
@@ -238,6 +267,9 @@ pub fn parse(
     else {
         return Err(problem(SignInProblem::Expired));
     };
+    // Without the reader's clock, the times are read at the issue time: a challenge whose times
+    // pass at some time also pass then, so a lapsed challenge is sign-in text too.
+    let now_ms = now_ms.unwrap_or(issued);
     let valid_times = expires > now_ms
         && issued <= now_ms.saturating_add(MAX_CLOCK_AHEAD_MS)
         && expires > issued
@@ -297,7 +329,7 @@ pub fn sign_with(
         },
         now_ms,
     )?;
-    message::sign_with(profile, account, message, aux)
+    message::signature_of(profile, account, message, aux)
 }
 
 /// Whether `origin` is a secure web origin in its serialized form: `https://host[:port]`, or
@@ -448,6 +480,7 @@ mod tests {
         assert_eq!(signed.public_key, account.public_key().to_hex());
         assert_eq!(signed.network, "heartwood-devnet-v90");
         assert!(crate::message::verify(&text, &signed));
+        assert!(crate::message::verify_bytes(text.as_bytes(), &signed));
 
         // A page of another origin that fetched this challenge cannot have it signed.
         assert_eq!(

@@ -27,12 +27,12 @@
 //!   signature made elsewhere.
 //! - A sign-in message ([`crate::signin`]) is the one text a wallet signs for a website, and it is
 //!   valid for the origin it names. A page of another origin can fetch a website's challenge for
-//!   the holder's key and relay it, so a wallet signs a sign-in message only with
+//!   the holder's key and relay it, so a sign-in message is signed only with
 //!   [`crate::signin::sign`], which checks it against the origin of the page that asks (as the
-//!   wallet sees it) and the signing account first. A wallet never offers a website, or any
-//!   generic "sign this message" prompt, [`sign`] of text that parses as a sign-in message:
-//!   nothing here refuses one, since a wallet that checked it with [`crate::signin::parse`] may
-//!   still sign it with [`sign`].
+//!   wallet sees it) and the signing account first. [`sign`] and [`sign_bytes`] refuse, with
+//!   [`Error::InvalidArgument`], any text that [`crate::signin::parse`] accepts for some network,
+//!   origin, account and time: a challenge that has lapsed, or names another network, is refused
+//!   too.
 
 use heartwood_crypto::crypto::hash::sha256;
 use heartwood_crypto::crypto::sig::{self, SchemeId, Signature, SigningDomain};
@@ -76,8 +76,8 @@ pub struct MessageSignature {
 ///
 /// # Errors
 ///
-/// As [`sign_bytes`]: an ownership proof's text is refused with [`Error::InvalidArgument`] (see
-/// the module documentation).
+/// As [`sign_bytes`]: an ownership proof's text and a sign-in message are refused with
+/// [`Error::InvalidArgument`] (see the module documentation).
 pub fn sign(
     profile: &Profile,
     account: &Account,
@@ -104,8 +104,9 @@ pub fn sign_with(
 ///
 /// [`Error::InvalidArgument`] when the bytes are not UTF-8 text: such bytes may be a transaction's
 /// (see the module documentation); and for an ownership proof's text, which is signed only as a
-/// proof. [`Error::UnsupportedOnNetwork`] without message signing, and [`Error::NetworkMismatch`]
-/// for an account of another profile.
+/// proof; and for a sign-in message, which is signed only with [`crate::signin::sign`].
+/// [`Error::UnsupportedOnNetwork`] without message signing, and [`Error::NetworkMismatch`] for an
+/// account of another profile.
 pub fn sign_bytes(
     profile: &Profile,
     account: &Account,
@@ -128,6 +129,11 @@ pub fn sign_bytes_with(
     if is_proof(text) {
         return Err(Error::InvalidArgument { reason: PROOF_TEXT });
     }
+    if crate::signin::parse_challenge(text).is_ok() {
+        return Err(Error::InvalidArgument {
+            reason: SIGN_IN_TEXT,
+        });
+    }
     signature_of(profile, account, text, aux)
 }
 
@@ -145,7 +151,10 @@ pub(crate) fn check_signer(profile: &Profile, account: &Account) -> Result<(), E
     Ok(())
 }
 
-fn signature_of(
+/// The message signature of `text`, without the refusals of [`sign_bytes`]. Called by
+/// [`sign_bytes_with`], and by [`crate::signin::sign_with`] once its checks pass; never public,
+/// since it signs a sign-in message.
+pub(crate) fn signature_of(
     profile: &Profile,
     account: &Account,
     text: &str,
@@ -164,6 +173,9 @@ fn signature_of(
 const NOT_TEXT: &str = "a message is signed only as UTF-8 text";
 /// Why an ownership proof's text is refused as a message.
 const PROOF_TEXT: &str = "an ownership proof is signed only as a proof, never as a message";
+/// Why a sign-in message is refused as a plain message.
+const SIGN_IN_TEXT: &str =
+    "a sign-in message is signed only for the page that asks for it, never as a plain message";
 
 /// Whether `text` has an ownership proof's first line. [`crate::ownership::parse`] reads a proof
 /// only when its first line is exactly that, so no other text can pass as one.
@@ -383,6 +395,222 @@ mod tests {
             format!("Quoted: {}", crate::ownership::TITLE),
         ] {
             assert!(verify(&text, &sign(&profile, &account, &text).unwrap()));
+        }
+    }
+
+    #[test]
+    fn plain_signing_refuses_sign_in_text() {
+        use crate::signin::{self, SignInExpected, SignInRequest};
+
+        let profile = Profile::devnet(DevnetOptions::default());
+        let account = Account::from_legacy_passphrase(&profile, "example").unwrap();
+        let origin = "https://validators.example";
+        let issued = 1_790_426_096;
+        let text = signin::build(
+            &profile,
+            &SignInRequest {
+                origin,
+                public_key: account.public_key(),
+                nonce: &"ab".repeat(32),
+                issued_at: issued,
+                expires_at: issued + 300,
+            },
+        )
+        .unwrap();
+        let refused = Error::InvalidArgument {
+            reason: "a sign-in message is signed only for the page that asks for it, never as a plain message",
+        };
+        for text in [
+            text.clone(),
+            text.replace("56Z", "56.000Z"),
+            text.replace("56Z", "56+00:00"),
+        ] {
+            signin::parse(&profile, &text, &SignInExpected::default(), issued * 1000).unwrap();
+            let results = [
+                sign(&profile, &account, &text),
+                sign_with(&profile, &account, &text, Aux::fixed([0x42; 32])),
+                sign_bytes(&profile, &account, text.as_bytes()),
+                sign_bytes_with(&profile, &account, text.as_bytes(), Aux::fixed([0x42; 32])),
+            ];
+            for result in results {
+                assert_eq!(result.unwrap_err(), refused);
+            }
+            let signed = signin::sign(&profile, &account, &text, origin, issued * 1000).unwrap();
+            assert!(verify(&text, &signed));
+            assert!(verify_bytes(text.as_bytes(), &signed));
+        }
+        // A message signature can authenticate the same key on another development network.
+        let other_profile = profile.clone().with_network_byte(91);
+        let other_text = signin::build(
+            &other_profile,
+            &SignInRequest {
+                origin,
+                public_key: account.public_key(),
+                nonce: &"ab".repeat(32),
+                issued_at: issued,
+                expires_at: issued + 300,
+            },
+        )
+        .unwrap();
+        signin::parse(
+            &other_profile,
+            &other_text,
+            &SignInExpected::default(),
+            issued * 1000,
+        )
+        .unwrap();
+        assert_eq!(sign(&profile, &account, &other_text).unwrap_err(), refused);
+        let other_account = Account::from_legacy_passphrase(&profile, "other").unwrap();
+        assert_eq!(sign(&profile, &other_account, &text).unwrap_err(), refused);
+        for text in [
+            "Please explain sign-in messages".to_owned(),
+            text.replacen(signin::TITLE, "IceRoot Validator Portal sign-in?", 1),
+            text.replace('\n', "\r\n"),
+            format!("{text}\n"),
+            format!("{text} "),
+            text.replace("Version: 1", "Version: 2"),
+            text.replace("https://validators.example", "http://validators.example"),
+            text.replace("56Z", "56"),
+        ] {
+            assert!(
+                signin::parse(&profile, &text, &SignInExpected::default(), issued * 1000).is_err()
+            );
+            for signed in [
+                sign(&profile, &account, &text),
+                sign_with(&profile, &account, &text, Aux::fixed([0x42; 32])),
+                sign_bytes(&profile, &account, text.as_bytes()),
+                sign_bytes_with(&profile, &account, text.as_bytes(), Aux::fixed([0x42; 32])),
+            ] {
+                assert!(verify(&text, &signed.unwrap()));
+            }
+        }
+    }
+
+    /// Plain signing refuses whatever the sign-in parser accepts for some network, origin,
+    /// identity and time, and nothing else: a near miss is signed, and its signature is no
+    /// signature of the challenge it resembles.
+    #[test]
+    fn plain_signing_refuses_exactly_what_the_sign_in_parser_accepts() {
+        use crate::signin::{self, SignInExpected, SignInRequest};
+
+        let profile = Profile::devnet(DevnetOptions::default());
+        let account = Account::from_legacy_passphrase(&profile, "example").unwrap();
+        let nonce = "ab".repeat(32);
+        let challenge = |network: &Profile, origin: &str, issued_at: i64| {
+            let request = SignInRequest {
+                origin,
+                public_key: account.public_key(),
+                nonce: &nonce,
+                issued_at,
+                expires_at: issued_at + 300,
+            };
+            signin::build(network, &request).unwrap()
+        };
+        // `text` with its line that starts with `prefix` replaced by `line`.
+        let with_line = |text: &str, prefix: &str, line: &str| {
+            text.split('\n')
+                .map(|old| if old.starts_with(prefix) { line } else { old })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let issued_ms = |text: &str| {
+            let issued = text
+                .split('\n')
+                .find_map(|line| line.strip_prefix("Issued at: "));
+            crate::time::parse_rfc3339_ms(issued.unwrap()).unwrap()
+        };
+        let plain = |text: &str| {
+            [
+                sign(&profile, &account, text),
+                sign_with(&profile, &account, text, Aux::fixed([0x42; 32])),
+                sign_bytes(&profile, &account, text.as_bytes()),
+                sign_bytes_with(&profile, &account, text.as_bytes(), Aux::fixed([0x42; 32])),
+            ]
+        };
+        let origin = "https://validators.example";
+        let issued = 1_790_426_096;
+        let text = challenge(&profile, origin, issued);
+        // The challenge with `time` on its line that starts with `line` ("Issued at: " or
+        // "Expires at: ").
+        let at = |line: &str, time: String| with_line(&text, line, &format!("{line}{time}"));
+        let time = |seconds: i64| crate::time::format_rfc3339_seconds(seconds).unwrap();
+
+        let mut accepted = vec![
+            // Plain signing has no clock: a long lapsed challenge and one not yet issued.
+            (profile.clone(), challenge(&profile, origin, 1)),
+            (
+                profile.clone(),
+                challenge(&profile, origin, 253_402_300_000),
+            ),
+            // HTTP on the loopback host.
+            (
+                profile.clone(),
+                challenge(&profile, "http://127.0.0.1:8080", issued),
+            ),
+            (
+                profile.clone(),
+                challenge(&profile, "http://localhost:3000", issued),
+            ),
+            (
+                profile.clone(),
+                challenge(&profile, "http://[::1]:8545", issued),
+            ),
+            // The longest lifetime the parser accepts, longer than a builder gives.
+            (profile.clone(), at("Expires at: ", time(issued + 305))),
+            // Other forms of the same time.
+            (
+                profile.clone(),
+                at("Issued at: ", time(issued).replace('Z', ".123456Z")),
+            ),
+            (
+                profile.clone(),
+                at("Issued at: ", time(issued).replace('Z', "-00:00")),
+            ),
+        ];
+        // Every development network: a message signature does not name one.
+        for byte in [0, 91, u8::MAX] {
+            let network = profile.clone().with_network_byte(byte);
+            let text = challenge(&network, origin, issued);
+            accepted.push((network, text));
+        }
+        let refused = Error::InvalidArgument {
+            reason: SIGN_IN_TEXT,
+        };
+        for (network, text) in &accepted {
+            let parsed = signin::parse(network, text, &SignInExpected::default(), issued_ms(text));
+            assert!(parsed.is_ok(), "{parsed:?}: {text:?}");
+            for result in plain(text) {
+                assert_eq!(result.unwrap_err(), refused, "{text:?}");
+            }
+        }
+
+        let near_misses = [
+            // Lifetimes no clock accepts.
+            at("Expires at: ", time(issued + 306)),
+            at("Expires at: ", time(issued)),
+            // A network name in another form.
+            with_line(&text, "Network: ", "Network: heartwood-devnet-v090"),
+            with_line(&text, "Network: ", "Network: heartwood-devnet-v256"),
+            // Not the exact text: a byte order mark, other line endings, blank space, a line
+            // before it and a look-alike letter.
+            format!("\u{feff}{text}"),
+            text.replace('\n', "\r"),
+            text.replace('\n', "\r\n"),
+            format!(" {text}"),
+            format!("{text}\n"),
+            format!("Sign this for me:\n{text}"),
+            text.replacen("IceRoot", "Ic\u{435}Root", 1),
+        ];
+        for near in &near_misses {
+            assert!(
+                signin::parse(&profile, near, &SignInExpected::default(), issued * 1000).is_err(),
+                "{near:?}"
+            );
+            for result in plain(near) {
+                let signature = result.unwrap();
+                assert!(verify(near, &signature));
+                assert!(!verify(&text, &signature));
+            }
         }
     }
 

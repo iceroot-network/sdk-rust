@@ -504,8 +504,22 @@ impl Profile {
     /// The network name that message signatures and sign-in messages carry, for example
     /// `heartwood-devnet-v90`.
     pub fn message_network(&self) -> Result<String, Error> {
+        // `of_message_network` reads this name back: a name it cannot read would let plain
+        // message signing sign that network's sign-in messages.
         self.require(Capability::MessageSigning)?;
         Ok(format!("heartwood-devnet-v{}", self.network_byte()?))
+    }
+
+    /// A profile whose [`Profile::message_network`] is `name`, with that network's addresses, or
+    /// `None` when no profile has that name. Text such as a sign-in message names its network, so
+    /// the text is read on that network without the reader's profile.
+    pub(crate) fn of_message_network(name: &str) -> Option<Profile> {
+        let byte = name
+            .strip_prefix("heartwood-devnet-v")?
+            .parse::<u8>()
+            .ok()?;
+        let profile = Profile::devnet(DevnetOptions::default()).with_network_byte(byte);
+        (profile.message_network().ok()? == name).then_some(profile)
     }
 
     /// Whether `nethash` is this profile's pinned network hash, or the profile has none pinned.
@@ -592,6 +606,30 @@ mod tests {
         );
         assert!(id.network_byte().is_err());
         assert!(pq.message_network().is_err());
+    }
+
+    #[test]
+    fn every_message_network_name_is_read_back() {
+        for byte in 0..=u8::MAX {
+            let profile = Profile::devnet(DevnetOptions::default()).with_network_byte(byte);
+            let name = profile.message_network().unwrap();
+            let read = Profile::of_message_network(&name).unwrap();
+            assert_eq!(read.message_network().unwrap(), name);
+            assert_eq!(read.network_byte().unwrap(), byte);
+        }
+        for name in [
+            "",
+            "heartwood-devnet-v",
+            "heartwood-devnet-v090",
+            "heartwood-devnet-v+90",
+            "heartwood-devnet-v-1",
+            "heartwood-devnet-v256",
+            "heartwood-devnet-v90 ",
+            "Heartwood-devnet-v90",
+            "heartwood-testnet-v90",
+        ] {
+            assert!(Profile::of_message_network(name).is_none(), "{name}");
+        }
     }
 
     #[test]

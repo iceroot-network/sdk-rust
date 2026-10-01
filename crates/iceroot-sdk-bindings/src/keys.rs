@@ -183,8 +183,10 @@ impl Key {
     /// network }`. The bytes must be UTF-8 text; any other bytes are refused with
     /// `InvalidArgument`, since they may be a transaction's, whose signature a message signature
     /// would be. Text whose first line is an ownership proof's is refused with `InvalidArgument`
-    /// too: a proof is signed only by the proof keys of [`crate::ownership`]. A website's sign-in
-    /// message is signed with [`Key::sign_sign_in`], never from a generic message prompt.
+    /// too: a proof is signed only by the proof keys of [`crate::ownership`]. So is a website's
+    /// sign-in message, any text the sign-in parser accepts for some network, origin, account and
+    /// time: it is signed with [`Key::sign_sign_in`], which checks it against the origin of the
+    /// page that asks and this key's identity first.
     pub fn sign_message(&self, message: &[u8]) -> Result<String> {
         self.sign_message_with(message, Aux::random())
     }
@@ -353,6 +355,35 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.code(), "InvalidPath");
+    }
+
+    #[test]
+    fn plain_signing_refuses_sign_in_text() {
+        let key = Key::from_legacy_passphrase(&devnet(), "example".to_owned()).unwrap();
+        let text = iceroot_sdk::signin::build(
+            &devnet(),
+            &iceroot_sdk::signin::SignInRequest {
+                origin: "https://validators.example",
+                public_key: key.account().unwrap().public_key(),
+                nonce: &"ab".repeat(32),
+                issued_at: 1_790_426_096,
+                expires_at: 1_790_426_396,
+            },
+        )
+        .unwrap();
+        for result in [
+            key.sign_message(text.as_bytes()),
+            key.sign_message_with(text.as_bytes(), Aux::random()),
+        ] {
+            let error = result.unwrap_err();
+            assert_eq!(error.code(), "InvalidArgument");
+            assert_eq!(
+                error.details(),
+                &serde_json::json!({"reason":
+                    "a sign-in message is signed only for the page that asks for it, never as a plain message"
+                })
+            );
+        }
     }
 
     #[test]

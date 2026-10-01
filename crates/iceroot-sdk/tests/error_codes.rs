@@ -165,3 +165,37 @@ fn the_keystore_shares_only_the_core_s_randomness_unavailable() {
         assert!(errors.iter().all(|error| error.code() != code), "{code}");
     }
 }
+
+#[test]
+fn plain_signing_refuses_sign_in_text() {
+    use iceroot_sdk::keys::Account;
+    use iceroot_sdk::profile::DevnetOptions;
+    use iceroot_sdk::{Aux, Profile, message, signin};
+
+    let profile = Profile::devnet(DevnetOptions::default());
+    let account = Account::from_legacy_passphrase(&profile, "example").unwrap();
+    let text = signin::build(
+        &profile,
+        &signin::SignInRequest {
+            origin: "https://validators.example",
+            public_key: account.public_key(),
+            nonce: &"ab".repeat(32),
+            issued_at: 1_790_426_096,
+            expires_at: 1_790_426_396,
+        },
+    )
+    .unwrap();
+    for result in [
+        message::sign(&profile, &account, &text),
+        message::sign_with(&profile, &account, &text, Aux::random()),
+        message::sign_bytes(&profile, &account, text.as_bytes()),
+        message::sign_bytes_with(&profile, &account, text.as_bytes(), Aux::random()),
+    ] {
+        let error = result.unwrap_err();
+        let reason = "a sign-in message is signed only for the page that asks for it, never as a plain message";
+        assert_eq!(error, Error::InvalidArgument { reason });
+        assert_eq!(error.code(), ErrorCode::InvalidArgument);
+        assert_eq!(error.code().as_str(), "InvalidArgument");
+        assert_eq!(error.details(), serde_json::json!({"reason": reason}));
+    }
+}

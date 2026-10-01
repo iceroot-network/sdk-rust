@@ -10,3 +10,5 @@ The boundary the IceRoot SDK's bindings share. The SDK's TypeScript interface ha
 Applications do not depend on this crate. Rust applications use `iceroot-sdk`; web and Tauri applications use the TypeScript package.
 
 The features `fixed-aux` and `keystore-testing` are the test seams of the bindings' test builds (fixed signing randomness, the keystore vectors' salts and nonces). No build that ships enables them; `tools/check-deps.sh` refuses them on any normal edge of the workspace.
+
+`Key::sign_message` refuses, with `InvalidArgument`, an ownership proof's text and any text the sign-in parser accepts for some network, origin, account and time, a lapsed challenge included. A website's sign-in message is signed with `Key::sign_sign_in`, which checks it against the origin of the page that asks and the key's identity first.

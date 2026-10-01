@@ -31,3 +31,5 @@ cargo test --locked -p iceroot-sdk-ffi
 ```
 
 The Go SDK's `scripts/build-wasm.sh` builds the module it embeds from this crate with fixed release settings, so that the same sources give the same bytes. The feature `test-seams` adds fixed signing randomness for the differential tests; it is never enabled in the embedded module, which refuses an `aux` argument. While the core has the classical backend, the build compiles libsecp256k1 from C with clang; the Go program that embeds the module needs no C compiler.
+
+The operation `signMessage` refuses, with `InvalidArgument`, an ownership proof's text and any text the sign-in parser accepts for some network, origin, account and time, a lapsed challenge included. A website's sign-in message is signed with `signinSign`, which checks it against the origin of the page that asks and the key's identity first.

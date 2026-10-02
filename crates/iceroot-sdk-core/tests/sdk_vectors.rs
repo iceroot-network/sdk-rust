@@ -793,6 +793,8 @@ fn every_class_is_run() {
             // Run by the keystore's own tests (crates/iceroot-keystore/tests/vectors.rs).
             "S07-keystore",
             "S08-ownership-proofs",
+            // Run by the link module's tests (crates/iceroot-sdk-core/tests/link.rs).
+            "S09-account-links",
         ],
         "a vector class without a test"
     );

@@ -52,6 +52,8 @@ pub enum ErrorCode {
     InvalidSignIn,
     /// An ownership proof or its message fails a check.
     InvalidProof,
+    /// An account link, its revocation or its signed record fails a check.
+    InvalidLink,
     /// A request to a node could not be built from its arguments.
     InvalidRequest,
     /// A network profile is incomplete or malformed.
@@ -112,6 +114,7 @@ impl ErrorCode {
             ErrorCode::InvalidTransaction => "InvalidTransaction",
             ErrorCode::InvalidSignIn => "InvalidSignIn",
             ErrorCode::InvalidProof => "InvalidProof",
+            ErrorCode::InvalidLink => "InvalidLink",
             ErrorCode::InvalidRequest => "InvalidRequest",
             ErrorCode::InvalidProfile => "InvalidProfile",
             ErrorCode::InvalidArgument => "InvalidArgument",
@@ -152,6 +155,7 @@ impl ErrorCode {
             | ErrorCode::InvalidTransaction
             | ErrorCode::InvalidSignIn
             | ErrorCode::InvalidProof
+            | ErrorCode::InvalidLink
             | ErrorCode::InvalidRequest
             | ErrorCode::InvalidProfile
             | ErrorCode::InvalidArgument => ErrorGroup::Input,
@@ -311,6 +315,12 @@ pub enum Error {
         /// The check it fails.
         problem: ProofProblem,
     },
+    /// An account link, its revocation or its signed record fails a check.
+    #[error("invalid account link: {problem}")]
+    InvalidLink {
+        /// The check it fails.
+        problem: LinkProblem,
+    },
     /// A request to a node could not be built from its arguments, such as a relay URL without
     /// a scheme or a page out of range.
     #[error("invalid request: {reason}")]
@@ -446,6 +456,7 @@ impl Error {
             Error::InvalidTransaction { .. } => ErrorCode::InvalidTransaction,
             Error::InvalidSignIn { .. } => ErrorCode::InvalidSignIn,
             Error::InvalidProof { .. } => ErrorCode::InvalidProof,
+            Error::InvalidLink { .. } => ErrorCode::InvalidLink,
             Error::InvalidRequest { .. } => ErrorCode::InvalidRequest,
             Error::InvalidProfile { .. } => ErrorCode::InvalidProfile,
             Error::InvalidArgument { .. } => ErrorCode::InvalidArgument,
@@ -507,6 +518,7 @@ impl Error {
             }
             Error::InvalidSignIn { problem } => json!({ "reason": problem.as_str() }),
             Error::InvalidProof { problem } => json!({ "reason": problem.as_str() }),
+            Error::InvalidLink { problem } => json!({ "reason": problem.as_str() }),
             Error::RateLimited {
                 retry_after_seconds,
             } => json!({ "retryAfterSeconds": retry_after_seconds }),
@@ -1187,6 +1199,101 @@ impl fmt::Display for ProofProblem {
             ProofProblem::Key => "the public key is malformed",
             ProofProblem::Signature => "the signature is malformed or does not verify",
             ProofProblem::Json => "not a signed ownership proof of a supported version",
+        })
+    }
+}
+
+/// The check an account link, its revocation or its signed record fails (see [`crate::link`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum LinkProblem {
+    /// Not a link or revocation message of the supported version: its length, a carriage
+    /// return, its number of lines or its fixed lines.
+    Format,
+    /// A field line does not start with its label, or its value is empty or has a space or tab
+    /// around it.
+    Field,
+    /// The message names another network than the reader's.
+    Network,
+    /// The GitHub user id is not a decimal integer from 1 to 2^53 - 1 without leading zeros.
+    GithubId,
+    /// The public key is not a valid key in the profile's canonical form.
+    Key,
+    /// The account is not the address of the public key on the network.
+    Address,
+    /// The issue time is not a real UTC time written as `YYYY-MM-DDTHH:MM:SSZ`.
+    IssuedAt,
+    /// The issue time is more than 30 seconds ahead of the reader's clock.
+    Future,
+    /// The issue time of the link a revocation ends is malformed, or not earlier than the
+    /// revocation's own.
+    EndsLink,
+    /// The kind, GitHub user id, public key or account differs from the one expected.
+    Mismatch,
+    /// The signed record's JSON is not an object of exactly the format's five text members.
+    Json,
+    /// The signed record's public key, network or algorithm differs from its message's or the
+    /// reader's.
+    Record,
+    /// The signature is malformed or does not verify.
+    Signature,
+    /// The issue time is not later than every link and revocation already recorded for the same
+    /// GitHub user id, account and network.
+    Replay,
+    /// A revocation names the issue time of no recorded link of the same GitHub user id, account
+    /// and network.
+    UnknownLink,
+}
+
+impl LinkProblem {
+    /// A stable string for the problem: `format`, `field`, `network`, `github-id`, `key`,
+    /// `address`, `issued-at`, `future`, `ends-link`, `mismatch`, `json`, `record`, `signature`,
+    /// `replay` or `unknown-link`.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            LinkProblem::Format => "format",
+            LinkProblem::Field => "field",
+            LinkProblem::Network => "network",
+            LinkProblem::GithubId => "github-id",
+            LinkProblem::Key => "key",
+            LinkProblem::Address => "address",
+            LinkProblem::IssuedAt => "issued-at",
+            LinkProblem::Future => "future",
+            LinkProblem::EndsLink => "ends-link",
+            LinkProblem::Mismatch => "mismatch",
+            LinkProblem::Json => "json",
+            LinkProblem::Record => "record",
+            LinkProblem::Signature => "signature",
+            LinkProblem::Replay => "replay",
+            LinkProblem::UnknownLink => "unknown-link",
+        }
+    }
+}
+
+impl fmt::Display for LinkProblem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            LinkProblem::Format => "not an account link or revocation of a supported version",
+            LinkProblem::Field => "a field is missing its label or has spaces around it",
+            LinkProblem::Network => "the message is for another network",
+            LinkProblem::GithubId => "the GitHub user id is not a valid numeric id",
+            LinkProblem::Key => "the public key is malformed",
+            LinkProblem::Address => "the account is not the address of the public key",
+            LinkProblem::IssuedAt => "the issue time is malformed",
+            LinkProblem::Future => "the issue time is more than 30 seconds ahead of the clock",
+            LinkProblem::EndsLink => {
+                "the issue time of the ended link is malformed or not earlier than the revocation"
+            }
+            LinkProblem::Mismatch => "the kind, GitHub user id or account is not the one expected",
+            LinkProblem::Json => "not a signed account link record",
+            LinkProblem::Record => {
+                "the record's public key, network or algorithm does not match its message"
+            }
+            LinkProblem::Signature => "the signature is malformed or does not verify",
+            LinkProblem::Replay => {
+                "the issue time is not later than a link or revocation already recorded"
+            }
+            LinkProblem::UnknownLink => "the revocation names no recorded link",
         })
     }
 }

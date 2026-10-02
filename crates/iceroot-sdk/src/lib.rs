@@ -4,8 +4,8 @@
 //!
 //! - the core ([`iceroot_sdk_core`], at the root of this crate): network profiles and
 //!   capabilities, recovery phrases and keys, addresses, amounts, transaction drafts and signing,
-//!   message signing and the sign-in message, and ownership proofs of Solar addresses
-//!   ([`ownership`]);
+//!   message signing and the sign-in message, ownership proofs of Solar addresses
+//!   ([`ownership`]), and account links between GitHub accounts and IceRoot accounts ([`link`]);
 //! - the node API client ([`api`], the crate `iceroot_sdk_api`): a sans-IO client that builds each
 //!   request and decodes each answer into IceRoot-shaped values, with an optional async HTTP
 //!   transport (feature `http`, native targets only);
@@ -156,6 +156,45 @@
 //! let fields = ownership::verify(&received, now_ms)?;
 //! assert_eq!(fields.address, "SNAgA2XCRZDKfm5Vu9h4KR1bZw5xn9EiC3");
 //! assert_eq!(fields.account, account);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Account links
+//!
+//! An account link joins a GitHub account, by its numeric id, and an IceRoot account. The message
+//! is built and checked on the reader's network, signed only through the checked path, and the
+//! signed record is verified and held to the no-replay rule.
+//!
+//! ```
+//! use iceroot_sdk::keys::Account;
+//! use iceroot_sdk::link::{self, LinkExpected, LinkRecord, LinkRequest, Recorded};
+//! use iceroot_sdk::profile::DevnetOptions;
+//! use iceroot_sdk::Profile;
+//!
+//! # fn main() -> Result<(), iceroot_sdk::Error> {
+//! let now_ms = 1_790_426_096_000; // The caller's clock: 2026-09-26T12:34:56Z.
+//! let profile = Profile::devnet(DevnetOptions::default());
+//! let account = Account::from_legacy_passphrase(&profile, "this is a top secret passphrase")?;
+//! let message = link::build(
+//!     &profile,
+//!     &LinkRequest {
+//!         github_id: 9_999_999_001,
+//!         public_key: account.public_key(),
+//!         issued_at: now_ms / 1000,
+//!     },
+//! )?;
+//! // The holder reads the whole message before it is signed.
+//! let record = link::sign(&profile, &account, &message, now_ms)?;
+//!
+//! // Whoever receives the record as JSON checks it, then holds it to the no-replay rule.
+//! let received = LinkRecord::from_json(&record.to_json())?;
+//! let fields = link::verify(&profile, &received, &LinkExpected::default(), now_ms)?;
+//! assert_eq!(fields.github_id, 9_999_999_001);
+//! assert_eq!(fields.account, account.address().to_string());
+//! link::check_history(&fields, &[])?;
+//! // Once recorded, the same record posted again is a replay.
+//! assert!(link::check_history(&fields, &[Recorded::of(&fields)]).is_err());
 //! # Ok(())
 //! # }
 //! ```

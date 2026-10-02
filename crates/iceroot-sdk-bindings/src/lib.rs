@@ -36,6 +36,7 @@ pub mod error;
 pub mod json;
 pub mod keys;
 pub mod keystore;
+pub mod link;
 pub mod messages;
 pub mod ownership;
 pub mod phrase;

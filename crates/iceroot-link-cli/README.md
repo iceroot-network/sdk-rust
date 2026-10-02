@@ -24,7 +24,7 @@ iceroot-link revoke --network devnet --message-file revoke.txt --out revoke.json
 | `--out <file>` | A new file for the signed record. |
 | `--phrase-file <file>` | The recovery phrase, in a file only you can read and write (`chmod 600`). |
 | `--passphrase-file <file>` | A legacy passphrase, in a file only you can read and write; on profiles in today's formats only. One line ending at the end of the file is removed; nothing else is changed. |
-| `--phrase-stdin` | The recovery phrase, piped in (`gpg --decrypt phrase.gpg \| iceroot-link sign ... --phrase-stdin`). A terminal is refused, since it would echo the phrase. |
+| `--phrase-stdin` | The recovery phrase, piped in (`gpg --decrypt phrase.gpg \| iceroot-link sign ... --phrase-stdin`). A terminal is refused, since it would echo the phrase, and a file redirected to standard input must be private, as for `--phrase-file`. |
 | `--account <n>`, `--index <n>` | The account number and address index of the recovery phrase (0 and 0 when absent). |
 | `--yes` | Sign without asking. |
 

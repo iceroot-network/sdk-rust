@@ -52,11 +52,19 @@ pub fn check_stdin_is_not_a_terminal(stdin_is_terminal: bool) -> Result<(), Secr
     }
 }
 
-/// The secret piped in on standard input. A terminal is refused.
+/// The secret piped in on standard input. A terminal is refused, and a file redirected to
+/// standard input must be private, as a `--phrase-file` file must.
 pub fn read_stdin() -> Result<Zeroizing<Vec<u8>>, SecretError> {
     let stdin = io::stdin();
     check_stdin_is_not_a_terminal(stdin.is_terminal())?;
-    read_limited(unbuffered_stdin()?)
+    let source = unbuffered_stdin()?;
+    let metadata = source
+        .metadata()
+        .map_err(|error| SecretError::Io(format!("standard input cannot be read: {error}")))?;
+    if metadata.is_file() {
+        check_private(&metadata, "--phrase-stdin")?;
+    }
+    read_limited(source)
 }
 
 /// Standard input as a file of its own, so that the standard library's input buffer never holds

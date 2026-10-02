@@ -433,6 +433,38 @@ fn phrase_stdin_reads_a_pipe() {
     assert_no_secret("stdin", &all_output(&output, &run.out));
 }
 
+/// A file redirected to standard input is a secret file like any other: one that others can
+/// read is refused, so `--phrase-stdin < file` cannot get round the rule of `--phrase-file`.
+#[test]
+fn phrase_stdin_refuses_a_file_others_can_read() {
+    let signer = account(0);
+    let run = Run::new(
+        "phrase_stdin_refuses_a_file_others_can_read",
+        &link_message(&signer, now_s() - 5),
+    );
+    let arguments = run.arguments("sign", &["--phrase-stdin", "--yes"]);
+    for mode in [0o644, 0o640, 0o604, 0o620, 0o602] {
+        fs::set_permissions(&run.phrase, fs::Permissions::from_mode(mode)).unwrap();
+        let output = Command::new(BIN)
+            .args(&arguments)
+            .stdin(fs::File::open(&run.phrase).unwrap())
+            .output()
+            .unwrap();
+        assert_refused(&output, 1, "make it private with chmod 600");
+        assert!(!run.out.exists(), "mode {mode:o}");
+        assert_no_secret("stdin file", &all_output(&output, &run.out));
+    }
+    // A private file on standard input signs.
+    fs::set_permissions(&run.phrase, fs::Permissions::from_mode(0o600)).unwrap();
+    let output = Command::new(BIN)
+        .args(&arguments)
+        .stdin(fs::File::open(&run.phrase).unwrap())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    assert_no_secret("stdin file", &all_output(&output, &run.out));
+}
+
 /// A terminal on standard input is refused before anything is read: the phrase would be echoed.
 /// `script` gives the program a terminal of its own.
 #[cfg(target_os = "linux")]

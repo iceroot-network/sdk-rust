@@ -48,7 +48,7 @@ The secret, one of:
   --passphrase-file <file>  a legacy passphrase, in a file only you can read; profiles in
                             today's formats only (one line ending at the end is removed)
   --phrase-stdin            a recovery phrase piped in; a terminal is refused, since it would
-                            echo the phrase
+                            echo the phrase, and a file redirected in must be private
 A secret is never read from an argument or the environment.
 
 Options:

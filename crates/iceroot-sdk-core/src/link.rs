@@ -381,17 +381,25 @@ impl LinkRecord {
         )
     }
 
-    /// The record in the JSON `text`: an object with exactly the five members, each a text.
-    /// The record is not verified; see [`verify`].
+    /// The record in the JSON `text`: an object with exactly the five members, each once and
+    /// each a text. The record is not verified; see [`verify`].
     pub fn from_json(text: &str) -> Result<LinkRecord, Error> {
         if text.len() > MAX_JSON_LENGTH {
             return Err(problem(LinkProblem::Json));
         }
         let value: Value = serde_json::from_str(text).map_err(|_| problem(LinkProblem::Json))?;
+        // A parsed object keeps only the last of two members of one name, so the members are
+        // counted in the text too: a doubled member would let the record verify a message other
+        // than the one a person reading it sees first.
+        if top_level_members(text) != 5 {
+            return Err(problem(LinkProblem::Json));
+        }
         LinkRecord::from_json_value(&value)
     }
 
-    /// [`LinkRecord::from_json`] for a parsed JSON value.
+    /// [`LinkRecord::from_json`] for a parsed JSON value. A parsed object has already lost the
+    /// earlier of two members of one name, so a record received as text is read with
+    /// [`LinkRecord::from_json`], which refuses that.
     pub fn from_json_value(value: &Value) -> Result<LinkRecord, Error> {
         const MEMBERS: [&str; 5] = ["message", "publicKey", "signature", "algorithm", "network"];
         let object = value.as_object().ok_or(problem(LinkProblem::Json))?;
@@ -413,6 +421,32 @@ impl LinkRecord {
             network: text("network")?,
         })
     }
+}
+
+/// The number of members of the object in the JSON `text`, which has already parsed: the colons
+/// outside strings at nesting depth one.
+fn top_level_members(text: &str) -> usize {
+    let (mut depth, mut members) = (0usize, 0usize);
+    let (mut in_string, mut escaped) = (false, false);
+    for byte in text.bytes() {
+        if in_string {
+            match byte {
+                _ if escaped => escaped = false,
+                b'\\' => escaped = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' | b'[' => depth = depth.saturating_add(1),
+            b'}' | b']' => depth = depth.saturating_sub(1),
+            b':' if depth == 1 => members = members.saturating_add(1),
+            _ => {}
+        }
+    }
+    members
 }
 
 /// Sign the link or revocation `message` with `account`, at the signer's time `now_ms`

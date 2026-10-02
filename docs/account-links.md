@@ -79,7 +79,7 @@ The signed record is compact JSON with exactly these members, in this order:
 {"message":"<the exact message, newlines written as \n>","publicKey":"<public key>","signature":"<signature>","algorithm":"secp256k1-bip340-sha256","network":"heartwood-devnet-v90"}
 ```
 
-It is UTF-8 with no white space between tokens and no newline at the end. Each text is escaped as JSON requires and no further: `\"`, `\\`, `\b`, `\f`, `\n`, `\r` and `\t`, other characters below U+0020 as `\u00XX` in lowercase hex, and every other character as itself. This is what JavaScript's `JSON.stringify` writes for the same object, and `LinkRecord::to_json` writes the same bytes. A reader (`LinkRecord::from_json`) accepts the members in any order, but exactly these five, each a text, in at most 16,384 bytes; otherwise it refuses with the reason `json`.
+It is UTF-8 with no white space between tokens and no newline at the end. Each text is escaped as JSON requires and no further: `\"`, `\\`, `\b`, `\f`, `\n`, `\r` and `\t`, other characters below U+0020 as `\u00XX` in lowercase hex, and every other character as itself. This is what JavaScript's `JSON.stringify` writes for the same object, and `LinkRecord::to_json` writes the same bytes. A reader (`LinkRecord::from_json`) accepts the members in any order, but exactly these five, each once and each a text, in at most 16,384 bytes; otherwise it refuses with the reason `json`.
 
 `link::verify` checks a record: its message passes the checks above; its `publicKey` and `network` are the message's and its `algorithm` is the profile's (`record`); and its signature is 64 bytes in lowercase hex that verify for the message under the public key (`signature`).
 
@@ -100,7 +100,7 @@ The message carries the key that signed it, and the check is that the account is
 
 ## Vectors
 
-`vectors/sdk/S09-account-links.jsonl` holds 112 records in the `heartwood-vectors/1` format, each with its output or its error (`{"class": "InvalidLink", "details": {"reason": ...}}`):
+`vectors/sdk/S09-account-links.jsonl` holds 113 records in the `heartwood-vectors/1` format, each with its output or its error (`{"class": "InvalidLink", "details": {"reason": ...}}`):
 
 - `link.build`: links and revocations built from a GitHub user id, a public key and the times, and the requests refused;
 - `link.parse`: valid messages and every refusal above, with each line altered, another network, a key and an address that do not match, non-ASCII text, extra spaces, CRLF line endings, a 32-byte message, a time too far ahead and revocations whose times are out of order;

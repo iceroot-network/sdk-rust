@@ -218,6 +218,24 @@ const recordJson = (record) => JSON.stringify({
     network: record.network,
 });
 
+// The member names of the object in the JSON text, as written, doubled ones included: JSON.parse
+// keeps only the last of two members of one name.
+function memberNames(text) {
+    const names = [];
+    const tokens = text.match(/"(?:[^"\\]|\\.)*"|[{}[\]:]/g) || [];
+    let depth = 0;
+    tokens.forEach((token, i) => {
+        if (token === '{' || token === '[') {
+            depth += 1;
+        } else if (token === '}' || token === ']') {
+            depth -= 1;
+        } else if (token === ':' && depth === 1) {
+            names.push(JSON.parse(tokens[i - 1]));
+        }
+    });
+    return names;
+}
+
 function readRecord(text) {
     if (Buffer.byteLength(text, 'utf8') > MAX_JSON_LENGTH) {
         refuse('json');
@@ -231,6 +249,7 @@ function readRecord(text) {
     const members = ['message', 'publicKey', 'signature', 'algorithm', 'network'];
     if (value === null || typeof value !== 'object' || Array.isArray(value) ||
         Object.keys(value).length !== members.length ||
+        memberNames(text).length !== members.length ||
         !members.every((key) => typeof value[key] === 'string')) {
         refuse('json');
     }
@@ -474,6 +493,7 @@ verifyCase('a member missing', JSON.stringify({ ...JSON.parse(signedLink.json), 
 verifyCase('a member that is not text', JSON.stringify({ ...JSON.parse(signedLink.json), network: 90 }), 'json');
 verifyCase('not JSON', signedLink.json.slice(0, -1), 'json');
 verifyCase('a JSON array', JSON.stringify([signedLink.json]), 'json');
+verifyCase('a member doubled', signedLink.json.replace('{"message":', `{"message":${JSON.stringify(revocation)},"message":`), 'json');
 verifyCase('the members in another order', JSON.stringify({
     network: NETWORK, algorithm: ALGORITHM, signature: signedLink.record.signature, publicKey: holder.publicKey, message: link,
 }));

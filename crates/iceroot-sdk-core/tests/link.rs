@@ -244,7 +244,7 @@ fn s09_account_links() {
     assert_eq!(
         tally,
         Tally {
-            matched: 112,
+            matched: 113,
             divergent: 0,
             skipped: 0
         }
@@ -760,6 +760,45 @@ fn the_record_json_is_fixed() {
     assert_eq!(reason_of(LinkRecord::from_json("{")), LinkProblem::Json);
     let long = format!("{{\"message\":\"{}\"}}", "x".repeat(link::MAX_JSON_LENGTH));
     assert_eq!(reason_of(LinkRecord::from_json(&long)), LinkProblem::Json);
+}
+
+#[test]
+fn a_doubled_member_is_refused() {
+    let signed = link::sign(&profile(), &account(HOLDER), &link_text(), NOW).unwrap();
+    let json = signed.to_json();
+    // A reader that kept the last of two members would verify a message other than the one a
+    // person reading the record sees first.
+    for doubled in [
+        json.replacen("{\"message\":", "{\"message\":\"decoy\",\"message\":", 1),
+        json.replacen(
+            "{\"message\":",
+            "{\"message\":{\"a\":[1,{\"b\":2}]},\"message\":",
+            1,
+        ),
+        json.replacen("\"network\":", "\"network\":\"x\",\"network\":", 1),
+        json.replacen(
+            "{\"message\":",
+            "{ \"message\" : \"decoy\" , \"message\":",
+            1,
+        ),
+        json.replacen(
+            "\"signature\":",
+            "\"sign\\u0061ture\":\"00\",\"signature\":",
+            1,
+        ),
+    ] {
+        assert_eq!(
+            reason_of(LinkRecord::from_json(&doubled)),
+            LinkProblem::Json,
+            "{doubled}"
+        );
+    }
+    // Text that only looks like a member inside a value is no member.
+    let mut quoted = signed.clone();
+    quoted.message = "{\"message\":\"x\",\"message\":\"y\"}: \\".to_owned();
+    assert_eq!(LinkRecord::from_json(&quoted.to_json()).unwrap(), quoted);
+    let spaced = format!(" {} ", json.replace(",\"", " , \"").replace("\":", "\" : "));
+    assert_eq!(LinkRecord::from_json(&spaced).unwrap(), signed);
 }
 
 #[test]

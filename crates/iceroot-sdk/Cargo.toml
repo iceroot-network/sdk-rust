@@ -1,0 +1,43 @@
+[package]
+name = "iceroot-sdk"
+description = "The IceRoot SDK for Rust: the one crate applications depend on"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# The keystore is on by default, since wallets need it. A server that never holds a user's
+# recovery seed (an explorer or a validator portal backend) can turn it off with
+# `default-features = false` and leave Argon2id, XChaCha20-Poly1305 and their dependencies out of
+# its build.
+default = ["keystore"]
+# The keystore format (`keystore`, the crate `iceroot_keystore`): a recovery seed encrypted under a
+# password.
+keystore = ["dep:iceroot-keystore"]
+# The node API client's async HTTP transport over reqwest (`api::HttpClient`). Native targets
+# only: on wasm32 the feature adds nothing, and the host language performs the requests.
+http = ["iceroot-sdk-api/http"]
+# Serialize and Deserialize on the node API client's request values and answers, in the JSON form
+# the SDK's bindings share (see the documentation of `api`).
+serde = ["iceroot-sdk-api/serde"]
+# Test seam of the bindings only: see the feature of the same name in iceroot-sdk-core.
+fixed-aux = ["iceroot-sdk-core/fixed-aux"]
+# The devnet end-to-end test (tests/e2e.rs), over the HTTP transport. It needs a running devnet,
+# which tools/e2e/devnet.sh starts and stops, and runs only when asked for (`-- --ignored`).
+e2e = ["http"]
+
+[dependencies]
+iceroot-keystore = { workspace = true, optional = true }
+iceroot-sdk-api.workspace = true
+iceroot-sdk-core.workspace = true
+iceroot-vote.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tokio = { version = "1", default-features = false, features = ["macros", "rt", "time"] }

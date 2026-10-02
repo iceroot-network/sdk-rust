@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-profile-message-algorithm"
+description = "Enables the profile_message_algorithm command without any pre-configured scope."
+commands.allow = ["profile_message_algorithm"]
+
+[[permission]]
+identifier = "deny-profile-message-algorithm"
+description = "Denies the profile_message_algorithm command without any pre-configured scope."
+commands.deny = ["profile_message_algorithm"]

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-message-verify"
+description = "Enables the message_verify command without any pre-configured scope."
+commands.allow = ["message_verify"]
+
+[[permission]]
+identifier = "deny-message-verify"
+description = "Denies the message_verify command without any pre-configured scope."
+commands.deny = ["message_verify"]

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-vote-rules-at"
+description = "Enables the vote_rules_at command without any pre-configured scope."
+commands.allow = ["vote_rules_at"]
+
+[[permission]]
+identifier = "deny-vote-rules-at"
+description = "Denies the vote_rules_at command without any pre-configured scope."
+commands.deny = ["vote_rules_at"]

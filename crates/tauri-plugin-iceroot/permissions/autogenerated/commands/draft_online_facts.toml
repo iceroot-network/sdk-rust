@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-draft-online-facts"
+description = "Enables the draft_online_facts command without any pre-configured scope."
+commands.allow = ["draft_online_facts"]
+
+[[permission]]
+identifier = "deny-draft-online-facts"
+description = "Denies the draft_online_facts command without any pre-configured scope."
+commands.deny = ["draft_online_facts"]

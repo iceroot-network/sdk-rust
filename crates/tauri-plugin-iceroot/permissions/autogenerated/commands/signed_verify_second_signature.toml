@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-signed-verify-second-signature"
+description = "Enables the signed_verify_second_signature command without any pre-configured scope."
+commands.allow = ["signed_verify_second_signature"]
+
+[[permission]]
+identifier = "deny-signed-verify-second-signature"
+description = "Denies the signed_verify_second_signature command without any pre-configured scope."
+commands.deny = ["signed_verify_second_signature"]

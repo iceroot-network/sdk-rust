@@ -1,0 +1,58 @@
+[package]
+name = "tauri-plugin-iceroot"
+description = "The IceRoot SDK as a Tauri 2 plugin: keys, signing, drafts, the node API client, the vote library, the keystore and ownership proofs in native Rust, behind the TypeScript interface of @iceroot-network/sdk/tauri"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "Apache-2.0"
+repository = "https://github.com/iceroot-network/sdk-rust"
+publish = false
+# Tauri's plugin build script hands the plugin's permissions to the application through Cargo's
+# `links` metadata.
+links = "tauri-plugin-iceroot"
+
+# The plugin builds against Tauri and the platform's webview libraries (WebKitGTK on Linux), which
+# the SDK's other crates never need, so it is a workspace of its own with its own lock file.
+[workspace]
+
+[features]
+default = []
+# Test seams of the plugin's test build: signatures and ownership proofs with fixed auxiliary
+# randomness, the keystore vectors' salts and nonces, and the vote library's constants, as
+# commands. The SDK's TypeScript tests use them to compare the plugin with native Rust byte for
+# byte. No build that ships may enable it.
+test-seams = ["iceroot-sdk-bindings/fixed-aux", "iceroot-sdk-bindings/keystore-testing"]
+
+[dependencies]
+# The SDK's Rust core with its node API client over reqwest, and the boundary its bindings share:
+# the plugin reads and writes the same JSON as the WebAssembly module.
+iceroot-sdk = { path = "../iceroot-sdk", features = ["http", "serde", "keystore"] }
+iceroot-sdk-bindings = { path = "../iceroot-sdk-bindings" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# No default feature: the application chooses the runtime (wry) and its platform features, so the
+# plugin itself builds without a webview library.
+tauri = { version = "2.12", default-features = false }
+zeroize = "1.9"
+
+[build-dependencies]
+tauri-plugin = { version = "2.7", features = ["build"] }
+
+[dev-dependencies]
+tauri = { version = "2.12", default-features = false, features = ["test"] }
+tokio = { version = "1", default-features = false, features = ["macros", "net", "io-util", "rt", "rt-multi-thread", "time"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+missing_docs = "warn"
+
+# No panics on untrusted input. Tests may unwrap (clippy.toml).
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+
+[profile.release]
+overflow-checks = true

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-vote-call"
+description = "Enables the vote_call command without any pre-configured scope."
+commands.allow = ["vote_call"]
+
+[[permission]]
+identifier = "deny-vote-call"
+description = "Denies the vote_call command without any pre-configured scope."
+commands.deny = ["vote_call"]

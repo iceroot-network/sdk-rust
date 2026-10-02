@@ -1,0 +1,63 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = """
+Every command of the SDK: keys, signing, drafts, the node API client, the vote library, the
+keystore and ownership proofs, except two. Connecting to a network also needs the relays it may
+reach, as the `allow` scope of `allow-net-connect`: no relay is reachable by default. Reading the
+recovery phrase out of a keystore, which only a backup screen needs, is `allow-keystore-decrypt`:
+keys open from a keystore without it.
+"""
+permissions = [
+    "allow-version",
+    "allow-profile-capabilities",
+    "allow-profile-message-network",
+    "allow-profile-message-algorithm",
+    "allow-phrase-generate",
+    "allow-phrase-check",
+    "allow-address-parse",
+    "allow-address-from-public-key",
+    "allow-amount-parse",
+    "allow-amount-format",
+    "allow-message-verify",
+    "allow-signin-build",
+    "allow-signin-parse",
+    "allow-key-from-phrase",
+    "allow-key-from-legacy-passphrase",
+    "allow-key-from-keystore",
+    "allow-key-sign-message",
+    "allow-key-sign-sign-in",
+    "allow-key-release",
+    "allow-chain-load",
+    "allow-chain-stage-at",
+    "allow-chain-rules",
+    "allow-chain-economics",
+    "allow-chain-free",
+    "allow-draft-build",
+    "allow-draft-deserialize",
+    "allow-draft-online-facts",
+    "allow-draft-sign",
+    "allow-signed-deserialize",
+    "allow-signed-from-json",
+    "allow-signed-decode",
+    "allow-signed-verify-second-signature",
+    "allow-net-read",
+    "allow-net-node-configuration",
+    "allow-net-submit",
+    "allow-net-close",
+    "allow-vote-call",
+    "allow-vote-rules-at",
+    "allow-vote-snapshot-from-validators",
+    "allow-keystore-encrypt",
+    "allow-keystore-inspect",
+    "allow-keystore-change-password",
+    "allow-keystore-reencrypt",
+    "allow-keystore-armor",
+    "allow-keystore-dearmor",
+    "allow-keystore-check-params",
+    "allow-keystore-is-weaker",
+    "allow-ownership-call",
+    "allow-proof-key-from-passphrase",
+    "allow-proof-key-sign",
+    "allow-proof-key-release",
+]

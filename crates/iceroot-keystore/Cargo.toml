@@ -1,0 +1,54 @@
+[package]
+name = "iceroot-keystore"
+description = "The IceRoot keystore format: a recovery seed encrypted under a password with Argon2id and XChaCha20-Poly1305"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Tests only, never in a build that ships: `Bounds::TEST`, which lowers the parameter floor to
+# Argon2's own minimums so that the vectors run in milliseconds (the ceilings stay), and
+# `encrypt_with_salt_and_nonce`, which takes the salt and nonce from the caller. The crate's own
+# tests turn it on through the dev-dependency on itself below; tools/check-deps.sh fails when a
+# normal or build dependency enables it.
+testing = []
+
+[dependencies]
+argon2.workspace = true
+base64ct.workspace = true
+chacha20poly1305.workspace = true
+getrandom.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# Password normalisation (NFKD): the normaliser the core uses for recovery phrases.
+icu_normalizer.workspace = true
+zeroize.workspace = true
+# Not called: dependencies only to turn on their `zeroize` features (see the workspace manifest).
+# src/crypto.rs does not build without those of blake2 and cipher.
+blake2.workspace = true
+cipher.workspace = true
+poly1305.workspace = true
+
+# In a browser, a worker or Node, randomness comes from crypto.getRandomValues.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+
+[dev-dependencies]
+iceroot-keystore = { path = ".", features = ["testing"] }
+hex.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+# A second NFKD implementation, which the password normalisation is compared with.
+unicode-normalization.workspace = true
+
+# The tests in WebAssembly, under Node (wasm-bindgen-test-runner), and their clock.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
+js-sys = "0.3"
+wasm-bindgen-test = "0.3"

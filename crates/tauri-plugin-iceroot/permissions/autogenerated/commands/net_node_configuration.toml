@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-net-node-configuration"
+description = "Enables the net_node_configuration command without any pre-configured scope."
+commands.allow = ["net_node_configuration"]
+
+[[permission]]
+identifier = "deny-net-node-configuration"
+description = "Denies the net_node_configuration command without any pre-configured scope."
+commands.deny = ["net_node_configuration"]

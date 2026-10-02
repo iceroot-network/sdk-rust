@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-signin-parse"
+description = "Enables the signin_parse command without any pre-configured scope."
+commands.allow = ["signin_parse"]
+
+[[permission]]
+identifier = "deny-signin-parse"
+description = "Denies the signin_parse command without any pre-configured scope."
+commands.deny = ["signin_parse"]

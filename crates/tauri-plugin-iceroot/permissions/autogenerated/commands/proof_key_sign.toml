@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-proof-key-sign"
+description = "Enables the proof_key_sign command without any pre-configured scope."
+commands.allow = ["proof_key_sign"]
+
+[[permission]]
+identifier = "deny-proof-key-sign"
+description = "Denies the proof_key_sign command without any pre-configured scope."
+commands.deny = ["proof_key_sign"]

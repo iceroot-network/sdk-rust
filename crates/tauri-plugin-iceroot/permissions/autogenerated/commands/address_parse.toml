@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-address-parse"
+description = "Enables the address_parse command without any pre-configured scope."
+commands.allow = ["address_parse"]
+
+[[permission]]
+identifier = "deny-address-parse"
+description = "Denies the address_parse command without any pre-configured scope."
+commands.deny = ["address_parse"]

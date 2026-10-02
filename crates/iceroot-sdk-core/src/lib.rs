@@ -16,6 +16,8 @@
 //! - [`message`] and [`signin`]: message signatures and the sign-in message.
 //! - [`ownership`]: ownership proofs of Solar addresses, which name the IceRoot account a
 //!   holding should be bound to.
+//! - [`link`]: account links, the signed message that joins a GitHub account and an IceRoot
+//!   account, its revocation and the no-replay rule.
 //! - [`node`]: what the node API client (`iceroot-sdk-api`) decodes, read into the core's inputs
 //!   and checked on the way: the chain, a draft's online facts, submissions and errors.
 //! - [`error`]: the one error type, with stable codes.
@@ -50,6 +52,7 @@ pub mod economics;
 pub mod error;
 pub mod fee;
 pub mod keys;
+pub mod link;
 pub mod message;
 pub mod node;
 pub mod ownership;

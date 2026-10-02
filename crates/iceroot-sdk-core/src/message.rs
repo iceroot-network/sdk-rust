@@ -17,7 +17,7 @@
 //! lost. A wallet still shows the holder the text it signs; from the post-quantum formats on the
 //! message domain carries its own tag, so that the separation holds whatever the bytes are.
 //!
-//! Two kinds of text are signatures of their own, and a plain message signature over either is
+//! Three kinds of text are signatures of their own, and a plain message signature over any is
 //! valid for it:
 //!
 //! - An ownership proof ([`crate::ownership`]) is signed exactly as a message is, and a devnet
@@ -33,6 +33,11 @@
 //!   [`Error::InvalidArgument`], any text that [`crate::signin::parse`] accepts for some network,
 //!   origin, account and time: a challenge that has lapsed, or names another network, is refused
 //!   too.
+//! - An account link or its revocation ([`crate::link`]) joins a GitHub account to the account,
+//!   or ends that link. [`sign`] and [`sign_bytes`] refuse, with [`Error::InvalidArgument`], text
+//!   whose first line is a link's or a revocation's ([`crate::link::TITLE`],
+//!   [`crate::link::REVOCATION_TITLE`]); such text is signed only with [`crate::link::sign`],
+//!   which checks it against the signing account and the time first.
 
 use heartwood_crypto::crypto::hash::sha256;
 use heartwood_crypto::crypto::sig::{self, SchemeId, Signature, SigningDomain};
@@ -76,8 +81,8 @@ pub struct MessageSignature {
 ///
 /// # Errors
 ///
-/// As [`sign_bytes`]: an ownership proof's text and a sign-in message are refused with
-/// [`Error::InvalidArgument`] (see the module documentation).
+/// As [`sign_bytes`]: an ownership proof's text, an account link's or revocation's text and a
+/// sign-in message are refused with [`Error::InvalidArgument`] (see the module documentation).
 pub fn sign(
     profile: &Profile,
     account: &Account,
@@ -104,7 +109,9 @@ pub fn sign_with(
 ///
 /// [`Error::InvalidArgument`] when the bytes are not UTF-8 text: such bytes may be a transaction's
 /// (see the module documentation); and for an ownership proof's text, which is signed only as a
-/// proof; and for a sign-in message, which is signed only with [`crate::signin::sign`].
+/// proof; for an account link's or revocation's text, which is signed only with
+/// [`crate::link::sign`]; and for a sign-in message, which is signed only with
+/// [`crate::signin::sign`].
 /// [`Error::UnsupportedOnNetwork`] without message signing, and [`Error::NetworkMismatch`] for an
 /// account of another profile.
 pub fn sign_bytes(
@@ -129,6 +136,9 @@ pub fn sign_bytes_with(
     if is_proof(text) {
         return Err(Error::InvalidArgument { reason: PROOF_TEXT });
     }
+    if crate::link::is_link_text(text) {
+        return Err(Error::InvalidArgument { reason: LINK_TEXT });
+    }
     if crate::signin::parse_challenge(text).is_ok() {
         return Err(Error::InvalidArgument {
             reason: SIGN_IN_TEXT,
@@ -152,8 +162,8 @@ pub(crate) fn check_signer(profile: &Profile, account: &Account) -> Result<(), E
 }
 
 /// The message signature of `text`, without the refusals of [`sign_bytes`]. Called by
-/// [`sign_bytes_with`], and by [`crate::signin::sign_with`] once its checks pass; never public,
-/// since it signs a sign-in message.
+/// [`sign_bytes_with`], and by [`crate::signin::sign_with`] and [`crate::link::sign_with`] once
+/// their checks pass; never public, since it signs a sign-in message or a link.
 pub(crate) fn signature_of(
     profile: &Profile,
     account: &Account,
@@ -173,6 +183,9 @@ pub(crate) fn signature_of(
 const NOT_TEXT: &str = "a message is signed only as UTF-8 text";
 /// Why an ownership proof's text is refused as a message.
 const PROOF_TEXT: &str = "an ownership proof is signed only as a proof, never as a message";
+/// Why an account link's or revocation's text is refused as a message.
+const LINK_TEXT: &str =
+    "an account link is signed only as a checked link, never as a plain message";
 /// Why a sign-in message is refused as a plain message.
 const SIGN_IN_TEXT: &str =
     "a sign-in message is signed only for the page that asks for it, never as a plain message";

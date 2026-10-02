@@ -606,6 +606,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "iceroot-link-cli"
+version = "0.1.0"
+dependencies = [
+ "iceroot-sdk-core",
+ "zeroize",
+]
+
+[[package]]
 name = "iceroot-sdk"
 version = "0.1.0"
 dependencies = [

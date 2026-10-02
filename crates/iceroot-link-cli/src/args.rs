@@ -154,7 +154,9 @@ fn option_name(
     position: usize,
     known: &[&'static str],
 ) -> Result<Option<&'static str>, UsageError> {
-    let Some(text) = item.to_str() else {
+    // Only an option is read as `--name=value`; any other argument, such as a file name with an
+    // equals sign, is left to the command.
+    let Some(text) = item.to_str().filter(|text| text.starts_with('-')) else {
         return Ok(None);
     };
     let name = text.split_once('=').map_or(text, |(name, _)| name);
@@ -464,6 +466,13 @@ mod tests {
                 now: Some("2026-01-02T03:04:05Z".into()),
             })
         );
+        // A file name may hold an equals sign: only an option is read as `--name=value`.
+        for name in ["a=b.json", "records/link=1.json"] {
+            let Command::Verify(options) = parse(line(&["verify", name])).unwrap() else {
+                panic!("not verify");
+            };
+            assert_eq!(options.record, PathBuf::from(name));
+        }
         assert!(parse(line(&["verify"])).is_err());
         assert!(parse(line(&["verify", "a", "b"])).is_err());
         assert!(parse(line(&["verify", "a", "--yes"])).is_err());

@@ -1,0 +1,5 @@
+# The features of heartwood-crypto that normal and build dependencies may enable, one per line.
+#
+# Empty: the SDK uses heartwood-crypto's default build. A WebAssembly signer that Heartwood
+# selects by feature, rather than by target, would be listed here. `genesis`, `fixed-aux` and
+# `legacy-schnorr` are never allowed; tools/check-deps.sh refuses them even if listed.

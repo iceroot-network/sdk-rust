@@ -1,0 +1,691 @@
+[
+  {
+    "name": "node-status",
+    "method": "GET",
+    "path": "/node/status",
+    "status": 200,
+    "headers": {
+      "x-block-height": "80"
+    },
+    "file": "node-status.json"
+  },
+  {
+    "name": "node-configuration",
+    "method": "GET",
+    "path": "/node/configuration",
+    "status": 200,
+    "headers": {
+      "x-block-height": "80"
+    },
+    "file": "node-configuration.json"
+  },
+  {
+    "name": "node-configuration-crypto",
+    "method": "GET",
+    "path": "/node/configuration/crypto",
+    "status": 200,
+    "headers": {
+      "x-block-height": "80"
+    },
+    "file": "node-configuration-crypto.json"
+  },
+  {
+    "name": "node-fees-30-days",
+    "method": "GET",
+    "path": "/node/fees?days=30",
+    "status": 200,
+    "headers": {
+      "x-block-height": "80"
+    },
+    "file": "node-fees-30-days.json"
+  },
+  {
+    "name": "node-fees",
+    "method": "GET",
+    "path": "/node/fees",
+    "status": 200,
+    "headers": {
+      "x-block-height": "80"
+    },
+    "file": "node-fees.json"
+  },
+  {
+    "name": "blockchain",
+    "method": "GET",
+    "path": "/blockchain",
+    "status": 200,
+    "headers": {
+      "x-block-height": "80"
+    },
+    "file": "blockchain.json"
+  },
+  {
+    "name": "submit-accepted",
+    "method": "POST",
+    "path": "/transactions",
+    "status": 200,
+    "headers": {
+      "x-block-height": "81"
+    },
+    "file": "submit-accepted.json",
+    "requestFile": "submit-accepted.request.json"
+  },
+  {
+    "name": "transaction-unconfirmed-by-id",
+    "method": "GET",
+    "path": "/transactions/unconfirmed/b2abe2cabab608935280c144a15ebea3e4e8348c530a983ffbf6013a13ab54a9",
+    "status": 200,
+    "headers": {
+      "x-block-height": "81"
+    },
+    "file": "transaction-unconfirmed-by-id.json"
+  },
+  {
+    "name": "transactions-unconfirmed",
+    "method": "GET",
+    "path": "/transactions/unconfirmed?page=1&limit=10",
+    "status": 200,
+    "headers": {
+      "x-block-height": "81"
+    },
+    "file": "transactions-unconfirmed.json"
+  },
+  {
+    "name": "submit-mixed",
+    "method": "POST",
+    "path": "/transactions",
+    "status": 200,
+    "headers": {
+      "x-block-height": "81"
+    },
+    "file": "submit-mixed.json",
+    "requestFile": "submit-mixed.request.json"
+  },
+  {
+    "name": "submit-empty",
+    "method": "POST",
+    "path": "/transactions",
+    "status": 422,
+    "headers": {
+      "x-block-height": "81"
+    },
+    "file": "submit-empty.json",
+    "requestFile": "submit-empty.request.json"
+  },
+  {
+    "name": "transaction-transfer-two-recipients",
+    "method": "GET",
+    "path": "/transactions/b2abe2cabab608935280c144a15ebea3e4e8348c530a983ffbf6013a13ab54a9",
+    "status": 200,
+    "headers": {
+      "x-block-height": "82"
+    },
+    "file": "transaction-transfer-two-recipients.json"
+  },
+  {
+    "name": "transaction-transfer-raw",
+    "method": "GET",
+    "path": "/transactions/b2abe2cabab608935280c144a15ebea3e4e8348c530a983ffbf6013a13ab54a9?transform=false",
+    "status": 200,
+    "headers": {
+      "x-block-height": "82"
+    },
+    "file": "transaction-transfer-raw.json"
+  },
+  {
+    "name": "transaction-not-found",
+    "method": "GET",
+    "path": "/transactions/0000000000000000000000000000000000000000000000000000000000000000",
+    "status": 404,
+    "headers": {
+      "x-block-height": "82"
+    },
+    "file": "transaction-not-found.json"
+  },
+  {
+    "name": "transaction-unconfirmed-not-found",
+    "method": "GET",
+    "path": "/transactions/unconfirmed/b2abe2cabab608935280c144a15ebea3e4e8348c530a983ffbf6013a13ab54a9",
+    "status": 404,
+    "headers": {
+      "x-block-height": "82"
+    },
+    "file": "transaction-unconfirmed-not-found.json"
+  },
+  {
+    "name": "transactions-page",
+    "method": "GET",
+    "path": "/transactions?page=1&limit=10",
+    "status": 200,
+    "headers": {
+      "x-block-height": "82"
+    },
+    "file": "transactions-page.json"
+  },
+  {
+    "name": "transactions-by-sender",
+    "method": "GET",
+    "path": "/transactions?senderId=daTBxkSJk2tZhujYcYSQtxj5RRFZ8HcxW8&page=1&limit=10",
+    "status": 200,
+    "headers": {
+      "x-block-height": "82"
+    },
+    "file": "transactions-by-sender.json"
+  },
+  {
+    "name": "transactions-transfer",
+    "method": "GET",
+    "path": "/transactions?typeGroup=1&type=6&page=1&limit=5",
+    "status": 200,
+    "headers": {
+      "x-block-height": "82"
+    },
+    "file": "transactions-transfer.json"
+  },
+  {
+    "name": "transaction-transfer",
+    "method": "GET",
+    "path": "/transactions/f99605ce833df977c59b1118a2a27d710b41889eb1e5e99a1338b9de1d85b979",
+    "status": 200,
+    "headers": {
+      "x-block-height": "82"
+    },
+    "file": "transaction-transfer.json"
+  },
+  {
+    "name": "transactions-vote",
+    "method": "GET",
+    "path": "/transactions?typeGroup=2&type=2&page=1&limit=5",
+    "status": 200,
+    "headers": {
+      "x-block-height": "82"
+    },
+    "file": "transactions-vote.json"
+  },
+  {
+    "name": "transaction-vote",
+    "method": "GET",
+    "path": "/transactions/aee258883b6ca7caefb379eed857a5f889ccaa0da5545228a3c91507d96ab971",
+    "status": 200,
+    "headers": {
+      "x-block-height": "82"
+    },
+    "file": "transaction-vote.json"
+  },
+  {
+    "name": "transactions-burn",
+    "method": "GET",
+    "path": "/transactions?typeGroup=2&type=0&page=1&limit=5",
+    "status": 200,
+    "headers": {
+      "x-block-height": "83"
+    },
+    "file": "transactions-burn.json"
+  },
+  {
+    "name": "transaction-burn",
+    "method": "GET",
+    "path": "/transactions/9a615b04318334aff651ce83821ba3c4e24a007622cbde48696028537857ccde",
+    "status": 200,
+    "headers": {
+      "x-block-height": "83"
+    },
+    "file": "transaction-burn.json"
+  },
+  {
+    "name": "transactions-second-key",
+    "method": "GET",
+    "path": "/transactions?typeGroup=1&type=1&page=1&limit=5",
+    "status": 200,
+    "headers": {
+      "x-block-height": "83"
+    },
+    "file": "transactions-second-key.json"
+  },
+  {
+    "name": "transaction-second-key",
+    "method": "GET",
+    "path": "/transactions/47ceaf1ece83b07f866d1f2f4a1fa5e03c673d3447baa0402f58f10b986963c3",
+    "status": 200,
+    "headers": {
+      "x-block-height": "83"
+    },
+    "file": "transaction-second-key.json"
+  },
+  {
+    "name": "transactions-validator-registration",
+    "method": "GET",
+    "path": "/transactions?typeGroup=1&type=2&page=1&limit=5",
+    "status": 200,
+    "headers": {
+      "x-block-height": "83"
+    },
+    "file": "transactions-validator-registration.json"
+  },
+  {
+    "name": "transaction-validator-registration",
+    "method": "GET",
+    "path": "/transactions/2cfcf4bd77f67f2668b7158e4061fdc09296d3b502d49d9ef6c43efb2987a19a",
+    "status": 200,
+    "headers": {
+      "x-block-height": "83"
+    },
+    "file": "transaction-validator-registration.json"
+  },
+  {
+    "name": "transactions-validator-resignation",
+    "method": "GET",
+    "path": "/transactions?typeGroup=1&type=7&page=1&limit=5",
+    "status": 200,
+    "headers": {
+      "x-block-height": "83"
+    },
+    "file": "transactions-validator-resignation.json"
+  },
+  {
+    "name": "transaction-validator-resignation",
+    "method": "GET",
+    "path": "/transactions/133cb27b66f1603d203781e43d33501a3b7c77087c8baf4c7f4c9a9f9a64a475",
+    "status": 200,
+    "headers": {
+      "x-block-height": "83"
+    },
+    "file": "transaction-validator-resignation.json"
+  },
+  {
+    "name": "transaction-vote-withdrawal",
+    "method": "GET",
+    "path": "/transactions/7c2d119ca0aae61c878051b4d1a08bdce82404e997052822bd121a3f89d35936",
+    "status": 200,
+    "headers": {
+      "x-block-height": "83"
+    },
+    "file": "transaction-vote-withdrawal.json"
+  },
+  {
+    "name": "transaction-vote-three-way",
+    "method": "GET",
+    "path": "/transactions/c241e61c1c8c86a831aaaea344f89df9ae0baf5633519a91cc2c6835cedb07fd",
+    "status": 200,
+    "headers": {
+      "x-block-height": "84"
+    },
+    "file": "transaction-vote-three-way.json"
+  },
+  {
+    "name": "transaction-resignation-permanent",
+    "method": "GET",
+    "path": "/transactions/de7fc20ce4c0b7187e0c965821e73586cfcb6a3776c74a065df3b8770ee20e3e",
+    "status": 200,
+    "headers": {
+      "x-block-height": "84"
+    },
+    "file": "transaction-resignation-permanent.json"
+  },
+  {
+    "name": "transaction-resignation-temporary",
+    "method": "GET",
+    "path": "/transactions/ab239c2c5509fa74122d836f2320ceb9975b8c8626ae07eda3c7246a81bcb94e",
+    "status": 200,
+    "headers": {
+      "x-block-height": "84"
+    },
+    "file": "transaction-resignation-temporary.json"
+  },
+  {
+    "name": "wallet-genesis",
+    "method": "GET",
+    "path": "/wallets/dZ1W1GsDCSyhR148oMhuHy3PkhnnSGCqVn",
+    "status": 200,
+    "headers": {
+      "x-block-height": "84"
+    },
+    "file": "wallet-genesis.json"
+  },
+  {
+    "name": "wallet-team",
+    "method": "GET",
+    "path": "/wallets/daTBxkSJk2tZhujYcYSQtxj5RRFZ8HcxW8",
+    "status": 200,
+    "headers": {
+      "x-block-height": "84"
+    },
+    "file": "wallet-team.json"
+  },
+  {
+    "name": "wallet-voter",
+    "method": "GET",
+    "path": "/wallets/dTe1ruBESG2r63u3VCLrMpTcx18PSurKJJ",
+    "status": 200,
+    "headers": {
+      "x-block-height": "84"
+    },
+    "file": "wallet-voter.json"
+  },
+  {
+    "name": "wallet-second-key",
+    "method": "GET",
+    "path": "/wallets/dDsmrDBibyfMtDreqHVTNix1sixL74Km2P",
+    "status": 200,
+    "headers": {
+      "x-block-height": "85"
+    },
+    "file": "wallet-second-key.json"
+  },
+  {
+    "name": "wallet-cold",
+    "method": "GET",
+    "path": "/wallets/dW84xVtbupBGDKm73pewS4hqhDqcJoyhzv",
+    "status": 200,
+    "headers": {
+      "x-block-height": "85"
+    },
+    "file": "wallet-cold.json"
+  },
+  {
+    "name": "wallet-invalid",
+    "method": "GET",
+    "path": "/wallets/dAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "status": 422,
+    "headers": {
+      "x-block-height": "85"
+    },
+    "file": "wallet-invalid.json"
+  },
+  {
+    "name": "wallet-bad-id",
+    "method": "GET",
+    "path": "/wallets/nobody-at-all",
+    "status": 422,
+    "headers": {
+      "x-block-height": "85"
+    },
+    "file": "wallet-bad-id.json"
+  },
+  {
+    "name": "wallet-transactions",
+    "method": "GET",
+    "path": "/wallets/daTBxkSJk2tZhujYcYSQtxj5RRFZ8HcxW8/transactions?page=1&limit=10",
+    "status": 200,
+    "headers": {
+      "x-block-height": "85"
+    },
+    "file": "wallet-transactions.json"
+  },
+  {
+    "name": "wallet-transactions-sent",
+    "method": "GET",
+    "path": "/wallets/daTBxkSJk2tZhujYcYSQtxj5RRFZ8HcxW8/transactions/sent?page=1&limit=10",
+    "status": 200,
+    "headers": {
+      "x-block-height": "85"
+    },
+    "file": "wallet-transactions-sent.json"
+  },
+  {
+    "name": "wallet-transactions-received",
+    "method": "GET",
+    "path": "/wallets/dZ1W1GsDCSyhR148oMhuHy3PkhnnSGCqVn/transactions/received?page=1&limit=5",
+    "status": 200,
+    "headers": {
+      "x-block-height": "85"
+    },
+    "file": "wallet-transactions-received.json"
+  },
+  {
+    "name": "wallet-votes",
+    "method": "GET",
+    "path": "/wallets/dTe1ruBESG2r63u3VCLrMpTcx18PSurKJJ/votes?page=1&limit=10",
+    "status": 200,
+    "headers": {
+      "x-block-height": "85"
+    },
+    "file": "wallet-votes.json"
+  },
+  {
+    "name": "votes-page",
+    "method": "GET",
+    "path": "/votes?page=1&limit=5",
+    "status": 200,
+    "headers": {
+      "x-block-height": "85"
+    },
+    "file": "votes-page.json"
+  },
+  {
+    "name": "vote-by-id",
+    "method": "GET",
+    "path": "/votes/4ca10d5305756afb5d0189fad478dd16d5b7db660ea9f8a38a385d9f66b0aaca",
+    "status": 200,
+    "headers": {
+      "x-block-height": "85"
+    },
+    "file": "vote-by-id.json"
+  },
+  {
+    "name": "blocks-last",
+    "method": "GET",
+    "path": "/blocks/last",
+    "status": 200,
+    "headers": {
+      "x-block-height": "85"
+    },
+    "file": "blocks-last.json"
+  },
+  {
+    "name": "blocks-first",
+    "method": "GET",
+    "path": "/blocks/first",
+    "status": 200,
+    "headers": {
+      "x-block-height": "86"
+    },
+    "file": "blocks-first.json"
+  },
+  {
+    "name": "blocks-page",
+    "method": "GET",
+    "path": "/blocks?page=1&limit=5",
+    "status": 200,
+    "headers": {
+      "x-block-height": "86"
+    },
+    "file": "blocks-page.json"
+  },
+  {
+    "name": "block-by-height",
+    "method": "GET",
+    "path": "/blocks/82",
+    "status": 200,
+    "headers": {
+      "x-block-height": "86"
+    },
+    "file": "block-by-height.json"
+  },
+  {
+    "name": "block-by-id",
+    "method": "GET",
+    "path": "/blocks/04bc52da30e3fcc46da881d48f9d50b6754befc6fdfe8faf6746f3591b8741ba",
+    "status": 200,
+    "headers": {
+      "x-block-height": "86"
+    },
+    "file": "block-by-id.json"
+  },
+  {
+    "name": "block-transactions",
+    "method": "GET",
+    "path": "/blocks/04bc52da30e3fcc46da881d48f9d50b6754befc6fdfe8faf6746f3591b8741ba/transactions?page=1&limit=10",
+    "status": 200,
+    "headers": {
+      "x-block-height": "86"
+    },
+    "file": "block-transactions.json"
+  },
+  {
+    "name": "block-not-found",
+    "method": "GET",
+    "path": "/blocks/99999999",
+    "status": 404,
+    "headers": {
+      "x-block-height": "86"
+    },
+    "file": "block-not-found.json"
+  },
+  {
+    "name": "blocks-missed",
+    "method": "GET",
+    "path": "/blocks/missed?page=1&limit=10",
+    "status": 200,
+    "headers": {
+      "x-block-height": "86"
+    },
+    "file": "blocks-missed.json"
+  },
+  {
+    "name": "delegates-page",
+    "method": "GET",
+    "path": "/delegates?page=1&limit=100",
+    "status": 200,
+    "headers": {
+      "x-block-height": "86"
+    },
+    "file": "delegates-page.json"
+  },
+  {
+    "name": "delegates-page-2",
+    "method": "GET",
+    "path": "/delegates?page=2&limit=50",
+    "status": 200,
+    "headers": {
+      "x-block-height": "86"
+    },
+    "file": "delegates-page-2.json"
+  },
+  {
+    "name": "delegate-by-name",
+    "method": "GET",
+    "path": "/delegates/genesis_5",
+    "status": 200,
+    "headers": {
+      "x-block-height": "87"
+    },
+    "file": "delegate-by-name.json"
+  },
+  {
+    "name": "delegate-by-address",
+    "method": "GET",
+    "path": "/delegates/dQcSrSKWSj6gYD1dF92EmsVz56UNTae1kz",
+    "status": 200,
+    "headers": {
+      "x-block-height": "87"
+    },
+    "file": "delegate-by-address.json"
+  },
+  {
+    "name": "delegate-resigned",
+    "method": "GET",
+    "path": "/delegates/genesis_53",
+    "status": 200,
+    "headers": {
+      "x-block-height": "87"
+    },
+    "file": "delegate-resigned.json"
+  },
+  {
+    "name": "delegate-unranked",
+    "method": "GET",
+    "path": "/delegates/tx1n2290",
+    "status": 200,
+    "headers": {
+      "x-block-height": "87"
+    },
+    "file": "delegate-unranked.json"
+  },
+  {
+    "name": "delegate-not-found",
+    "method": "GET",
+    "path": "/delegates/no_such_validator",
+    "status": 404,
+    "headers": {
+      "x-block-height": "87"
+    },
+    "file": "delegate-not-found.json"
+  },
+  {
+    "name": "delegate-voters",
+    "method": "GET",
+    "path": "/delegates/genesis_15/voters?page=1&limit=10",
+    "status": 200,
+    "headers": {
+      "x-block-height": "87"
+    },
+    "file": "delegate-voters.json"
+  },
+  {
+    "name": "delegate-blocks",
+    "method": "GET",
+    "path": "/delegates/genesis_5/blocks?page=1&limit=3",
+    "status": 200,
+    "headers": {
+      "x-block-height": "87"
+    },
+    "file": "delegate-blocks.json"
+  },
+  {
+    "name": "delegate-missed-blocks",
+    "method": "GET",
+    "path": "/delegates/genesis_5/blocks/missed?page=1&limit=10",
+    "status": 200,
+    "headers": {
+      "x-block-height": "87"
+    },
+    "file": "delegate-missed-blocks.json"
+  },
+  {
+    "name": "round-1-delegates",
+    "method": "GET",
+    "path": "/rounds/1/delegates",
+    "status": 200,
+    "headers": {
+      "x-block-height": "87"
+    },
+    "file": "round-1-delegates.json"
+  },
+  {
+    "name": "round-2-delegates",
+    "method": "GET",
+    "path": "/rounds/2/delegates",
+    "status": 200,
+    "headers": {
+      "x-block-height": "87"
+    },
+    "file": "round-2-delegates.json"
+  },
+  {
+    "name": "rate-limited",
+    "method": "GET",
+    "path": "/node/status",
+    "status": 429,
+    "headers": {
+      "x-block-height": "87"
+    },
+    "file": "rate-limited.json"
+  },
+  {
+    "name": "transaction-resignation-revoke",
+    "method": "GET",
+    "path": "/transactions/3816b8e05248be56f6791e2169da5e3dab6efea2a7a8b7f27465a1e741723327",
+    "status": 200,
+    "headers": {},
+    "file": "transaction-resignation-revoke.json"
+  },
+  {
+    "name": "delegate-revoked",
+    "method": "GET",
+    "path": "/delegates/genesis_53",
+    "status": 200,
+    "headers": {},
+    "file": "delegate-revoked.json"
+  }
+]

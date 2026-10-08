@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-net-connect"
+description = "Enables the net_connect command without any pre-configured scope."
+commands.allow = ["net_connect"]
+
+[[permission]]
+identifier = "deny-net-connect"
+description = "Denies the net_connect command without any pre-configured scope."
+commands.deny = ["net_connect"]

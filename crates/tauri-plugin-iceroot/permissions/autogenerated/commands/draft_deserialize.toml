@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-draft-deserialize"
+description = "Enables the draft_deserialize command without any pre-configured scope."
+commands.allow = ["draft_deserialize"]
+
+[[permission]]
+identifier = "deny-draft-deserialize"
+description = "Denies the draft_deserialize command without any pre-configured scope."
+commands.deny = ["draft_deserialize"]

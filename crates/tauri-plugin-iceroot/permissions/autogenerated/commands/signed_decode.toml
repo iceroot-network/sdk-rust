@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-signed-decode"
+description = "Enables the signed_decode command without any pre-configured scope."
+commands.allow = ["signed_decode"]
+
+[[permission]]
+identifier = "deny-signed-decode"
+description = "Denies the signed_decode command without any pre-configured scope."
+commands.deny = ["signed_decode"]

@@ -1,0 +1,25 @@
+[package]
+name = "iceroot-link-cli"
+description = "iceroot-link: sign, revoke and verify IceRoot account links from the command line"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# A program only: the WebAssembly lint and build of the workspace take libraries, and this crate
+# has none.
+[[bin]]
+name = "iceroot-link"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+iceroot-sdk-core.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+iceroot-sdk-core.workspace = true

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-vote-snapshot-from-validators"
+description = "Enables the vote_snapshot_from_validators command without any pre-configured scope."
+commands.allow = ["vote_snapshot_from_validators"]
+
+[[permission]]
+identifier = "deny-vote-snapshot-from-validators"
+description = "Denies the vote_snapshot_from_validators command without any pre-configured scope."
+commands.deny = ["vote_snapshot_from_validators"]

@@ -1,0 +1,26 @@
+[package]
+name = "iceroot-vote"
+description = "Vote selection for IceRoot wallets: the four vote modes, vote rules and checks, as pure functions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The structured details of the errors, as the SDK's other crates give them.
+serde_json.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# Process isolation is available only on native hosts. WASI runs vector tests in one thread.
+proptest = { workspace = true, features = ["fork", "timeout"] }
+
+[lints]
+workspace = true

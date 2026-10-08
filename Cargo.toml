@@ -1,0 +1,107 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+# The Tauri plugin builds against Tauri and the platform's webview libraries (WebKitGTK on Linux),
+# which no other crate needs, so it is a workspace of its own: see
+# crates/tauri-plugin-iceroot/README.md.
+exclude = ["crates/tauri-plugin-iceroot"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# The same minimum as Heartwood Core, whose byte layer every crate here builds on.
+rust-version = "1.98"
+license = "Apache-2.0"
+repository = "https://github.com/iceroot-network/sdk-rust"
+publish = false
+
+[workspace.lints.rust]
+# Binding crates (WebAssembly, the native plugin, the Go exports) override this in their own
+# manifest; every other crate forbids unsafe code.
+unsafe_code = "forbid"
+unused_must_use = "deny"
+missing_docs = "warn"
+
+# No panics on untrusted input. Tests may unwrap (clippy.toml).
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+
+[workspace.dependencies]
+iceroot-sdk = { path = "crates/iceroot-sdk", default-features = false }
+iceroot-sdk-bindings = { path = "crates/iceroot-sdk-bindings" }
+iceroot-sdk-core = { path = "crates/iceroot-sdk-core" }
+iceroot-sdk-api = { path = "crates/iceroot-sdk-api" }
+iceroot-vote = { path = "crates/iceroot-vote" }
+iceroot-keystore = { path = "crates/iceroot-keystore" }
+
+# Heartwood Core's byte-exact layer: keys, addresses, signatures, the transaction codec, the
+# milestone rules, the fee floor and the message signing domain, at its tagged release. No feature
+# is enabled here; tools/check-deps.sh keeps it that way. The consensus crates of heartwood-core
+# are never dependencies of the SDK.
+heartwood-crypto = { git = "https://github.com/iceroot-network/heartwood-core.git", tag = "crypto-v0.1.0" }
+
+# The same exact version as heartwood-crypto's own pin. The SDK uses it directly for one operation
+# only, the scalar addition of the hardened BIP32 step; every key, address and signature still
+# comes from heartwood-crypto.
+secp256k1 = { version = "=0.33.1", default-features = false, features = ["std"] }
+
+# Recovery phrases and wallet derivation: SHA-256 and SHA-512 (digest 0.11, as heartwood-crypto),
+# HMAC-SHA512, PBKDF2 and the NFKD normalisation BIP39 requires. The normaliser is ICU4X's, with its
+# data compiled in: the same crate the `http` feature already brings in through URL parsing, and
+# about half the size of the alternatives in the WebAssembly module. The keystore normalises
+# passwords with it too, so a module with both carries one copy of the Unicode data.
+sha2 = "0.11"
+hmac = "0.13"
+pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
+icu_normalizer = { version = "2.3", default-features = false, features = ["compiled_data"] }
+# Tests only: a second NFKD implementation that the ICU4X normaliser is compared with, code point
+# by code point, in the core's tests and the keystore's.
+unicode-normalization = "0.1.25"
+
+zeroize = "1.9"
+getrandom = "0.4"
+
+# The keystore format (iceroot-keystore): Argon2id, XChaCha20-Poly1305 and the text armor's
+# base64url, all pure Rust so that the same code runs natively and in WebAssembly.
+argon2 = { version = "0.6", default-features = false, features = ["alloc", "zeroize"] }
+chacha20poly1305 = { version = "0.11", default-features = false, features = ["zeroize"] }
+# Not called by the keystore: their `zeroize` features wipe, when dropped, the Blake2b state inside
+# Argon2 (which absorbs the password), XChaCha20's keystream buffer (which, with the stored
+# ciphertext, gives the payload) and the Poly1305 state.
+blake2 = { version = "0.11", default-features = false, features = ["zeroize"] }
+cipher = { version = "0.5", features = ["zeroize"] }
+poly1305 = { version = "0.9", features = ["zeroize"] }
+base64ct = { version = "1.8", features = ["alloc"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order", "raw_value"] }
+thiserror = "2"
+
+# Native HTTP for the optional `http` feature of iceroot-sdk-api. Never part of a WebAssembly build.
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+tokio = { version = "1", default-features = false, features = ["time"] }
+# The Mozilla root certificates, which the HTTP client trusts on Android (see iceroot-sdk-api).
+webpki-root-certs = "1"
+
+# Tests only.
+hex = "0.4"
+proptest = { version = "1.11", default-features = false, features = ["std", "bit-set"] }
+
+[profile.release]
+overflow-checks = true
+
+# The vote library's property test draws about 40,000 selections: light optimization keeps
+# debug runs short. Overflow checks and debug assertions stay on.
+[profile.dev.package.iceroot-vote]
+opt-level = 1
+
+[profile.dev.package.proptest]
+opt-level = 2
+
+[profile.dev.package.regex-syntax]
+opt-level = 2
+
+[profile.dev.package.sha2]
+opt-level = 2

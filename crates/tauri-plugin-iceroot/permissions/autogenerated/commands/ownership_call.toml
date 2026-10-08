@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-ownership-call"
+description = "Enables the ownership_call command without any pre-configured scope."
+commands.allow = ["ownership_call"]
+
+[[permission]]
+identifier = "deny-ownership-call"
+description = "Denies the ownership_call command without any pre-configured scope."
+commands.deny = ["ownership_call"]

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-profile-capabilities"
+description = "Enables the profile_capabilities command without any pre-configured scope."
+commands.allow = ["profile_capabilities"]
+
+[[permission]]
+identifier = "deny-profile-capabilities"
+description = "Denies the profile_capabilities command without any pre-configured scope."
+commands.deny = ["profile_capabilities"]

@@ -1,0 +1,57 @@
+name: SDK release
+
+# A pushed tag vX.Y.Z (on prod, equal to the workspace version in Cargo.toml) runs the tests and
+# publishes a GitHub release with notes. Applications use the crates as git dependencies on the tag.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-rust-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CC_wasm32_unknown_unknown: clang-18
+  AR_wasm32_unknown_unknown: llvm-ar-18
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: '1.98.0'
+          components: rustfmt,clippy
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.21.1'
+      - name: Install clang and llvm-ar for the wasm32 build
+        run: |
+          command -v clang-18 >/dev/null && command -v llvm-ar-18 >/dev/null ||
+            (sudo apt-get update && sudo apt-get install -y --no-install-recommends clang-18 llvm-18)
+      - name: Lints, native, with every feature
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: Tests
+        run: cargo test --locked --workspace --all-features
+      - name: Build for wasm32
+        run: cargo build --locked --workspace --lib --target wasm32-unknown-unknown --release
+      - name: Dependency guard
+        run: tools/check-deps.sh
+      - name: NOTICE matches the dependency tree
+        run: node tools/notice.mjs --check
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/release.mjs --tag "$GITHUB_REF_NAME" --require-on prod

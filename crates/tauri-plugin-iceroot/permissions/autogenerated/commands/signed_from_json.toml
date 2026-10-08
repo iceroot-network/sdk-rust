@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-signed-from-json"
+description = "Enables the signed_from_json command without any pre-configured scope."
+commands.allow = ["signed_from_json"]
+
+[[permission]]
+identifier = "deny-signed-from-json"
+description = "Denies the signed_from_json command without any pre-configured scope."
+commands.deny = ["signed_from_json"]

@@ -20,6 +20,8 @@ env:
   AR_wasm32_unknown_unknown: llvm-ar-18
   CC_wasm32_wasip1: clang-18
   AR_wasm32_wasip1: llvm-ar-18
+  # wasi-libc supplies the C headers for the wasip1 build; the package keeps them outside clang's search path.
+  CFLAGS_wasm32_wasip1: -isystem /usr/include/wasm32-wasi
 
 jobs:
   production-merge:
@@ -64,8 +66,8 @@ jobs:
           node-version: '22.21.1'
       - name: Install clang and llvm-ar for the wasm32 build
         run: |
-          command -v clang-18 >/dev/null && command -v llvm-ar-18 >/dev/null ||
-            (sudo apt-get update && sudo apt-get install -y --no-install-recommends clang-18 llvm-18)
+          command -v clang-18 >/dev/null && command -v llvm-ar-18 >/dev/null && [ -d /usr/include/wasm32-wasi ] ||
+            (sudo apt-get update && sudo apt-get install -y --no-install-recommends clang-18 llvm-18 wasi-libc)
       # Keep the existing cache save policy.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:

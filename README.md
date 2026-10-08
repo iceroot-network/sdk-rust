@@ -56,23 +56,7 @@ iceroot-sdk = { git = "https://github.com/iceroot-network/sdk-rust", tag = "v0.1
 
 The node API client is `iceroot_sdk::api`, the vote library `iceroot_sdk::vote` and the keystore `iceroot_sdk::keystore`. The examples in the documentation of `iceroot-sdk` build and sign a transfer, share a vote and refuse a selection, and encrypt a recovery phrase's entropy and restore the phrase (`cargo doc --open -p iceroot-sdk`). Every error has a stable code and structured details, the same in every crate and in the TypeScript SDK; the documentation of `iceroot-sdk` lists the codes.
 
-Building from source needs read access to the `heartwood-core` repository while it is private. `Cargo.toml` fetches it over SSH from `ssh://git@github.com/iceroot-network/heartwood-core.git`, so any SSH key GitHub accepts for that repository works: the default key, or the one `~/.ssh/config` names for `github.com`. `.cargo/config.toml` makes Cargo fetch with the `git` command line, so the machine's SSH and git configuration apply; an application that depends on the SDK needs the same in its own `.cargo/config.toml`:
-
-```toml
-[net]
-git-fetch-with-cli = true
-```
-
-Where the key with access sits behind an SSH host alias instead (a separate key per organisation, for example), rewrite the address for the command that fetches, with git configuration from the environment, which Cargo passes on to git:
-
-```sh
-GIT_CONFIG_COUNT=1 \
-GIT_CONFIG_KEY_0='url.ssh://git@<alias>/iceroot-network/.insteadOf' \
-GIT_CONFIG_VALUE_0='ssh://git@github.com/iceroot-network/' \
-  cargo fetch --locked
-```
-
-Once Cargo holds the commit `Cargo.lock` pins, builds need no access at all (`cargo build --offline`). On a CI machine or in a container, the same rewrite can go in the global git configuration instead (`git config --global url.<alias URL>.insteadOf <github.com URL>`); this repository's own CI reads `heartwood-core` over HTTPS with a token (see [Continuous integration](#continuous-integration)). A rewrite in a repository's own git configuration has no effect, because Cargo fetches in a repository of its own.
+Building from source fetches `heartwood-crypto` from the public repository at `https://github.com/iceroot-network/heartwood-core.git`. No key or token is needed. Once fetched, builds work offline.
 
 ## Development
 
@@ -100,7 +84,7 @@ The Tauri plugin is a workspace of its own and needs the webview's development f
 
 `.github/workflows/ci.yml` runs on pull requests to `dev` and `prod` and on pushes to `prod`: formatting, clippy (native with every feature, and wasm32), the tests with both vector sets, the documentation, the wasm32 build, clippy and the build of the Go SDK's exports for `wasm32-wasip1`, the dependency guard (which checks both WebAssembly targets) and the `NOTICE` check. The Go SDK's own workflow builds its embedded module from this repository and runs these vector runners on `wasm32-wasip1` in Go. The job `tauri-plugin` runs the plugin's formatting, clippy, tests and documentation with the webview's development files installed, and builds it for Android with the runner's NDK, linked as a shared library in which every symbol must resolve (`-z defs`). The job `tauri-plugin-apple` builds it for macOS (`aarch64-apple-darwin`) and iOS (`aarch64-apple-ios`) on a macOS runner with Xcode, each linked as a shared library in which every symbol must resolve. A further job builds and tests against Heartwood Core's `dev` branch, so a change there is seen before the next `heartwood-crypto` tag; it does not block a merge.
 
-The workflows read `heartwood-core` over HTTPS with a fine-grained personal access token, stored in this repository as the secret `HEARTWOOD_TOKEN`. The token covers `heartwood-core` alone, with read-only access to its contents (and the read-only metadata GitHub adds to every token) and no other permission. `tools/ci/heartwood-access.sh` masks the token in the job's log, rewrites `heartwood-core`'s SSH addresses to HTTPS, and gives git the token as an authorization header for that repository's address only, as git configuration in the job's environment: no git configuration file holds it, and Cargo's git database, which the dependency cache saves, never sees it. The script also makes Cargo fetch with the `git` command line, which reads that configuration. The job that tests against Heartwood Core's `dev` branch checks that branch out with the same token and does not keep it in the checkout. Pull requests from forks get no secrets, so their runs stop at that step. While `heartwood-core` is private, only pull request runs save the dependency cache: it holds Cargo's copy of `heartwood-core`, and a pull request from a fork can restore the caches of this repository's branches.
+The workflows fetch the public Heartwood Core repository over HTTPS without a dependency secret.
 
 ### Releasing
 

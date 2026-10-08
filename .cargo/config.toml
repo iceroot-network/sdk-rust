@@ -1,4 +1,3 @@
-# heartwood-core is fetched over SSH from github.com. With the git command line, the machine's SSH
-# and git configuration apply, including a URL rewrite to an SSH host alias (see the README).
+# Fetch public Git dependencies with the git command line.
 [net]
 git-fetch-with-cli = true

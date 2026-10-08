@@ -98,7 +98,7 @@ function releaseNotes(tag, version, head) {
 iceroot-sdk = { git = "https://github.com/${repository}", tag = "${tag}" }
 \`\`\`
 
-Building it needs read access to heartwood-core over SSH until that repository is public; the README says how. The TypeScript package built from this release is attached to the release of the same tag in [sdk-typescript](https://github.com/iceroot-network/sdk-typescript/releases).
+Building it fetches heartwood-core from the public HTTPS repository without credentials. The TypeScript package built from this release is attached to the release of the same tag in [sdk-typescript](https://github.com/iceroot-network/sdk-typescript/releases).
 
 ## Contents
 

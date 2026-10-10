@@ -109,7 +109,7 @@ The message carries the key that signed it, and the check is that the account is
 - `link.history`: the no-replay rule, including a revocation naming a link that does not exist, a link older than the last revocation and a revocation older than a later link;
 - `message.sign`: plain message signing refusing link and revocation text, and signing near misses.
 
-`crates/iceroot-sdk-core/tests/link.rs` runs every record through the SDK's public functions. To generate the file again, with a built checkout of the reference implementation (for its keys, addresses and signatures):
+`crates/iceroot-sdk-core/tests/link.rs` runs every record through the SDK's public functions. To generate the file again, with a built checkout of the public [solar-core-ref repository](https://github.com/iceroot-network/solar-core-ref) (for its keys, addresses and signatures). `<reference checkout>` is the path to that checkout:
 
 ```sh
 node tools/oracle/gen-link-vectors.js <reference checkout>

@@ -8,7 +8,7 @@ cargo build --release -p iceroot-link-cli    # target/release/iceroot-link
 
 ## Signing
 
-The validator portal's link wizard builds the message. Save it to a file exactly as given, with no final line break, then:
+A link message built by an application, for example a validator portal, follows [the version 1 account link format](../../docs/account-links.md#the-link-message-version-1). Save it to a file exactly as given, with no final line break, then:
 
 ```sh
 iceroot-link sign   --network devnet --message-file link.txt   --out link.json   --phrase-file ~/.iceroot/phrase
